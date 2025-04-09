@@ -17,3 +17,7 @@ By Default, the getProx function also creates a modelname.ser file of the serial
 ## Data format
 
 The program is designed to be compatible with .tsv files formatted in the same way as files from the UCR 2018 repository (https://www.cs.ucr.edu/~eamonn/time_series_data_2018/).
+
+## Associated Papers
+
+"Forest Proximities for Time Series," IntelliSys 2025. Project page: https://sites.google.com/view/forest-proximities
