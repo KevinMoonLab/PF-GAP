@@ -36,8 +36,8 @@ public class AppContext {
 	public static int verbosity = 0; //0, 1, 2 
 	public static int export_level = 1; //0, 1, 2 
 
-	public static String training_file = "E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TRAIN.csv";
-	public static String testing_file = "E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
+	public static String training_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TRAIN.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TRAIN.csv";
+	public static String testing_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TEST.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
 	public static String output_dir = "output/";
 	public static boolean csv_has_header = false;
 	public static boolean target_column_is_first = true;
@@ -65,13 +65,14 @@ public class AppContext {
 			MEASURE.lcss,
 			MEASURE.erp,
 			MEASURE.twe,
-			MEASURE.msm	
+			MEASURE.msm
 	};	
 
 	public static Runtime runtime = Runtime.getRuntime();
     public static boolean savemodel;
 	public static boolean getprox;
-	public static String modelname;
+	public static String modelname = "Ben2";
+	public static MEASURE[] userdistances; //= {MEASURE.dtw};
 
     private static transient Dataset train_data;
 	private static transient Dataset test_data;

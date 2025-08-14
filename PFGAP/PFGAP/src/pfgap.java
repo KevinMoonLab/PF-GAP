@@ -1,5 +1,8 @@
 import core.CSVReader;
 import datasets.ListDataset;
+import distance.elastic.DistanceMeasure;
+import distance.elastic.MEASURE;
+import distance.elastic.MapleDistance;
 import org.apache.commons.lang3.ArrayUtils;
 import trees.ProximityForest;
 import trees.ProximityTree;
@@ -23,11 +26,23 @@ public class pfgap{
         System.out.println("Enter the number of trees to use: ");
         String treenum = myObj.nextLine();
         System.out.println("The number of trees is: " + treenum);
+        //System.out.println("Enter the name of the Distance to use: ");
+        //String dist = myObj.nextLine();
+        //System.out.println("The selected distance is: " + dist);
 
         int Treenum = Integer.parseInt(treenum);
+        //Class<DistanceMeasure> distance = Class.forName(dist);
+        //String input_distance = dist;
 
 
-        ProximityForest PF = new ProximityForest(Treenum);
+        //ProximityForest PF = new ProximityForest(Treenum);
+        //List<MEASURE> myMeasures = new List<MEASURE>() {MEASURE.maple};
+        MEASURE[] mything = {MEASURE.python}; //{MEASURE.maple};
+        String[] myfile = {"DistS2.mpl"};
+        //ProximityForest PF = new ProximityForest(Treenum,myfile);
+        //ProximityForest PF = new ProximityForest(Treenum);
+        ProximityForest PF = new ProximityForest(Treenum,mything);
+        //ProximityForest PF = new ProximityForest(Treenum, MEASURE.maple);
         String train_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TRAIN.csv";
         String test_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TEST.csv";
         ListDataset train_data = CSVReader.readCSVToListDataset(train_file,false, true,"\t");
@@ -63,6 +78,9 @@ public class pfgap{
         }
         double t6 = System.currentTimeMillis();
         System.out.println("Done Computing Forest Proximities.");
+        //Process process = Runtime.getRuntime().exec("mkdir dummy_folder");
+        //Double testMapleDist = MapleDistance.distance(new double[]{10.0,2.0},new double[]{20.0,4.0},"DistS2.mpl");
+        //System.out.println(testMapleDist);
         System.out.print("Computation time: ");
         System.out.println(t6-t5);
         //System.out.println(ArrayUtils.toString(PFGAP));

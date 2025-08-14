@@ -100,7 +100,7 @@ public class ExperimentRunner {
 
 			//if(!eval) {
 				//create model
-				ProximityForest forest = new ProximityForest(i);
+				ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
 
 				//train model
 				forest.train(train_data);
@@ -164,8 +164,8 @@ public class ExperimentRunner {
 			}
 			else{
 				//evaluate saved model??
-				ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream("PF.ser"));
-				ProximityForest forest1 = (ProximityForest) objectInputStream.readObject();
+				ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream(AppContext.modelname+ ".ser"));
+				ProximityForest forest1 = (ProximityForest) objectInputStream.readObject(); //AppContext.userdistances
 				//forest1.predict(test_data);
 			/*ArrayList<Integer> Predictions_saved = new ArrayList<>();
 			for (int k=0; k < test_data.size(); k++){

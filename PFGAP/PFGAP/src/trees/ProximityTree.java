@@ -9,6 +9,7 @@ import core.TreeStatCollector;
 import core.contracts.Dataset;
 import datasets.ListDataset;
 import distance.elastic.DistanceMeasure;
+import distance.elastic.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
 
 import java.util.Random;
@@ -31,30 +32,69 @@ public class ProximityTree implements Serializable {
 	protected transient Random rand;
 	public TreeStatCollector stats;
 	protected ArrayList<Node> leaves;
+	private MEASURE[] chosen_distances;
+	private String[] distance_file;
 	
 	protected DistanceMeasure tree_distance_measure; //only used if AppContext.random_dm_per_node == false
 
-	public ProximityTree(int tree_id, ProximityForest forest) {
+	public ProximityTree(int tree_id, ProximityForest forest, MEASURE... chosen_distances) {
 		this.forest_id = forest.forest_id;
 		this.tree_id = tree_id;
 		this.rand = AppContext.getRand();
 		stats = new TreeStatCollector(forest_id, tree_id);
 		this.leaves = new ArrayList<Node>();
+		//this.distance_file = distance_file;
+		//if (distance_file[0].contains(".mpl")){
+			//System.out.println("Ah, so you're a Maple user, eh?");
+		//	this.chosen_distances = new MEASURE[]{MEASURE.maple};
+		//}
+		//if (distance_file[0].contains(".py")){
+			//System.out.println("Ah, so you're a Python user, eh?");
+		//	this.chosen_distances = new MEASURE[]{MEASURE.python};
+		//}
+		this.chosen_distances = chosen_distances;
+		if (chosen_distances.length > 0){
+			if (Arrays.toString(chosen_distances).contains("maple")){
+				this.distance_file = new String[]{"MapleDistance.mpl"};
+			}
+			if (Arrays.toString(chosen_distances).contains("python")){
+				this.distance_file = new String[]{"PythonDistance.py"};
+			}
+		} else {
+			this.distance_file = new String[]{""};
+		}
+
 	}
 
 	public Node getRootNode() {
 		return this.root;
 	}
 
+	public MEASURE[] getChosen_distances(){
+		return this.chosen_distances;
+	}
+
+	public String[] getDistance_file(){
+		return this.distance_file;
+	}
+
 	public ArrayList<Node> getLeaves() {return this.leaves;}
 	
 	public void train(Dataset data) throws Exception {
 		//System.out.println("Training a tree");
-		
-		if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
-			int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-			tree_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);		
-			//params selected per node in the splitter class
+		if (this.chosen_distances.length == 0){
+			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
+				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
+				tree_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
+				//params selected per node in the splitter class
+			}
+		}
+		else {
+			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
+				int r = AppContext.getRand().nextInt(this.chosen_distances.length);
+				tree_distance_measure = new DistanceMeasure(this.chosen_distances[r]);
+				//params selected per node in the splitter class
+			}
 		}
 		
 		this.root = new Node(null, null, ++node_counter, this);
@@ -285,8 +325,10 @@ public class ProximityTree implements Serializable {
 		protected ArrayList<Integer> InBagIndices; //int[] InBagIndices;
 		protected ArrayList<Integer> OutOfBagIndices; //ArrayList<Integer> OutOfBagIndices;
 		protected Map<Integer, Integer> multiplicities;
-		protected transient Node parent;	//dont need this, but it helps to debug
-		protected transient ProximityTree tree;		
+		//protected transient Node parent;	//dont need this, but it helps to debug
+		//protected transient ProximityTree tree;
+		protected Node parent;	//dont need this, but it helps to debug
+		protected ProximityTree tree;
 		
 		protected int node_id;
 		protected int node_depth = 0;

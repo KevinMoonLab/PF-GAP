@@ -1,7 +1,7 @@
 import subprocess
 import numpy as np
 
-def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=10, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first"):
+def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None):
     msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
@@ -20,8 +20,14 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     msgList.extend(["-savemodel=" + savemodel])
     msgList.extend(["-modelname=" + modelname])
     
+    if distances==None:
+        distances="[]"
+    else:
+        distances = "[" + ",".join(distances) + "]"
+        
+    msgList.extend(["-distances=" + distances])    
 
-    subprocess.call(msgList)
+    process = subprocess.call(msgList)
     return
     
 

@@ -1,5 +1,6 @@
 package distance.elastic;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +37,9 @@ public class DistanceMeasure implements Serializable {
 	private MSM msm;
 	private ERP erp;
 	private TWE twe;
+	private MapleDistance maple;
+	private PythonDistance python;
+
 	
 	public int windowSizeDTW =-1,
 			windowSizeDDTW=-1, 
@@ -100,13 +104,20 @@ public class DistanceMeasure implements Serializable {
 			case shifazDDTWCV:
 				ddtwcv = new DDTW();
 				break;
+			case maple:
+				maple = new MapleDistance();
+				break;
+			case python:
+				python = new PythonDistance();
+				break;
 			default:
 				throw new Exception("Unknown distance measure");
+				//System.out.println("Using Custom Distance...");
 //				break;
 		}
 		
 	}
-	public void select_random_params(Dataset d, Random r) {
+	public void select_random_params(Dataset d, Random r, String... Dfile) {
 		switch (this.distance_measure) {
 		case euclidean:
 		case shifazEUCLIDEAN:
@@ -161,11 +172,11 @@ public class DistanceMeasure implements Serializable {
 		}
 	}
 
-	public double distance(double[] s, double[] t){
-		return this.distance(s, t, Double.POSITIVE_INFINITY);
+	public double distance(double[] s, double[] t, String... dfile) throws IOException, InterruptedException {
+		return this.distance(s, t, Double.POSITIVE_INFINITY, dfile);
 	}
 	
-	public double distance(double[] s, double[] t, double bsf){
+	public double distance(double[] s, double[] t, double bsf, String... dfile) throws IOException, InterruptedException {
 		double distance = Double.POSITIVE_INFINITY;
 		
 		switch (this.distance_measure) {
@@ -213,7 +224,14 @@ public class DistanceMeasure implements Serializable {
 		case shifazDDTWCV:
 			distance = ddtwcv.distance(s, t, bsf, this.windowSizeDDTW);
 			break;
-		default:
+			case maple:
+				//distance = MapleDistance.distance(s,t,dfile[0]);
+				distance = maple.distance(s,t,dfile[0]);
+				break;
+			case python:
+				//distance = PythonDistance.distance(s,t,dfile[0]);
+				distance = python.distance(s,t,dfile[0]);
+			default:
 //			throw new Exception("Unknown distance measure");
 //			break;
 		}
@@ -292,7 +310,8 @@ public class DistanceMeasure implements Serializable {
 	public int find_closest_node(
 			double[] query, 
 			double[][] exemplars,
-			boolean train) throws Exception{
+			boolean train,
+			String... dfile) throws Exception{
 		closest_nodes.clear();
 		double dist = Double.POSITIVE_INFINITY;
 		double bsf = Double.POSITIVE_INFINITY;		
@@ -304,7 +323,7 @@ public class DistanceMeasure implements Serializable {
 				return i;
 			}
 							
-			dist = this.distance(query, exemplar);
+			dist = this.distance(query, exemplar, dfile);
 			
 			if (dist < bsf) {
 				bsf = dist;

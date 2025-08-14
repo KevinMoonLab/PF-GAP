@@ -3,11 +3,14 @@ package trees;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import core.AppContext;
 import core.ProximityForestResult;
 import core.contracts.Dataset;
 import datasets.ListDataset;
+import distance.elastic.DistanceMeasure;
+import distance.elastic.MEASURE;
 import util.PrintUtilities;
 /**
  * 
@@ -32,7 +35,7 @@ public class ProximityForest implements Serializable{
 	int[] num_votes;
 	List<Integer> max_voted_classes;
 	
-	public ProximityForest(int forest_id) {
+	public ProximityForest(int forest_id, MEASURE... selected_distances) {
 		this.result = new ProximityForestResult(this);
 		System.out.println(this.result);
 		
@@ -40,7 +43,7 @@ public class ProximityForest implements Serializable{
 		this.trees = new ProximityTree[AppContext.num_trees];
 		
 		for (int i = 0; i < AppContext.num_trees; i++) {
-			trees[i] = new ProximityTree(i, this);
+			trees[i] = new ProximityTree(i, this, selected_distances);
 		}
 
 	}
