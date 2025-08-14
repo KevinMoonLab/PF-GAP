@@ -31,3 +31,7 @@ When creating a "PythonDistance.py" or "MapleDistance.mpl" file, the name of the
 The program is designed to be compatible with .tsv files formatted in the same way as files from the UCR 2018 repository (https://www.cs.ucr.edu/~eamonn/time_series_data_2018/). In particular, the class label and the data is given in the same file.
 
 For more generic data types with user-defined distances, it is recommended to pass a .tsv file into PF-GAP containing the training labels and indices corresponding to the training instances. Then, a user-created distance can reference another datafile using the indices which are passed from PF-GAP to the custom distance.
+
+## Associsted Papers
+
+"Forest Proximities for Time Series," IntelliSys 2025. Project page: https://sites.google.com/view/forest-proximities
