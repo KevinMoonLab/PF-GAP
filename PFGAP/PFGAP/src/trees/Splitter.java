@@ -1,6 +1,7 @@
 package trees;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Map;
 
 import core.AppContext;
@@ -63,11 +64,11 @@ public class Splitter implements Serializable {
 	}	
 
 	public int find_closest_branch(double[] query, DistanceMeasure dm, double[][] e) throws Exception{
-		return dm.find_closest_node(query, e, true);
+		return dm.find_closest_node(query, e, true, this.node.tree.getDistance_file());
 	}	
 	
 	public int find_closest_branch(double[] query) throws Exception{
-		return this.distance_measure.find_closest_node(query, exemplars, true);
+		return this.distance_measure.find_closest_node(query, exemplars, true, this.node.tree.getDistance_file());
 	}		
 	
 	public Dataset[] getBestSplits() {
@@ -85,16 +86,31 @@ public class Splitter implements Serializable {
 	
 		for (int i = 0; i < AppContext.num_candidates_per_split; i++) {
 
-			if (AppContext.random_dm_per_node) {
-				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-				temp_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);		
-			}else {
-				//NOTE: num_candidates_per_split has no effect if random_dm_per_node == false (if DM is selected once per tree)
-				//after experiments we found that DM selection per node is better since it diversifies the ensemble
-				temp_distance_measure = node.tree.tree_distance_measure;
+			if (this.node.tree.getChosen_distances().length==0){
+				if (AppContext.random_dm_per_node) {
+					int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
+					temp_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
+				}else {
+					//NOTE: num_candidates_per_split has no effect if random_dm_per_node == false (if DM is selected once per tree)
+					//after experiments we found that DM selection per node is better since it diversifies the ensemble
+					temp_distance_measure = node.tree.tree_distance_measure;
+				}
+
+				temp_distance_measure.select_random_params(data, AppContext.getRand());
+			} else{
+				if (AppContext.random_dm_per_node) {
+					int r = AppContext.getRand().nextInt(this.node.tree.getChosen_distances().length);
+					temp_distance_measure = new DistanceMeasure(this.node.tree.getChosen_distances()[r]);
+				}else {
+					//NOTE: num_candidates_per_split has no effect if random_dm_per_node == false (if DM is selected once per tree)
+					//after experiments we found that DM selection per node is better since it diversifies the ensemble
+					temp_distance_measure = node.tree.tree_distance_measure;
+				}
+
+				temp_distance_measure.select_random_params(data, AppContext.getRand());
 			}
-			
-			temp_distance_measure.select_random_params(data, AppContext.getRand());
+
+
 							
 			splits = split_data(data, data_per_class);
 			weighted_gini = weighted_gini(parent_size, splits);
