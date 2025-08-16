@@ -36,7 +36,7 @@ def create_3d_sphere_data(seed):
     #Combine data
     data = np.concatenate([cluster_1, cluster_2], axis=0)
     
-    return data, labels
+    return data, labels, sphere
 
 def to_spherical_coords(data):
     """Convert 3D points on the unit sphere to 2D spherical coordinates (polar, azimuthal)."""
