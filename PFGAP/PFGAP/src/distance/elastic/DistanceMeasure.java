@@ -172,11 +172,11 @@ public class DistanceMeasure implements Serializable {
 		}
 	}
 
-	public double distance(double[] s, double[] t, String... dfile) throws IOException, InterruptedException {
-		return this.distance(s, t, Double.POSITIVE_INFINITY, dfile);
+	public double distance(double[] s, double[] t) throws IOException, InterruptedException {
+		return this.distance(s, t, Double.POSITIVE_INFINITY);
 	}
 	
-	public double distance(double[] s, double[] t, double bsf, String... dfile) throws IOException, InterruptedException {
+	public double distance(double[] s, double[] t, double bsf) throws IOException, InterruptedException {
 		double distance = Double.POSITIVE_INFINITY;
 		
 		switch (this.distance_measure) {
@@ -226,11 +226,11 @@ public class DistanceMeasure implements Serializable {
 			break;
 			case maple:
 				//distance = MapleDistance.distance(s,t,dfile[0]);
-				distance = maple.distance(s,t,dfile[0]);
+				distance = maple.distance(s,t);
 				break;
 			case python:
 				//distance = PythonDistance.distance(s,t,dfile[0]);
-				distance = python.distance(s,t,dfile[0]);
+				distance = python.distance(s,t);
 			default:
 //			throw new Exception("Unknown distance measure");
 //			break;
@@ -323,7 +323,7 @@ public class DistanceMeasure implements Serializable {
 				return i;
 			}
 							
-			dist = this.distance(query, exemplar, dfile);
+			dist = this.distance(query, exemplar);
 			
 			if (dist < bsf) {
 				bsf = dist;
