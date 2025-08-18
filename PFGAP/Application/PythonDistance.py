@@ -1,2 +1,4 @@
 def Distance(t1, t2):
-    return sum((x - y)**2 for x, y in zip(t1, t2))**0.5
+    from geomstats.geometry.hypersphere import Hypersphere
+    sphere = Hypersphere(dim=2)
+    return sphere.metric.dist(t1, t2)

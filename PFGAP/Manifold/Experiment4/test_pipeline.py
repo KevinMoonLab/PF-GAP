@@ -36,9 +36,9 @@ from Experiment4functions import create_3d_sphere_data, SEEDS
 # Import configuration
 try:
     from config import *
-    print("✓ Loaded configuration from config.py")
+    print(f"{COLOR_OKGREEN}✓ Loaded configuration from config.py{COLOR_RESET}")
 except ImportError:
-    print("⚠ Using default configuration (config.py not found)")
+    print(f"{COLOR_WARNING}⚠ Using default configuration (config.py not found){COLOR_RESET}")
     # Default configuration
     K_VALUES = [1, 4, 8, 12, 16, 20]
     TRAIN_TEST_SPLIT = 0.7
@@ -70,10 +70,10 @@ def save_results(data, filename, directory):
         else:
             with open(filepath.with_suffix('.txt'), 'w') as f:
                 f.write(str(data))
-        print(f"Saved: {filepath}")
+        print(f"{COLOR_OKBLUE}Saved: {filepath}{COLOR_RESET}")
         return True
     except Exception as e:
-        print(f"Error saving {filename}: {e}")
+        print(f"{COLOR_FAIL}Error saving {filename}: {e}{COLOR_RESET}")
         return False
 
 def load_existing_results(seed, test_type):
@@ -81,9 +81,12 @@ def load_existing_results(seed, test_type):
     if test_type.startswith("knn_k"):
         filename = f"{seed}_knn_{test_type}.json"
         return (METRICS_DIR / filename).exists()
-    elif test_type == "pfgap":
+    elif test_type == "pfgap_euclidean":
         # Check for the comprehensive PFGAP results file
-        filename = f"{seed}_pfgap_all_k_results.json"
+        filename = f"{seed}_pfgap_euclidean_all_k_results.json"
+        return (METRICS_DIR / filename).exists()
+    elif test_type == "pfgap_geomstats":
+        filename = f"{seed}_pfgap_geomstats_all_k_results.json"
         return (METRICS_DIR / filename).exists()
     elif test_type == "proximity":
         filename = f"{seed}_proximity_matrix.npy"
@@ -96,9 +99,9 @@ def load_existing_results(seed, test_type):
 
 def run_single_test(seed):
     """Run all tests for a single seed"""
-    print(f"\n{'='*50}")
-    print(f"Processing seed: {seed}")
-    print(f"{'='*50}")
+    print(f"\n{COLOR_HEADER}{'='*50}{COLOR_RESET}")
+    print(f"{COLOR_BOLD}Processing seed: {seed}{COLOR_RESET}")
+    print(f"{COLOR_HEADER}{'='*50}{COLOR_RESET}")
     
     results = {
         'seed': seed,
@@ -111,28 +114,47 @@ def run_single_test(seed):
     
     try:
         # Generate data
-        print(f"Generating 3D sphere data for seed {seed}...")
+        print(f"{COLOR_OKCYAN}Generating 3D sphere data for seed {seed}...{COLOR_RESET}")
         data, labels, sphere = create_3d_sphere_data(seed)
-        
+
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             data, labels, test_size=1-TRAIN_TEST_SPLIT, 
             random_state=seed, stratify=labels
         )
-        
-        # Save train/test data
-        train_data = np.column_stack([X_train, y_train])
-        test_data = np.column_stack([X_test, y_test])
-        
-        # Save data files for PFGAP
+
+        # Ensure y is a column vector
+        if y_train.ndim == 1:
+            y_train = y_train.reshape(-1, 1)
+        if y_test.ndim == 1:
+            y_test = y_test.reshape(-1, 1)
+
+        # Reformat labels to integer
+        y_train = y_train.astype(int)
+        y_test = y_test.astype(int)
+
+        # Combine y as first column and X horizontally
+        train_data = np.hstack([y_train, X_train])
+        test_data  = np.hstack([y_test,  X_test])
+
         train_file = RESULTS_DIR / f"{seed}_train_data.tsv"
         test_file = RESULTS_DIR / f"{seed}_test_data.tsv"
-        
-        np.savetxt(train_file, train_data, delimiter='\t', fmt='%.6f')
-        np.savetxt(test_file, test_data, delimiter='\t', fmt='%.6f')
-        
-        # Test 1: KNN Classification
-        print(f"Running KNN tests for seed {seed}...")
+
+        # Write TSV with per-column format: label as int, features as float
+        n_features = X_train.shape[1]
+        fmt = ['%d'] + ['%.6f'] * n_features
+        def _write_tsv(path, data):
+            d = os.path.dirname(path)
+            if d and not os.path.exists(d):
+                os.makedirs(d, exist_ok=True)
+            open(path, 'w').close()
+            np.savetxt(path, data, delimiter='\t', fmt=fmt)
+
+        _write_tsv(train_file, train_data)
+        _write_tsv(test_file,  test_data)
+
+        #& Test 1: KNN Classification
+        print(f"{COLOR_OKBLUE}Running KNN tests for seed {seed}...{COLOR_RESET}")
         for k in K_VALUES:
             if not load_existing_results(seed, f"knn_k{k}"):
                 try:
@@ -157,58 +179,65 @@ def run_single_test(seed):
                 except Exception as e:
                     error_msg = f"KNN k={k} failed: {e}"
                     results['errors'].append(error_msg)
-                    print(f"Error: {error_msg}")
-        
-        # Test 2: PFGAP Classification
-        print(f"Running PFGAP tests for seed {seed}...")
-        if not load_existing_results(seed, "pfgap"):
-            try:
-                # Run PFGAP
-                output_dir = str(RESULTS_DIR / f"{seed}_pfgap_output")
-                
-                # For comparison, we'll compute distances manually and use them in our analysis
-                getProx(
-                    trainfile=str(train_file),
-                    testfile=str(test_file),
-                    num_trees=PFGAP_NUM_TREES,
-                    r=PFGAP_R,
-                    out=output_dir,
-                    modelname=f"PF_{seed}",
-                    distances=["python"]
-                )
-                
-                # Get proximity matrices
-                prox_file = Path(output_dir) / "ForestProximities.txt"
-                y_file = Path(output_dir) / "ytrain.txt"
-                
-                if prox_file.exists() and y_file.exists():
-                    prox_array, y_array = getProxArrays(str(prox_file), str(y_file))
-                    prox_sym = SymmetrizeProx(prox_array)
-                    
-                    # Save proximity matrix
-                    save_results(prox_sym, f"{seed}_proximity_matrix.npy", PROXIMITY_DIR)
-                    
-                    # Calculate PFGAP predictions using proximity for all k values
-                    # This allows us to compare PFGAP performance across the same k values as KNN
-                    pfgap_predictions = {}
-                    pfgap_metrics = {}
-                    test_prox = prox_sym[:len(X_train), len(X_train):]
-                    
-                    for k in K_VALUES:
-                        y_pred_pfgap = []
+                    print(f"{COLOR_FAIL}Error: {error_msg}{COLOR_RESET}")
+
+        #& Test 2: PFGAP Classification
+        print(f"{COLOR_OKBLUE}Running PFGAP tests for seed {seed}...{COLOR_RESET}")
+        outlier_results = {}
+
+        for pfgap_test in ["pfgap_euclidean", "pfgap_geomstats"]:
+            if not load_existing_results(seed, pfgap_test):
+                try:
+                    # Run PFGAP
+                    output_dir = str(RESULTS_DIR / f"{seed}_{pfgap_test}_output")
+
+                    # For comparison, we'll compute distances manually and use them in our analysis
+                    if pfgap_test == "pfgap_geomstats":
+                        getProx(
+                            trainfile=str(train_file),
+                            testfile=str(test_file),
+                            num_trees=PFGAP_NUM_TREES,
+                            r=PFGAP_R,
+                            out=output_dir,
+                            modelname=f"PF_{seed}",
+                            distances=["python"]
+                        )
+                    else:
+                        #* The difference here is we dont set the distances
+                        getProx(
+                            trainfile=str(train_file),
+                            testfile=str(test_file),
+                            num_trees=PFGAP_NUM_TREES,
+                            r=PFGAP_R,
+                            out=output_dir,
+                            modelname=f"PF_{seed}",
+                        )
+
+                    # Get proximity matrices
+                    prox_file = Path(output_dir) / "ForestProximities.txt"
+                    y_file = Path(output_dir) / "ytrain.txt"
+
+                    if not (prox_file.exists() and y_file.exists()):
+                        print(f"{COLOR_WARNING}Files not found. Looking another location{COLOR_RESET}")
+                        prox_file = Path("ForestProximities.txt")
+                        y_file = Path("ytrain.txt")
+
+                    if prox_file.exists() and y_file.exists():
+                        prox_array, y_array = getProxArrays(str(prox_file), str(y_file))
+                        prox_sym = SymmetrizeProx(prox_array)
                         
-                        for i in range(test_prox.shape[1]):
-                            # Find k nearest neighbors in training set
-                            nearest_indices = np.argsort(test_prox[:, i])[-k:]
-                            nearest_labels = y_train[nearest_indices]
-                            # Majority vote
-                            unique, counts = np.unique(nearest_labels, return_counts=True)
-                            y_pred_pfgap.append(unique[np.argmax(counts)])
+                        # Save proximity matrix
+                        save_results(prox_sym, f"{seed}_proximity_matrix.npy", PROXIMITY_DIR)
                         
-                        y_pred_pfgap = np.array(y_pred_pfgap)
-                        
+                        # Calculate PFGAP predictions using proximity for all k values
+                        # This allows us to compare PFGAP performance across the same k values as KNN
+
+                        f0 = open("Predictions.txt")
+                        f1 = f0.read()
+                        y_pred_pfgap = np.array(eval("np.array(" + f1 + ")"))
+                                                
                         # Calculate metrics for this k value
-                        pfgap_metrics[f'k{k}'] = {
+                        pfgap_metrics = {
                             'accuracy': accuracy_score(y_test, y_pred_pfgap),
                             'f1_score': f1_score(y_test, y_pred_pfgap, average='weighted'),
                             'precision': precision_score(y_test, y_pred_pfgap, average='weighted'),
@@ -216,106 +245,87 @@ def run_single_test(seed):
                             'confusion_matrix': confusion_matrix(y_test, y_pred_pfgap).tolist(),
                             'classification_report': classification_report(y_test, y_pred_pfgap, output_dict=True)
                         }
-                        
-                        pfgap_predictions[f'k{k}'] = y_pred_pfgap
-                    
-                    # Store results for the default k value (k=5) for backward compatibility
-                    results['pfgap_results'] = pfgap_metrics['k5']
-                    
-                    # Save PFGAP results for all k values
-                    save_results(pfgap_metrics, f"{seed}_pfgap_all_k_results.json", METRICS_DIR)
-                    
-                else:
-                    raise FileNotFoundError("PFGAP output files not found")
-                    
-            except Exception as e:
-                error_msg = f"PFGAP failed: {e}"
-                results['errors'].append(error_msg)
-                print(f"Error: {error_msg}")
-        
+                                            
+                        results[pfgap_test] = pfgap_metrics
+
+                        # Save PFGAP results for all k values
+                        save_results(pfgap_metrics, f"{seed}_{pfgap_test}_all_k_results.json", METRICS_DIR)
+
+                        #& Outlier Detection for PFGAP                
+                        # PFGAP outlier detection using proximity matrices
+                        if 'prox_sym' in locals():
+                            print(f"{COLOR_OKCYAN}  Computing PFGAP outlier scores...{COLOR_RESET}")
+                            pfgap_outlier_scores = getOutlierScores(prox_sym, y_array)
+                            outlier_results['pfgap'] = pfgap_outlier_scores
+                            
+                            # Save PFGAP outlier scores
+                            save_results(pfgap_outlier_scores, f"{seed}_{pfgap_test}_outlier_scores.npy", OUTLIER_DIR)
+
+                        else:
+                            raise FileNotFoundError("PFGAP output files not found")
+                                
+                except Exception as e:
+                    error_msg = f"PFGAP failed: {e}"
+                    results['errors'].append(error_msg)
+                    print(f"{COLOR_FAIL}Error: {error_msg}{COLOR_RESET}")
+
         #& Test 3: Outlier Detection
-        print(f"Running outlier detection for seed {seed}...")
+        print(f"{COLOR_OKBLUE}Running outlier detection for seed {seed}...{COLOR_RESET}")
         if not load_existing_results(seed, "outlier"):
             try:
-                outlier_results = {}
-                
-                # PFGAP outlier detection using proximity matrices
-                if 'prox_sym' in locals():
-                    print(f"  Computing PFGAP outlier scores...")
-                    pfgap_outlier_scores = getOutlierScores(prox_sym, y_train)
-                    outlier_results['pfgap'] = pfgap_outlier_scores.tolist()
-                    
-                    # Save PFGAP outlier scores
-                    save_results(pfgap_outlier_scores, f"{seed}_pfgap_outlier_scores.npy", OUTLIER_DIR)
-                
                 # KNN outlier detection using natural KNN approach
-                print(f"  Computing KNN outlier scores...")
+                print(f"{COLOR_OKCYAN}  Computing KNN outlier scores...{COLOR_RESET}")
                 knn_outlier_scores = {}
-                
                 for k in K_VALUES:
                     try:
                         # For KNN, we'll use the distance-based outlier detection
                         # This is how KNN naturally identifies outliers
                         knn = KNeighborsClassifier(n_neighbors=k, metric=sphere.metric.dist)
                         knn.fit(X_train, y_train)
-                        
                         # Get distances to k nearest neighbors for each training point
                         distances, indices = knn.kneighbors(X_train)
-                        
                         # Outlier score based on average distance to k nearest neighbors
                         # Higher distances indicate more outlier-like behavior
                         avg_distances = np.mean(distances, axis=1)
-                        
                         # Normalize by the median distance (similar to PFGAP approach)
                         median_dist = np.median(avg_distances)
                         mad_dist = np.median(np.abs(avg_distances - median_dist))
-                        
                         if mad_dist == 0:
                             mad_dist = 1e-6
-                        
                         normalized_scores = np.abs(avg_distances - median_dist) / mad_dist
                         knn_outlier_scores[f'k{k}'] = normalized_scores.tolist()
-                        
                     except Exception as e:
-                        print(f"    Warning: KNN outlier detection failed for k={k}: {e}")
+                        print(f"{COLOR_WARNING}    Warning: KNN outlier detection failed for k={k}: {e}{COLOR_RESET}")
                         knn_outlier_scores[f'k{k}'] = None
-                
                 outlier_results['knn'] = knn_outlier_scores
                 results['outlier_scores'] = outlier_results
-                
                 # Save comprehensive outlier results
                 save_results(outlier_results, f"{seed}_comprehensive_outlier_scores.json", OUTLIER_DIR)
-                    
             except Exception as e:
                 error_msg = f"Outlier detection failed: {e}"
                 results['errors'].append(error_msg)
-                print(f"Error: {error_msg}")
-        
+                print(f"{COLOR_FAIL}Error: {error_msg}{COLOR_RESET}")
         # Save comprehensive results
         save_results(results, f"{seed}_comprehensive_results.json", RESULTS_DIR)
-        
         # Clean up temporary files
         try:
             os.remove(train_file)
             os.remove(test_file)
         except:
             pass
-            
-        print(f"Completed seed {seed} successfully")
-        
+        print(f"{COLOR_OKGREEN}Completed seed {seed} successfully{COLOR_RESET}")
     except Exception as e:
         error_msg = f"Major error in seed {seed}: {e}"
         results['errors'].append(error_msg)
-        print(f"Major Error: {error_msg}")
+        print(f"{COLOR_FAIL}Major Error: {error_msg}{COLOR_RESET}")
         save_results(results, f"{seed}_error_results.json", RESULTS_DIR)
-    
     return results
 
 def main():
     """Main pipeline execution"""
-    print("Starting PFGAP vs KNN Testing Pipeline")
-    print(f"Testing {len(SEEDS)} seeds with K values: {K_VALUES}")
-    print(f"Results will be saved to: {RESULTS_DIR}")
+    print(f"{COLOR_HEADER}Starting PFGAP vs KNN Testing Pipeline{COLOR_RESET}")
+    print(f"{COLOR_BOLD}Testing {len(SEEDS)} seeds with K values: {K_VALUES}{COLOR_RESET}")
+    print(f"{COLOR_OKCYAN}Results will be saved to: {RESULTS_DIR}{COLOR_RESET}")
     
     # Check which tests have already been completed
     completed_seeds = []
@@ -328,7 +338,7 @@ def main():
         
         if knn_completed and pfgap_completed and proximity_completed and outlier_completed:
             completed_seeds.append(seed)
-            print(f"Seed {seed} already completed, skipping...")
+            print(f"{COLOR_OKGREEN}Seed {seed} already completed, skipping...{COLOR_RESET}")
     
     remaining_seeds = [seed for seed in SEEDS if seed not in completed_seeds]
     
@@ -336,7 +346,7 @@ def main():
         print("All tests already completed!")
         return
     
-    print(f"Running tests for {len(remaining_seeds)} remaining seeds...")
+    print(f"{COLOR_OKBLUE}Running tests for {len(remaining_seeds)} remaining seeds...{COLOR_RESET}")
     
     # Run tests in parallel
     all_results = Parallel(n_jobs=N_JOBS, verbose=VERBOSE)(
@@ -344,9 +354,9 @@ def main():
     )
     
     # Generate summary report
-    print("\n" + "="*60)
-    print("GENERATING SUMMARY REPORT")
-    print("="*60)
+    print(f"\n{COLOR_HEADER}{'='*60}{COLOR_RESET}")
+    print(f"{COLOR_BOLD}GENERATING SUMMARY REPORT{COLOR_RESET}")
+    print(f"{COLOR_HEADER}{'='*60}{COLOR_RESET}")
     
     summary = {
         'total_seeds': len(SEEDS),
@@ -386,8 +396,8 @@ def main():
     # Save summary
     save_results(summary, "pipeline_summary.json", RESULTS_DIR)
     
-    print(f"\nPipeline completed! Results saved to: {RESULTS_DIR}")
-    print(f"Summary: {len(completed_seeds) + len(remaining_seeds)}/{len(SEEDS)} seeds processed")
+    print(f"\n{COLOR_OKGREEN}Pipeline completed! Results saved to: {RESULTS_DIR}{COLOR_RESET}")
+    print(f"{COLOR_BOLD}Summary: {len(completed_seeds) + len(remaining_seeds)}/{len(SEEDS)} seeds processed{COLOR_RESET}")
 
 if __name__ == "__main__":
     main()
