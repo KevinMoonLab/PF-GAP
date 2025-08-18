@@ -2,7 +2,16 @@ import subprocess
 import numpy as np
 
 def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None):
-    msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
+    # Get the directory where this script is located
+    import os
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    jar_path = os.path.join(script_dir, 'PFGAP.jar')
+    
+    # Check if JAR file exists
+    if not os.path.exists(jar_path):
+        raise FileNotFoundError(f"PFGAP.jar not found at {jar_path}. Please ensure the JAR file is in the Application directory.")
+    
+    msgList = ['java', '-jar', '-Xmx1g', jar_path]
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
     msgList.extend(["-test=" + testfile])

@@ -166,13 +166,6 @@ def run_single_test(seed):
                 # Run PFGAP
                 output_dir = str(RESULTS_DIR / f"{seed}_pfgap_output")
                 
-                # Create custom distance function using geomstats sphere metric
-                def sphere_distance_func(s, t):
-                    """Custom distance function using geomstats sphere metric"""
-                    return sphere.metric.dist(s, t)
-                
-                # For now, we'll use the default PFGAP distance since we can't directly pass custom functions
-                # TODO: Need to modify PFGAP to accept custom distance functions
                 # For comparison, we'll compute distances manually and use them in our analysis
                 getProx(
                     trainfile=str(train_file),
@@ -180,7 +173,8 @@ def run_single_test(seed):
                     num_trees=PFGAP_NUM_TREES,
                     r=PFGAP_R,
                     out=output_dir,
-                    modelname=f"PF_{seed}"
+                    modelname=f"PF_{seed}",
+                    distances=["python"]
                 )
                 
                 # Get proximity matrices

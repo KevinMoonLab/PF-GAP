@@ -18,7 +18,7 @@ def create_3d_sphere_data(seed):
     np.random.seed(seed)
     gs.random.seed(seed)
 
-    sphere = Hypersphere(dim=2, equip=False)
+    sphere = Hypersphere(dim=2)
     cluster = sphere.random_von_mises_fisher(kappa=20, n_samples=150)
 
     SO3 = SpecialOrthogonal(3, equip=False)
