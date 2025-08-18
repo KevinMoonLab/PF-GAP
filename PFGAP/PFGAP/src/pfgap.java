@@ -37,7 +37,7 @@ public class pfgap{
 
         //ProximityForest PF = new ProximityForest(Treenum);
         //List<MEASURE> myMeasures = new List<MEASURE>() {MEASURE.maple};
-        MEASURE[] mything = {MEASURE.python}; //{MEASURE.maple};
+        MEASURE[] mything = {MEASURE.euclidean}; //{MEASURE.python}; //{MEASURE.maple};
         String[] myfile = {"DistS2.mpl"};
         //ProximityForest PF = new ProximityForest(Treenum,myfile);
         //ProximityForest PF = new ProximityForest(Treenum);

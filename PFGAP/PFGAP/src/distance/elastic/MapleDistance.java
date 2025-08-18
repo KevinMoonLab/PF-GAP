@@ -1,69 +1,99 @@
 package distance.elastic;
 
-import org.apache.commons.lang3.ArrayUtils;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Scanner;
 
 public class MapleDistance implements Serializable {
-    public MapleDistance() {
+    private static Process mapleProcess;
+    private static BufferedWriter mapleInput;
+    private static BufferedReader mapleOutput;
+    private static boolean initialized = false;
 
-    }
-
-    public static double distance(double[] t1, double[] t2, String mapledistfile) throws IOException, InterruptedException {
-        // first, we build a maple file that:
-            //1. reads the actual script file
-            //2. calls the distance function
-        //System.out.println("Calling Maple Distance...");
-        Integer key = (int)(Math.random()*1000000);
-        String tempdir = "_temp" + key; //for parallelization, we want to prevent accidentally using the wrong distance.
-        String tempname = tempdir + "/_temp_helper.txt";
-        String tempMname = tempdir + "/_temp_helper.mpl";
-
-        String mapleCommands =
-                "restart;\n" +
-                        "read \"" + mapledistfile + "\";\n" +
-                        "t1:=" + Arrays.toString(t1).replace("{","[").replace("}","]") + ";\n" +
-                        "t2:=" + Arrays.toString(t2).replace("{","[").replace("}","]") + ";\n" +
-                        "theDir:= \"" + tempdir + "\";\n" +
-                        "Distance(t1,t2,theDir);\n"; //The maple procedure must be called "Distance"
-
-        Process preprocess = Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir " + tempdir});
-        preprocess.waitFor();
-        try (FileWriter writer = new FileWriter(tempname)) {
-            writer.write(mapleCommands);
-            //System.out.println("Maple script '" + tempname + "' created successfully.");
-        } catch (IOException e) {
-            System.err.println("Error writing to file: " + e.getMessage());
-        }
-
-        File oldfile = new File(tempname);
-        oldfile.renameTo(new File(tempMname));
-
-        Process process = Runtime.getRuntime().exec("maple " + tempMname);
-        process.waitFor();
-        // At this point, a new file has been created which stores the answer. Now we need to read it in.
-
-        String fileName = tempdir + "/distanceanswer.txt"; // Assuming data.txt contains decimal numbers
-        ArrayList<Double> distance_answer = new ArrayList<>();
+    static {
         try {
-            File file = new File(fileName);
-            Scanner scanner = new Scanner(file);
+            initialize();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to start Maple process", e);
+        }
+    }
 
-            while (scanner.hasNextDouble()) {
-                double dist = scanner.nextDouble();
-                //System.out.println("Read: " + dist);
-                distance_answer.add(dist); //there should only be one, actually.
+    private static void initialize() throws IOException {
+        if (initialized) return;
+
+        ProcessBuilder pb = new ProcessBuilder("maple", "-q");
+        mapleProcess = pb.redirectErrorStream(true).start();
+        mapleInput = new BufferedWriter(new OutputStreamWriter(mapleProcess.getOutputStream()));
+        mapleOutput = new BufferedReader(new InputStreamReader(mapleProcess.getInputStream()));
+
+        // Wait for initial READY marker
+        mapleInput.write("printf(\"READY\\n\"):\n");
+        mapleInput.flush();
+        waitForMarker("READY");
+
+        // ✅ Load the distance function script
+        mapleInput.write("read(\"MapleDistance.mpl\"):\n"); // Adjust path if needed
+        mapleInput.flush();
+
+        // Wait for confirmation after loading the script
+        mapleInput.write("printf(\"LOADED\\n\"):\n");
+        mapleInput.flush();
+        waitForMarker("LOADED");
+
+        initialized = true;
+    }
+
+    private static void waitForMarker(String marker) throws IOException {
+        String line;
+        while ((line = mapleOutput.readLine()) != null) {
+            if (line.contains(marker)) {
+                return;
             }
-            scanner.close();
-        } catch (FileNotFoundException e) {
-            System.err.println("Distance answer file not found: " + fileName);
+        }
+        throw new IOException("Did not receive expected marker from Maple: " + marker);
+    }
+
+    public static double distance(double[] t1, double[] t2) throws IOException {
+        if (!initialized) {
+            initialize();
         }
 
-        // clean up the temp files... I don't think we have to wait on this one.
-        Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "rm -r " + tempdir});
-        //System.out.println(distance_answer.get(0));
-        return distance_answer.get(0);
+        mapleInput.write("t1 := " + arrayToMapleList(t1) + ":\n");
+        mapleInput.write("t2 := " + arrayToMapleList(t2) + ":\n");
+        //mapleInput.write("t1 := Vector(" + arrayToMapleList(t1) + "):\n");
+        //mapleInput.write("t2 := Vector(" + arrayToMapleList(t2) + "):\n");
+        mapleInput.write("res := Distance(t1, t2):\n");
+        mapleInput.write("printf(\"RESULT: %.15f\\n\", res):\n");
+        mapleInput.flush();
+
+        // Wait for the result
+        String line;
+        while ((line = mapleOutput.readLine()) != null) {
+            if (line.startsWith("RESULT:")) {
+                return Double.parseDouble(line.substring(7).trim());
+            }
+        }
+
+        throw new IOException("Failed to read distance result from Maple.");
     }
+
+    public static void close() throws IOException { // This may not actually be needed.
+        if (!initialized) return;
+
+        mapleInput.write("quit:\n");
+        mapleInput.flush();
+        mapleProcess.destroy();
+        initialized = false;
+    }
+
+    private static String arrayToMapleList(double[] arr) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < arr.length; i++) {
+            sb.append(arr[i]);
+            if (i < arr.length - 1) {
+                sb.append(",");
+            }
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
 }
