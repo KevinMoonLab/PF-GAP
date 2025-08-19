@@ -3,6 +3,7 @@
 #& Tasks to Accomplish
 """
 1. We need to first do an accuracy test (f1 score and accuracy) between pfgap and knn
+   - KNN is tested with both sphere manifold distance and normal euclidean distance
 2. An outlier detection test
 3. Imputation test (NOTE: this is pending Ben's creating a wrapper for the PFGAP to do the imputation)
 
@@ -78,8 +79,11 @@ def save_results(data, filename, directory):
 
 def load_existing_results(seed, test_type):
     """Check if results already exist for a given seed and test type"""
-    if test_type.startswith("knn_k"):
-        filename = f"{seed}_knn_{test_type}.json"
+    if test_type.startswith("knn_manifold_k"):
+        filename = f"{seed}_knn_manifold_{test_type}.json"
+        return (METRICS_DIR / filename).exists()
+    elif test_type.startswith("knn_euclidean_k"):
+        filename = f"{seed}_knn_euclidean_{test_type}.json"
         return (METRICS_DIR / filename).exists()
     elif test_type == "pfgap_euclidean":
         # Check for the comprehensive PFGAP results file
@@ -153,31 +157,68 @@ def run_single_test(seed):
         _write_tsv(train_file, train_data)
         _write_tsv(test_file,  test_data)
 
-        #& Test 1: KNN Classification
+        #& Test 1: KNN Classification (testing both sphere manifold and euclidean distance)
         print(f"{COLOR_OKBLUE}Running KNN tests for seed {seed}...{COLOR_RESET}")
         for k in K_VALUES:
-            if not load_existing_results(seed, f"knn_k{k}"):
+            # Test with sphere manifold distance
+            if not load_existing_results(seed, f"knn_manifold_k{k}"):
                 try:
-                    knn = KNeighborsClassifier(n_neighbors=k, metric=sphere.metric.dist)
-                    knn.fit(X_train, y_train)
-                    y_pred = knn.predict(X_test)
+                    knn_manifold = KNeighborsClassifier(n_neighbors=k, metric=sphere.metric.dist)
+                    knn_manifold.fit(X_train, y_train)
+                    y_pred_manifold = knn_manifold.predict(X_test)
                     
-                    knn_results = {
-                        'accuracy': accuracy_score(y_test, y_pred),
-                        'f1_score': f1_score(y_test, y_pred, average='weighted'),
-                        'precision': precision_score(y_test, y_pred, average='weighted'),
-                        'recall': recall_score(y_test, y_pred, average='weighted'),
-                        'confusion_matrix': confusion_matrix(y_test, y_pred).tolist(),
-                        'classification_report': classification_report(y_test, y_pred, output_dict=True)
+                    knn_manifold_results = {
+                        'distance_metric': 'sphere_manifold',
+                        'accuracy': accuracy_score(y_test, y_pred_manifold),
+                        'f1_score': f1_score(y_test, y_pred_manifold, average='weighted'),
+                        'precision': precision_score(y_test, y_pred_manifold, average='weighted'),
+                        'recall': recall_score(y_test, y_pred_manifold, average='weighted'),
+                        'confusion_matrix': confusion_matrix(y_test, y_pred_manifold).tolist(),
+                        'classification_report': classification_report(y_test, y_pred_manifold, output_dict=True)
                     }
                     
-                    results['knn_results'][f'k{k}'] = knn_results
+                    if 'knn_results' not in results:
+                        results['knn_results'] = {}
+                    if f'k{k}' not in results['knn_results']:
+                        results['knn_results'][f'k{k}'] = {}
+                    results['knn_results'][f'k{k}']['manifold'] = knn_manifold_results
                     
-                    # Save individual KNN results
-                    save_results(knn_results, f"{seed}_knn_k{k}.json", METRICS_DIR)
+                    # Save individual KNN manifold results
+                    save_results(knn_manifold_results, f"{seed}_knn_manifold_k{k}.json", METRICS_DIR)
                     
                 except Exception as e:
-                    error_msg = f"KNN k={k} failed: {e}"
+                    error_msg = f"KNN manifold k={k} failed: {e}"
+                    results['errors'].append(error_msg)
+                    print(f"{COLOR_FAIL}Error: {error_msg}{COLOR_RESET}")
+            
+            # Test with normal euclidean distance
+            if not load_existing_results(seed, f"knn_euclidean_k{k}"):
+                try:
+                    knn_euclidean = KNeighborsClassifier(n_neighbors=k, metric='euclidean')
+                    knn_euclidean.fit(X_train, y_train)
+                    y_pred_euclidean = knn_euclidean.predict(X_test)
+                    
+                    knn_euclidean_results = {
+                        'distance_metric': 'euclidean',
+                        'accuracy': accuracy_score(y_test, y_pred_euclidean),
+                        'f1_score': f1_score(y_test, y_pred_euclidean, average='weighted'),
+                        'precision': precision_score(y_test, y_pred_euclidean, average='weighted'),
+                        'recall': recall_score(y_test, y_pred_euclidean, average='weighted'),
+                        'confusion_matrix': confusion_matrix(y_test, y_pred_euclidean).tolist(),
+                        'classification_report': classification_report(y_test, y_pred_euclidean, output_dict=True)
+                    }
+                    
+                    if 'knn_results' not in results:
+                        results['knn_results'] = {}
+                    if f'k{k}' not in results['knn_results']:
+                        results['knn_results'][f'k{k}'] = {}
+                    results['knn_results'][f'k{k}']['euclidean'] = knn_euclidean_results
+                    
+                    # Save individual KNN euclidean results
+                    save_results(knn_euclidean_results, f"{seed}_knn_euclidean_k{k}.json", METRICS_DIR)
+                    
+                except Exception as e:
+                    error_msg = f"KNN euclidean k={k} failed: {e}"
                     results['errors'].append(error_msg)
                     print(f"{COLOR_FAIL}Error: {error_msg}{COLOR_RESET}")
 
@@ -278,22 +319,37 @@ def run_single_test(seed):
                 knn_outlier_scores = {}
                 for k in K_VALUES:
                     try:
-                        # For KNN, we'll use the distance-based outlier detection
+                        # For KNN manifold, we'll use the distance-based outlier detection
                         # This is how KNN naturally identifies outliers
-                        knn = KNeighborsClassifier(n_neighbors=k, metric=sphere.metric.dist)
-                        knn.fit(X_train, y_train)
+                        knn_manifold = KNeighborsClassifier(n_neighbors=k, metric=sphere.metric.dist)
+                        knn_manifold.fit(X_train, y_train)
                         # Get distances to k nearest neighbors for each training point
-                        distances, indices = knn.kneighbors(X_train)
+                        distances_manifold, indices_manifold = knn_manifold.kneighbors(X_train)
                         # Outlier score based on average distance to k nearest neighbors
                         # Higher distances indicate more outlier-like behavior
-                        avg_distances = np.mean(distances, axis=1)
+                        avg_distances_manifold = np.mean(distances_manifold, axis=1)
                         # Normalize by the median distance (similar to PFGAP approach)
-                        median_dist = np.median(avg_distances)
-                        mad_dist = np.median(np.abs(avg_distances - median_dist))
-                        if mad_dist == 0:
-                            mad_dist = 1e-6
-                        normalized_scores = np.abs(avg_distances - median_dist) / mad_dist
-                        knn_outlier_scores[f'k{k}'] = normalized_scores.tolist()
+                        median_dist_manifold = np.median(avg_distances_manifold)
+                        mad_dist_manifold = np.median(np.abs(avg_distances_manifold - median_dist_manifold))
+                        if mad_dist_manifold == 0:
+                            mad_dist_manifold = 1e-6
+                        normalized_scores_manifold = np.abs(avg_distances_manifold - median_dist_manifold) / mad_dist_manifold
+                        
+                        # For KNN euclidean, repeat the same process
+                        knn_euclidean = KNeighborsClassifier(n_neighbors=k, metric='euclidean')
+                        knn_euclidean.fit(X_train, y_train)
+                        distances_euclidean, indices_euclidean = knn_euclidean.kneighbors(X_train)
+                        avg_distances_euclidean = np.mean(distances_euclidean, axis=1)
+                        median_dist_euclidean = np.median(avg_distances_euclidean)
+                        mad_dist_euclidean = np.median(np.abs(avg_distances_euclidean - median_dist_euclidean))
+                        if mad_dist_euclidean == 0:
+                            mad_dist_euclidean = 1e-6
+                        normalized_scores_euclidean = np.abs(avg_distances_euclidean - median_dist_euclidean) / mad_dist_euclidean
+                        
+                        knn_outlier_scores[f'k{k}'] = {
+                            'manifold': normalized_scores_manifold.tolist(),
+                            'euclidean': normalized_scores_euclidean.tolist()
+                        }
                     except Exception as e:
                         print(f"{COLOR_WARNING}    Warning: KNN outlier detection failed for k={k}: {e}{COLOR_RESET}")
                         knn_outlier_scores[f'k{k}'] = None
@@ -330,8 +386,10 @@ def main():
     # Check which tests have already been completed
     completed_seeds = []
     for seed in SEEDS:
-        # Check if all KNN tests, PFGAP (all k values), proximity matrix, and outlier scores exist
-        knn_completed = all(load_existing_results(seed, f"knn_k{k}") for k in K_VALUES)
+        # Check if all KNN tests (both manifold and euclidean), PFGAP (all k values), proximity matrix, and outlier scores exist
+        knn_manifold_completed = all(load_existing_results(seed, f"knn_manifold_k{k}") for k in K_VALUES)
+        knn_euclidean_completed = all(load_existing_results(seed, f"knn_euclidean_k{k}") for k in K_VALUES)
+        knn_completed = knn_manifold_completed and knn_euclidean_completed
         pfgap_completed = load_existing_results(seed, "pfgap")  # This now checks for comprehensive results
         proximity_completed = load_existing_results(seed, "proximity")
         outlier_completed = load_existing_results(seed, "outlier")  # This now checks for comprehensive results
@@ -375,7 +433,10 @@ def main():
             # Get best KNN accuracy
             knn_best_acc = None
             if result.get('knn_results'):
-                knn_accuracies = [v['accuracy'] for v in result['knn_results'].values()]
+                knn_accuracies = []
+                for k_results in result['knn_results'].values():
+                    for metric_results in k_results.values():
+                        knn_accuracies.append(metric_results['accuracy'])
                 knn_best_acc = max(knn_accuracies) if knn_accuracies else None
             
             # Get PFGAP accuracy (using k=5 for comparison)
