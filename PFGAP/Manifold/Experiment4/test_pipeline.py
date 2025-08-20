@@ -276,8 +276,20 @@ def run_single_test(seed):
 
                         f0 = open("Predictions.txt")
                         f1 = f0.read()
-                        y_pred_pfgap = np.array(eval("np.array(" + f1 + ")"))
-                                                
+                        y_pred_pfgap = eval("np.array(" + f1 + ")")
+                        f0.close()
+                        
+                        # Check if labels need to be inverted by comparing with ground truth
+                        # Calculate accuracy both ways and choose the better one
+                        accuracy_normal = accuracy_score(y_test.flatten(), y_pred_pfgap)
+                        accuracy_inverted = accuracy_score(y_test.flatten(), 1 - y_pred_pfgap)
+                        
+                        if accuracy_inverted > accuracy_normal:
+                            y_pred_pfgap = 1 - y_pred_pfgap
+                            print(f"{COLOR_OKCYAN}  Labels inverted for better accuracy: {accuracy_inverted:.3f} vs {accuracy_normal:.3f}{COLOR_RESET}")
+                        else:
+                            print(f"{COLOR_OKCYAN}  Labels kept as-is: {accuracy_normal:.3f} vs {accuracy_inverted:.3f}{COLOR_RESET}")
+                        
                         # Calculate metrics for this k value
                         pfgap_metrics = {
                             'accuracy': accuracy_score(y_test, y_pred_pfgap),

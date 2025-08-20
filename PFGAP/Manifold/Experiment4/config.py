@@ -24,7 +24,7 @@ CLUSTER_SAMPLES = 150  # Samples per cluster
 VON_MISES_KAPPA = 20  # Concentration parameter for von Mises-Fisher
 
 # Parallel Processing
-N_JOBS = -1  # Use all available CPU cores
+N_JOBS = 1  # Use all available CPU cores
 VERBOSE = 10  # Joblib verbosity level
 
 # File Paths
