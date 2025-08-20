@@ -226,7 +226,7 @@ def run_single_test(seed):
         print(f"{COLOR_OKBLUE}Running PFGAP tests for seed {seed}...{COLOR_RESET}")
         outlier_results = {}
 
-        for pfgap_test in ["pfgap_euclidean", "pfgap_geomstats"]: #!NOTE: You can delete the geomstats and it won't run the geomstats test :)
+        for pfgap_test in ["pfgap_euclidean"]:#, "pfgap_geomstats"]: #!NOTE: You can delete the geomstats and it won't run the geomstats test :)
             if not load_existing_results(seed, pfgap_test):
                 try:
                     # Run PFGAP
@@ -240,7 +240,7 @@ def run_single_test(seed):
                             num_trees=PFGAP_NUM_TREES,
                             r=PFGAP_R,
                             out=output_dir,
-                            modelname=f"PF_{seed}",
+                            modelname="Spartacus", 
                             distances=["python"]
                         )
                     else:
@@ -251,7 +251,8 @@ def run_single_test(seed):
                             num_trees=PFGAP_NUM_TREES,
                             r=PFGAP_R,
                             out=output_dir,
-                            modelname=f"PF_{seed}",
+                            modelname="Spartacus", 
+                            distances=['euclidean']
                         )
 
                     # Get proximity matrices
