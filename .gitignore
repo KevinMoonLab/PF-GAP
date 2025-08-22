@@ -3,3 +3,4 @@ ytrain.txt
 results/
 PF_*.ser
 ForestProximities.txt
+graph_data/

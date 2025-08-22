@@ -338,7 +338,7 @@ def run_single_test(seed):
                         knn_manifold.fit(X_train, y_train)
                         # Get distances to k nearest neighbors for each training point
                         distances_manifold, indices_manifold = knn_manifold.kneighbors(X_train)
-                        # Outlier score based on average distance to k nearest neighbors
+                        #* Outlier score based on average distance to k nearest neighbors
                         # Higher distances indicate more outlier-like behavior
                         avg_distances_manifold = np.mean(distances_manifold, axis=1)
                         # Normalize by the median distance (similar to PFGAP approach)
