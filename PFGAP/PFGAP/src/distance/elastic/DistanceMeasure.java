@@ -39,6 +39,7 @@ public class DistanceMeasure implements Serializable {
 	private TWE twe;
 	private MapleDistance maple;
 	private PythonDistance python;
+	private Manhattan manhattan;
 
 	
 	public int windowSizeDTW =-1,
@@ -110,6 +111,9 @@ public class DistanceMeasure implements Serializable {
 			case python:
 				python = new PythonDistance();
 				break;
+			case manhattan:
+				manhattan = new Manhattan();
+				break;
 			default:
 				throw new Exception("Unknown distance measure");
 				//System.out.println("Using Custom Distance...");
@@ -117,7 +121,7 @@ public class DistanceMeasure implements Serializable {
 		}
 		
 	}
-	public void select_random_params(Dataset d, Random r, String... Dfile) {
+	public void select_random_params(Dataset d, Random r) {
 		switch (this.distance_measure) {
 		case euclidean:
 		case shifazEUCLIDEAN:
@@ -231,6 +235,10 @@ public class DistanceMeasure implements Serializable {
 			case python:
 				//distance = PythonDistance.distance(s,t,dfile[0]);
 				distance = python.distance(s,t);
+				break;
+			case manhattan:
+				distance = manhattan.distance(s,t,bsf);
+				break;
 			default:
 //			throw new Exception("Unknown distance measure");
 //			break;

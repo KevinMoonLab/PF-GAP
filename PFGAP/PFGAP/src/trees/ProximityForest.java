@@ -5,6 +5,13 @@ import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.locks.ReentrantLock;
+
 import core.AppContext;
 import core.ProximityForestResult;
 import core.contracts.Dataset;
@@ -34,7 +41,11 @@ public class ProximityForest implements Serializable{
 	
 	int[] num_votes;
 	List<Integer> max_voted_classes;
-	
+
+	private final ReentrantLock trainLock = new ReentrantLock();
+	private final ReentrantLock predictLock = new ReentrantLock();
+
+
 	public ProximityForest(int forest_id, MEASURE... selected_distances) {
 		this.result = new ProximityForestResult(this);
 		System.out.println(this.result);
@@ -59,8 +70,9 @@ public class ProximityForest implements Serializable{
 		}
 
 	}*/
-	
-	public void train(Dataset train_data) throws Exception {
+
+	// The following is the previous "train" method before the parallel option was made.
+	/*public void train(Dataset train_data) throws Exception {
 	//public void train(ListDataset train_data) throws Exception {
 		result.startTimeTrain = System.nanoTime();
 
@@ -91,8 +103,74 @@ public class ProximityForest implements Serializable{
 			PrintUtilities.printMemoryUsage();	
 		}
 	
+	}*/
+
+	public void train(Dataset train_data) throws Exception {
+		trainLock.lock();
+		try {
+			result.startTimeTrain = System.nanoTime();
+
+			if (AppContext.parallelTrees) {
+				ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+				List<Future<?>> futures = new ArrayList<>();
+
+				for (int i = 0; i < trees.length; i++) {
+					final int index = i;
+					futures.add(executor.submit(() -> {
+						try {
+							trees[index].train(train_data);
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
+						if (AppContext.verbosity > 0) {
+							synchronized (System.out) {
+								System.out.print(index + ".");
+								if (AppContext.verbosity > 1) {
+									PrintUtilities.printMemoryUsage(true);
+									if ((index + 1) % 20 == 0) {
+										System.out.println();
+									}
+								}
+							}
+						}
+					}));
+				}
+
+				for (Future<?> future : futures) {
+					future.get();
+				}
+
+				executor.shutdown();
+			} else {
+				for (int i = 0; i < trees.length; i++) {
+					trees[i].train(train_data);
+					if (AppContext.verbosity > 0) {
+						System.out.print(i + ".");
+						if (AppContext.verbosity > 1) {
+							PrintUtilities.printMemoryUsage(true);
+							if ((i + 1) % 20 == 0) {
+								System.out.println();
+							}
+						}
+					}
+				}
+			}
+
+			result.endTimeTrain = System.nanoTime();
+			result.elapsedTimeTrain = result.endTimeTrain - result.startTimeTrain;
+
+			if (AppContext.verbosity > 0) {
+				System.out.print("\n");
+				PrintUtilities.printMemoryUsage();
+			}
+		} finally {
+			trainLock.unlock();
+		}
 	}
-	
+
+
+
+	//This is the previous test() method code before parallelization.
 	//ASSUMES CLASS labels HAVE BEEN reordered to start from 0 and contiguous
 	public ProximityForestResult test(Dataset test_data) throws Exception {
 		result.startTimeTest = System.nanoTime();
@@ -136,8 +214,139 @@ public class ProximityForest implements Serializable{
 
         return result;
 	}
-	
+
+	//This is the work-in-progress parallel test method.
+	/*public ProximityForestResult test(Dataset test_data) throws Exception {
+		result.startTimeTest = System.nanoTime();
+		int size = test_data.size();
+
+		ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+		List<Future<Integer>> futures = new ArrayList<>();
+
+		for (int i = 0; i < size; i++) {
+			final int index = i;
+			futures.add(executor.submit(() -> {
+				double[] query = test_data.get_series(index);
+				return predict(query);
+			}));
+		}
+
+		for (int i = 0; i < size; i++) {
+			int predicted_class = futures.get(i).get();
+			int actual_class = test_data.get_class(i);
+
+			result.Predictions.add(predicted_class);
+			if (actual_class != predicted_class) {
+				result.errors++;
+			} else {
+				result.correct++;
+			}
+
+			if (AppContext.verbosity > 0 && i % AppContext.print_test_progress_for_each_instances == 0) {
+				System.out.print("*");
+			}
+		}
+
+		executor.shutdown();
+
+		result.endTimeTest = System.nanoTime();
+		result.elapsedTimeTest = result.endTimeTest - result.startTimeTest;
+
+		if (AppContext.verbosity > 0) {
+			System.out.println();
+		}
+
+		assert test_data.size() == result.errors + result.correct;
+		result.accuracy = ((double) result.correct) / test_data.size();
+		result.error_rate = 1 - result.accuracy;
+
+		return result;
+	}*/
+
+
+
+
 	public Integer predict(double[] query) throws Exception {
+		predictLock.lock();
+		try {
+			int max_vote_count = -1;
+			int temp_count;
+
+			if (AppContext.parallelTrees) {
+				AtomicIntegerArray voteCounts = new AtomicIntegerArray(num_votes.length);
+				ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+				List<Future<?>> futures = new ArrayList<>();
+
+				for (int i = 0; i < trees.length; i++) {
+					final int index = i;
+					futures.add(executor.submit(() -> {
+						int label = 0;
+						try {
+							label = trees[index].predict(query);
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
+						voteCounts.incrementAndGet(label);
+					}));
+				}
+
+				for (Future<?> future : futures) {
+					future.get();
+				}
+
+				executor.shutdown();
+
+				max_voted_classes.clear();
+				for (int i = 0; i < voteCounts.length(); i++) {
+					temp_count = voteCounts.get(i);
+					if (temp_count > max_vote_count) {
+						max_vote_count = temp_count;
+						max_voted_classes.clear();
+						max_voted_classes.add(i);
+					} else if (temp_count == max_vote_count) {
+						max_voted_classes.add(i);
+					}
+				}
+			} else {
+				int label;
+				for (int i = 0; i < num_votes.length; i++) {
+					num_votes[i] = 0;
+				}
+				max_voted_classes.clear();
+
+				for (int i = 0; i < trees.length; i++) {
+					label = trees[i].predict(query);
+					num_votes[label]++;
+				}
+
+				for (int i = 0; i < num_votes.length; i++) {
+					temp_count = num_votes[i];
+					if (temp_count > max_vote_count) {
+						max_vote_count = temp_count;
+						max_voted_classes.clear();
+						max_voted_classes.add(i);
+					} else if (temp_count == max_vote_count) {
+						max_voted_classes.add(i);
+					}
+				}
+			}
+
+			int r = AppContext.getRand().nextInt(max_voted_classes.size());
+
+			if (max_voted_classes.size() > 1) {
+				this.result.majority_vote_match_count++;
+			}
+
+			return max_voted_classes.get(r);
+		} finally {
+			predictLock.unlock();
+		}
+	}
+
+
+
+	//This is the previous code for the predict method before the parallel option.
+	/*public Integer predict(double[] query) throws Exception {
 		//ASSUMES CLASSES HAVE BEEN REMAPPED, start from 0
 		int label;
 		int max_vote_count = -1;
@@ -176,7 +385,7 @@ public class ProximityForest implements Serializable{
 		}
 		
 		return max_voted_classes.get(r);
-	}
+	}*/
 	
 	public ProximityTree[] getTrees() {
 		return this.trees;

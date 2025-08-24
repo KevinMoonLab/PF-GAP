@@ -1,8 +1,11 @@
 import subprocess
 import numpy as np
 
-def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None):
-    msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
+def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
+    #msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
+    msgList = ['java', '-jar'] #, '-Xmx1g', 'PFGAP.jar']
+    msgList.extend(['-Xmx' + memory])
+    msgList.extend(['PFGAP.jar'])
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
     msgList.extend(["-test=" + testfile])
@@ -19,6 +22,8 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     msgList.extend(["-getprox=" + getprox])
     msgList.extend(["-savemodel=" + savemodel])
     msgList.extend(["-modelname=" + modelname])
+    msgList.extend(["-parallelTrees=" + parallelTrees])
+    msgList.extend(["-parallelProx=" + parallelProx])
     
     if distances==None:
         distances="[]"
@@ -31,7 +36,7 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     return
     
 
-def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first"):
+def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false"):
     msgList = ['java', '-jar', '-Xmx1g', 'PFGAP_eval.jar']
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + testfile])
@@ -43,6 +48,7 @@ def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, ve
     msgList.extend(["-csv_has_header=" + csv_has_header]) # we mean this to work primarily with tsv files, actually.
     msgList.extend(["-target_column=" + target_column])
     msgList.extend(["-modelname=" + modelname])
+    msgList.extend(["-parallelTrees=" + parallelTrees])
 
     subprocess.call(msgList)
     return

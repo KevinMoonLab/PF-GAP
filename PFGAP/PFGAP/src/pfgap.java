@@ -37,7 +37,7 @@ public class pfgap{
 
         //ProximityForest PF = new ProximityForest(Treenum);
         //List<MEASURE> myMeasures = new List<MEASURE>() {MEASURE.maple};
-        MEASURE[] mything = {MEASURE.euclidean}; //{MEASURE.python}; //{MEASURE.maple};
+        MEASURE[] mything = {MEASURE.ddtw}; //{MEASURE.manhattan}; //{MEASURE.python}; //{MEASURE.maple};
         String[] myfile = {"DistS2.mpl"};
         //ProximityForest PF = new ProximityForest(Treenum,myfile);
         //ProximityForest PF = new ProximityForest(Treenum);
@@ -45,6 +45,7 @@ public class pfgap{
         //ProximityForest PF = new ProximityForest(Treenum, MEASURE.maple);
         String train_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TRAIN.csv";
         String test_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TEST.csv";
+        //String test_file = "null";
         ListDataset train_data = CSVReader.readCSVToListDataset(train_file,false, true,"\t");
         // Here is the test set, if testing is desired.
         //String test_file = "/home/ben/Documents/SchoolGithub/Math_Dissertation/Data_Science/PFGAP/Data/GunPoint_TEST.csv";
