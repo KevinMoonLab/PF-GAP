@@ -105,6 +105,12 @@ public class PFApplication {
 				case "-savemodel":
 					AppContext.savemodel = Boolean.parseBoolean(options[1]);
 					break;
+				case "-parallelTrees":
+					AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
+					break;
+				case "-parallelProx":
+					AppContext.parallelProx = Boolean.parseBoolean(options[1]);
+					break;
 					case "-distances":
 						String temp = options[1];
 						String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
@@ -149,6 +155,7 @@ public class PFApplication {
 						measuresByName.put("shifazTWE", MEASURE.shifazTWE);
 						measuresByName.put("maple", MEASURE.maple);
 						measuresByName.put("python", MEASURE.python);
+						measuresByName.put("manhattan", MEASURE.manhattan);
 
 						for (int j=0; j < numberofdists; j++){
 							MEASURE convertedEntry = measuresByName.get(contentsList.get(j));

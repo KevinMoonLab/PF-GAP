@@ -107,6 +107,9 @@ public class PFApplicationEval {
                     case "-modelname":
                         AppContext.modelname = options[1];
                         break;
+                    case "-parallelTrees":
+                        AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
+                        break;
                     case "-distances":
                         //Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir ok"});
                         /*String temp = options[1];
@@ -153,6 +156,7 @@ public class PFApplicationEval {
                         measuresByName.put("shifazTWE", MEASURE.shifazTWE);
                         measuresByName.put("maple", MEASURE.maple);
                         measuresByName.put("python", MEASURE.python);
+                        measuresByName.put("manhattan", MEASURE.manhattan);
 
                         for (int j=0; j < numberofdists; j++){
                             MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
