@@ -79,26 +79,7 @@ def save_results(data, filename, directory):
 
 def load_existing_results(seed, test_type):
     """Check if results already exist for a given seed and test type"""
-    if test_type.startswith("knn_manifold_k"):
-        filename = f"{seed}_knn_manifold_{test_type}.json"
-        return (METRICS_DIR / filename).exists()
-    elif test_type.startswith("knn_euclidean_k"):
-        filename = f"{seed}_knn_euclidean_{test_type}.json"
-        return (METRICS_DIR / filename).exists()
-    elif test_type == "pfgap_euclidean":
-        # Check for the comprehensive PFGAP results file
-        filename = f"{seed}_pfgap_euclidean_all_k_results.json"
-        return (METRICS_DIR / filename).exists()
-    elif test_type == "pfgap_geomstats":
-        filename = f"{seed}_pfgap_geomstats_all_k_results.json"
-        return (METRICS_DIR / filename).exists()
-    elif test_type == "proximity":
-        filename = f"{seed}_proximity_matrix.npy"
-        return (PROXIMITY_DIR / filename).exists()
-    elif test_type == "outlier":
-        # Check for the comprehensive outlier results file
-        filename = f"{seed}_comprehensive_outlier_scores.json"
-        return (OUTLIER_DIR / filename).exists()
+    #! This functionality was purposely removed. 
     return False
 
 def run_single_test(seed):
@@ -240,7 +221,7 @@ def run_single_test(seed):
                             num_trees=PFGAP_NUM_TREES,
                             r=PFGAP_R,
                             out=output_dir,
-                            modelname="Spartacus", 
+                            modelname="test_" + str(seed),
                             distances=["python"]
                         )
                     else:
@@ -251,8 +232,8 @@ def run_single_test(seed):
                             num_trees=PFGAP_NUM_TREES,
                             r=PFGAP_R,
                             out=output_dir,
-                            modelname="Spartacus", 
-                            distances=['euclidean','manhattan']
+                            modelname="test_" + str(seed),
+                            distances=['euclidean']
                         )
 
                     # Get proximity matrices

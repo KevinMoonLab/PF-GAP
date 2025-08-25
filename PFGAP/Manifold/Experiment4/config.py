@@ -8,8 +8,8 @@ TRAIN_TEST_SPLIT = 0.7
 RANDOM_STATE = 42
 
 # PFGAP Configuration
-PFGAP_NUM_TREES = 100
-PFGAP_R = 15
+PFGAP_NUM_TREES = 11
+PFGAP_R = 5
 PFGAP_REPEATS = 1
 PFGAP_ON_TREE = "true"
 PFGAP_SHUFFLE = "false"
@@ -23,7 +23,7 @@ CLUSTER_SAMPLES = 150  # Samples per cluster
 VON_MISES_KAPPA = 20  # Concentration parameter for von Mises-Fisher
 
 # Parallel Processing
-N_JOBS = -1  # Use all available CPU cores
+N_JOBS = 1  # Use all available CPU cores
 VERBOSE = 10  # Joblib verbosity level
 
 # File Paths
