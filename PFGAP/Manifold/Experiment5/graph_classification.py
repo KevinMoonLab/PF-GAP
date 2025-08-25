@@ -59,7 +59,7 @@ for SEED in SEEDS:
     print(f"Calculating {num_graphs}x{num_graphs} distance matrix...")
 
     # Use tqdm for a progress bar
-    for i in tqdm(range(num_graphs)):
+    for i in range(num_graphs):
         for j in range(i, num_graphs): # We only need to compute the upper triangle
             if i == j:
                 continue # Distance to self is 0

@@ -252,7 +252,7 @@ def run_single_test(seed):
                             r=PFGAP_R,
                             out=output_dir,
                             modelname="Spartacus", 
-                            distances=['euclidean']
+                            distances=['euclidean','manhattan']
                         )
 
                     # Get proximity matrices
