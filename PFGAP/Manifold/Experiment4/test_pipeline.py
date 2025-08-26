@@ -233,7 +233,8 @@ def run_single_test(seed):
                             r=PFGAP_R,
                             out=output_dir,
                             modelname="test_" + str(seed),
-                            distances=['euclidean']
+                            distances=['euclidean'],
+                            max_depth=4,
                         )
 
                     # Get proximity matrices
