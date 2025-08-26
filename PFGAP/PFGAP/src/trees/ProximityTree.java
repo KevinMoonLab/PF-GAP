@@ -410,6 +410,33 @@ public class ProximityTree implements Serializable {
 				return;
 			}
 
+			if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth){ //0 means no max depth.
+				//first, get a count of each class present in the node. Then find the majority class.
+				int[] classes = data.get_unique_classes();
+				Map<Integer, Integer> frequencyMap = new HashMap<>();
+
+				// Count frequencies of each element
+				for (int num : classes) {
+					frequencyMap.put(num, frequencyMap.getOrDefault(num, 0) + 1);
+				}
+
+				int mostFrequentElement = classes[0]; // Initialize with the first element
+				int maxFrequency = 0;
+
+				// Find the element with the maximum frequency
+				for (Map.Entry<Integer, Integer> entry : frequencyMap.entrySet()) {
+					if (entry.getValue() > maxFrequency) {
+						maxFrequency = entry.getValue();
+						mostFrequentElement = entry.getKey();
+					}
+				}
+				// Now that we have the most Frequent class, we consider the node to be this class and terminate.
+				this.label = mostFrequentElement;
+				this.is_leaf = true;
+				this.tree.leaves.add(this);
+				return;
+			}
+
 			this.splitter = new Splitter(this);
 
 

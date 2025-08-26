@@ -1,7 +1,7 @@
 import subprocess
 import numpy as np
 
-def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
+def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
     #msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
     msgList = ['java', '-jar'] #, '-Xmx1g', 'PFGAP.jar']
     msgList.extend(['-Xmx' + memory])
@@ -14,6 +14,7 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     msgList.extend(["-trees=" + str(num_trees)])
     msgList.extend(["-r=" + str(r)])
     msgList.extend(["-on_tree=" + on_tree])
+    msgList.extend(["-max_depth=" + str(max_depth)]) #max_depth=0 means no max depth.
     msgList.extend(["-shuffle=" + shuffle])
     msgList.extend(["-export=" + str(export)])
     msgList.extend(["-verbosity=" + str(verbosity)])

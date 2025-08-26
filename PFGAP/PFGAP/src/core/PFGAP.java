@@ -12,7 +12,7 @@ import java.util.concurrent.Future;
 public class PFGAP{
 
     //Here is the original code.
-    /*public static ArrayList<ProximityTree> getSi(Integer i, ProximityForest pf){
+    public static ArrayList<ProximityTree> getSi(Integer i, ProximityForest pf){
         ArrayList<ProximityTree> Si = new ArrayList<ProximityTree>();
         ProximityTree[] trees = pf.getTrees();
         for(ProximityTree tree:trees){
@@ -22,9 +22,10 @@ public class PFGAP{
             }
         }
         return Si;
-    }*/
+    }
 
-    public static ArrayList<ProximityTree> getSi(Integer i, ProximityForest pf) {
+    //Here is the parallel code.
+    /*public static ArrayList<ProximityTree> getSi(Integer i, ProximityForest pf) {
         ArrayList<ProximityTree> Si = new ArrayList<>();
         ProximityTree[] trees = pf.getTrees();
 
@@ -62,12 +63,12 @@ public class PFGAP{
         }
 
         return Si;
-    }
+    }*/
 
 
     //public static ProximityTree.Node getJiLeaf(Integer i, ProximityTree t){
     //Here is the original code
-    /*public static ArrayList<Integer> getJi(Integer i, ProximityTree t){
+    public static ArrayList<Integer> getJi(Integer i, ProximityTree t){
         ArrayList<Integer> Ji = new ArrayList<>();
         ArrayList<ProximityTree.Node> leaves = t.getLeaves();
         //System.out.println(leaves.size());
@@ -82,9 +83,10 @@ public class PFGAP{
             }
         }
         return Ji;
-    }*/
+    }
 
-    public static ArrayList<Integer> getJi(Integer i, ProximityTree t) {
+    // Here is the parallel code.
+    /*public static ArrayList<Integer> getJi(Integer i, ProximityTree t) {
         ArrayList<Integer> Ji = new ArrayList<>();
         ArrayList<ProximityTree.Node> leaves = t.getLeaves();
 
@@ -122,11 +124,11 @@ public class PFGAP{
         }
 
         return Ji;
-    }
+    }*/
 
 
     //Below is the original code
-    /*public static Double ForestProximity(Integer i, Integer j, ProximityForest pf){
+    public static Double ForestProximity(Integer i, Integer j, ProximityForest pf){
         ArrayList<ProximityTree> Si = getSi(i,pf);
         //Double[] terms = new Double[]{};
         ArrayList<Double> terms = new ArrayList<>();
@@ -146,9 +148,10 @@ public class PFGAP{
             sum += term;
         }
         return sum;
-    }*/
+    }
 
-    public static Double ForestProximity(Integer i, Integer j, ProximityForest pf) {
+    // Here is the parallel code.
+    /*public static Double ForestProximity(Integer i, Integer j, ProximityForest pf) {
         ArrayList<ProximityTree> Si = getSi(i, pf);
         ArrayList<Double> terms = new ArrayList<>();
 
@@ -197,7 +200,7 @@ public class PFGAP{
         }
 
         return sum;
-    }
+    }*/
 
 
 }
