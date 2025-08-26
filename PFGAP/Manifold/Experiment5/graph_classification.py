@@ -150,11 +150,6 @@ for SEED in SEEDS:
     model_results.to_csv(model_results_path, index=False)
     print(f"KNN model results saved to: {model_results_path}")
 
-    # Display the dataframe
-    model_results
-
-    model_results["outlier_scores"].values
-
     import sys
     import os
     import pickle
