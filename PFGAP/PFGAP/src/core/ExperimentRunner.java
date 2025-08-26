@@ -3,7 +3,11 @@ package core;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import datasets.ListDataset;
 import org.apache.commons.lang3.ArrayUtils;
@@ -130,12 +134,37 @@ public class ExperimentRunner {
 					System.out.println("Computing Forest Proximities...");
 					double t5 = System.currentTimeMillis();
 					Double[][] PFGAP = new Double[train_data.size()][train_data.size()];
-					for (Integer k = 0; k < train_data.size(); k++) {
-						for (Integer j = 0; j < train_data.size(); j++) {
-							Double prox = ForestProximity(k, j, forest);
-							PFGAP[k][j] = prox;
+					if(AppContext.parallelProx){
+						ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+						List<Future<?>> futures = new ArrayList<>();
+
+						for (int k = 0; k < train_data.size(); k++) {
+							final int finalK = k;
+							futures.add(executor.submit(() -> {
+								for (int j = 0; j < train_data.size(); j++) {
+									double prox = ForestProximity(finalK, j, forest);
+									PFGAP[finalK][j] = prox;
+								}
+							}));
+						}
+
+						// Wait for all tasks to complete
+						for (Future<?> future : futures) {
+							future.get(); // Handle exceptions as needed
+						}
+
+						executor.shutdown();
+
+					} else{
+						for (Integer k = 0; k < train_data.size(); k++) {
+							for (Integer j = 0; j < train_data.size(); j++) {
+								Double prox = ForestProximity(k, j, forest);
+								PFGAP[k][j] = prox;
+							}
 						}
 					}
+
 					double t6 = System.currentTimeMillis();
 					System.out.print("Done Computing Forest Proximities. ");
 					System.out.print("Computation time: ");

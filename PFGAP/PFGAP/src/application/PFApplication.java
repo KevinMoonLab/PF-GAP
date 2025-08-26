@@ -72,6 +72,9 @@ public class PFApplication {
 				case "-on_tree":
 					AppContext.random_dm_per_node = Boolean.parseBoolean(options[1]);
 					break;
+				case "-max_depth":
+					AppContext.max_depth = Integer.parseInt(options[1]);
+					break;
 				case "-shuffle":
 					AppContext.shuffle_dataset = Boolean.parseBoolean(options[1]);
 					break;
@@ -105,64 +108,71 @@ public class PFApplication {
 				case "-savemodel":
 					AppContext.savemodel = Boolean.parseBoolean(options[1]);
 					break;
-					case "-distances":
-						String temp = options[1];
-						String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
-						String[] contents = temp_rm.split(","); // Splits by ","
-						List<String> contentsList = Arrays.asList(contents);
-						int numberofdists = contentsList.size();
-						MEASURE[] toadd = new MEASURE[numberofdists];
+				case "-parallelTrees":
+					AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
+					break;
+				case "-parallelProx":
+					AppContext.parallelProx = Boolean.parseBoolean(options[1]);
+					break;
+				case "-distances":
+					String temp = options[1];
+					String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
+					String[] contents = temp_rm.split(","); // Splits by ","
+					List<String> contentsList = Arrays.asList(contents);
+					int numberofdists = contentsList.size();
+					MEASURE[] toadd = new MEASURE[numberofdists];
 
-						Map<String, MEASURE> measuresByName = new HashMap<>();
+					Map<String, MEASURE> measuresByName = new HashMap<>();
 
-						// Associate string keys with MEASURE values
-						measuresByName.put("basicDTW", MEASURE.basicDTW);
-						measuresByName.put("dtwDistance", MEASURE.dtwDistance);
-						measuresByName.put("dtwDistanceEfficient", MEASURE.dtwDistanceEfficient);
-						measuresByName.put("erp", MEASURE.erp);
-						measuresByName.put("lcss", MEASURE.lcss);
-						measuresByName.put("msm", MEASURE.msm);
-						measuresByName.put("pdtw", MEASURE.pdtw);
-						measuresByName.put("scdtw", MEASURE.scdtw);
-						measuresByName.put("twe", MEASURE.twe);
-						measuresByName.put("wdtw", MEASURE.wdtw);
-						measuresByName.put("francoisDTW", MEASURE.francoisDTW);
-						measuresByName.put("smoothDTW", MEASURE.smoothDTW);
-						measuresByName.put("dtw", MEASURE.dtw);
-						measuresByName.put("dca_dtw", MEASURE.dca_dtw);
-						measuresByName.put("euclidean", MEASURE.euclidean);
-						measuresByName.put("equality", MEASURE.equality);
-						measuresByName.put("dtwcv", MEASURE.dtwcv);
-						measuresByName.put("ddtwcv", MEASURE.ddtwcv);
-						measuresByName.put("wddtw", MEASURE.wddtw);
-						measuresByName.put("ddtw", MEASURE.ddtw);
-						measuresByName.put("shifazDTW", MEASURE.shifazDTW);
-						measuresByName.put("shifazDTWCV", MEASURE.shifazDTWCV);
-						measuresByName.put("shifazDDTW", MEASURE.shifazDDTW);
-						measuresByName.put("shifazDDTWCV", MEASURE.shifazDDTWCV);
-						measuresByName.put("shifazWDTW", MEASURE.shifazWDTW);
-						measuresByName.put("shifazWDDTW", MEASURE.shifazWDDTW);
-						measuresByName.put("shifazEUCLIDEAN", MEASURE.shifazEUCLIDEAN);
-						measuresByName.put("shifazERP", MEASURE.shifazERP);
-						measuresByName.put("shifazMSM", MEASURE.shifazMSM);
-						measuresByName.put("shifazLCSS", MEASURE.shifazLCSS);
-						measuresByName.put("shifazTWE", MEASURE.shifazTWE);
-						measuresByName.put("maple", MEASURE.maple);
-						measuresByName.put("python", MEASURE.python);
+					// Associate string keys with MEASURE values
+					measuresByName.put("basicDTW", MEASURE.basicDTW);
+					measuresByName.put("dtwDistance", MEASURE.dtwDistance);
+					measuresByName.put("dtwDistanceEfficient", MEASURE.dtwDistanceEfficient);
+					measuresByName.put("erp", MEASURE.erp);
+					measuresByName.put("lcss", MEASURE.lcss);
+					measuresByName.put("msm", MEASURE.msm);
+					measuresByName.put("pdtw", MEASURE.pdtw);
+					measuresByName.put("scdtw", MEASURE.scdtw);
+					measuresByName.put("twe", MEASURE.twe);
+					measuresByName.put("wdtw", MEASURE.wdtw);
+					measuresByName.put("francoisDTW", MEASURE.francoisDTW);
+					measuresByName.put("smoothDTW", MEASURE.smoothDTW);
+					measuresByName.put("dtw", MEASURE.dtw);
+					measuresByName.put("dca_dtw", MEASURE.dca_dtw);
+					measuresByName.put("euclidean", MEASURE.euclidean);
+					measuresByName.put("equality", MEASURE.equality);
+					measuresByName.put("dtwcv", MEASURE.dtwcv);
+					measuresByName.put("ddtwcv", MEASURE.ddtwcv);
+					measuresByName.put("wddtw", MEASURE.wddtw);
+					measuresByName.put("ddtw", MEASURE.ddtw);
+					measuresByName.put("shifazDTW", MEASURE.shifazDTW);
+					measuresByName.put("shifazDTWCV", MEASURE.shifazDTWCV);
+					measuresByName.put("shifazDDTW", MEASURE.shifazDDTW);
+					measuresByName.put("shifazDDTWCV", MEASURE.shifazDDTWCV);
+					measuresByName.put("shifazWDTW", MEASURE.shifazWDTW);
+					measuresByName.put("shifazWDDTW", MEASURE.shifazWDDTW);
+					measuresByName.put("shifazEUCLIDEAN", MEASURE.shifazEUCLIDEAN);
+					measuresByName.put("shifazERP", MEASURE.shifazERP);
+					measuresByName.put("shifazMSM", MEASURE.shifazMSM);
+					measuresByName.put("shifazLCSS", MEASURE.shifazLCSS);
+					measuresByName.put("shifazTWE", MEASURE.shifazTWE);
+					measuresByName.put("maple", MEASURE.maple);
+					measuresByName.put("python", MEASURE.python);
+					measuresByName.put("manhattan", MEASURE.manhattan);
 
-						for (int j=0; j < numberofdists; j++){
-							MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
-							toadd[j] = convertedEntry;
-						}
+					for (int j=0; j < numberofdists; j++){
+						MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
+						toadd[j] = convertedEntry;
+					}
 
-						if (Objects.equals(contentsList.get(0), "")){
-							AppContext.userdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
-						} else {
-							AppContext.userdistances = toadd;
-						}
+					if (Objects.equals(contentsList.get(0), "")){
+						AppContext.userdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
+					} else {
+						AppContext.userdistances = toadd;
+					}
 
-						//AppContext.userdistances = toadd;
-						break;
+					//AppContext.userdistances = toadd;
+					break;
 				default:
 					throw new Exception("Invalid Commandline Arguments");
 				}

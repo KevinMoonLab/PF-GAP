@@ -44,7 +44,7 @@ public class AppContext {
 
 
 	public static int num_repeats = 1;
-	public static int num_trees = 1;
+	public static int num_trees = 11;
 	public static int num_candidates_per_split = 1;
 	public static boolean random_dm_per_node = true;
 	public static boolean shuffle_dataset = false;
@@ -73,6 +73,9 @@ public class AppContext {
 	public static boolean getprox;
 	public static String modelname = "Ben2";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
+	public static boolean parallelTrees = false; //false;
+	public static boolean parallelProx = false; //false;
+	public static int max_depth; //initializes to 0.
 
     private static transient Dataset train_data;
 	private static transient Dataset test_data;
