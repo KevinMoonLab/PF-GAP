@@ -240,7 +240,8 @@ for SEED in SEEDS:
             out="indexed_graph_output",
             verbosity=2,
             csv_has_header="false",
-            target_column="first"
+            target_column="first",
+            max_depth=4
         )
         pfgap_end_time = time.time()
         print("\n🎉 PFGAP training completed")
