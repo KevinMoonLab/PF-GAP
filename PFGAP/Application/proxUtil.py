@@ -1,11 +1,22 @@
+
+import os
 import subprocess
 import numpy as np
 
+# Resolve absolute path to PFGAP.jar and PFGAP_eval.jar
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'Application'))
+PFGAP_JAR_PATH = os.path.join(BASE_DIR, 'PFGAP.jar')
+PFGAP_EVAL_JAR_PATH = os.path.join(BASE_DIR, 'PFGAP_eval.jar')
+
+
 def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
-    #msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
-    msgList = ['java', '-jar'] #, '-Xmx1g', 'PFGAP.jar']
+    import sys
+    sys.path.append(os.path.join(BASE_DIR, 'Application'))
+    sys.path.append(BASE_DIR)
+
+    msgList = ['java', '-jar']
     msgList.extend(['-Xmx' + memory])
-    msgList.extend(['PFGAP.jar'])
+    msgList.extend([PFGAP_JAR_PATH])
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
     msgList.extend(["-test=" + testfile])
@@ -25,20 +36,21 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     msgList.extend(["-modelname=" + modelname])
     msgList.extend(["-parallelTrees=" + parallelTrees])
     msgList.extend(["-parallelProx=" + parallelProx])
-    
-    if distances==None:
-        distances="[]"
+
+    if distances is None:
+        distances = "[]"
     else:
         distances = "[" + ",".join(distances) + "]"
-        
-    msgList.extend(["-distances=" + distances])    
+
+    msgList.extend(["-distances=" + distances])
 
     process = subprocess.call(msgList)
     return
     
 
+
 def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false"):
-    msgList = ['java', '-jar', '-Xmx1g', 'PFGAP_eval.jar']
+    msgList = ['java', '-jar', '-Xmx1g', PFGAP_EVAL_JAR_PATH]
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + testfile])
     msgList.extend(["-test=" + testfile])
