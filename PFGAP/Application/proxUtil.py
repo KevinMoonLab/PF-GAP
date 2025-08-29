@@ -1,7 +1,8 @@
 import subprocess
 import numpy as np
+import os
 
-def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="output", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
+def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
     #msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
     msgList = ['java', '-jar'] #, '-Xmx1g', 'PFGAP.jar']
     msgList.extend(['-Xmx' + memory])
@@ -9,7 +10,7 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
     msgList.extend(["-test=" + testfile])
-    msgList.extend(["-out=" + out])
+    #msgList.extend(["-out=" + out])
     msgList.extend(["-repeats=" + str(repeats)])
     msgList.extend(["-trees=" + str(num_trees)])
     msgList.extend(["-r=" + str(r)])
@@ -26,6 +27,14 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     msgList.extend(["-parallelTrees=" + parallelTrees])
     msgList.extend(["-parallelProx=" + parallelProx])
     
+    if out=="":
+        out = os.getcwd() + "/"
+        msgList.extend(["-out=" + out])
+    else:
+        if not os.path.isdir(out):
+            os.mkdir(out)
+        msgList.extend(["-out=" + out + "/"])
+    
     if distances==None:
         distances="[]"
     else:
@@ -37,12 +46,12 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     return
     
 
-def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false"):
+def evalPF(testfile, modelname="PF", out="", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false"):
     msgList = ['java', '-jar', '-Xmx1g', 'PFGAP_eval.jar']
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + testfile])
     msgList.extend(["-test=" + testfile])
-    msgList.extend(["-out=" + out])
+    #msgList.extend(["-out=" + out])
     msgList.extend(["-shuffle=" + shuffle])
     msgList.extend(["-export=" + str(export)])
     msgList.extend(["-verbosity=" + str(verbosity)])
@@ -50,6 +59,14 @@ def evalPF(testfile, modelname="PF", out="output", shuffle="false", export=1, ve
     msgList.extend(["-target_column=" + target_column])
     msgList.extend(["-modelname=" + modelname])
     msgList.extend(["-parallelTrees=" + parallelTrees])
+    
+    if out=="":
+        out = os.getcwd() + "/"
+        msgList.extend(["-out=" + out])
+    else:
+        if not os.path.isdir(out):
+            os.mkdir(out)
+        msgList.extend(["-out=" + out + "/"])
 
     subprocess.call(msgList)
     return

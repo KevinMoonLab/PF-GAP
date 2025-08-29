@@ -112,7 +112,7 @@ public class ExperimentRunner {
 				if(AppContext.savemodel) {
 					// save the trained model
 					try {
-						FileOutputStream fileOutputStream = new FileOutputStream(AppContext.modelname + ".ser");
+						FileOutputStream fileOutputStream = new FileOutputStream(AppContext.output_dir + AppContext.modelname + ".ser");
 						ObjectOutputStream objectOutputStream = new ObjectOutputStream(fileOutputStream);
 						objectOutputStream.writeObject(forest);
 						objectOutputStream.close();
@@ -123,9 +123,11 @@ public class ExperimentRunner {
 
 				//test model
 				ProximityForestResult result = forest.test(test_data);
+				test_data = null; // erase the test data information.
 
 				//Now we print the Predictions array to a text file.
-				PrintWriter writer0 = new PrintWriter("Predictions.txt", "UTF-8");
+				PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Predictions.txt", "UTF-8");
+				//TODO: output the predictions in terms of the original classes.
 				writer0.print(ArrayUtils.toString(result.Predictions));
 				writer0.close();
 
@@ -172,19 +174,20 @@ public class ExperimentRunner {
 
 
 					//Now we print the PFGAP array to a text file.
-					PrintWriter writer = new PrintWriter("ForestProximities.txt", "UTF-8");
+					PrintWriter writer = new PrintWriter(AppContext.output_dir + "ForestProximities.txt", "UTF-8");
 					writer.print(ArrayUtils.toString(PFGAP));
 					writer.close();
 					Integer[] ytrain = new Integer[train_data.size()];
 					for (Integer k = 0; k < train_data.size(); k++) {
 						ytrain[k] = train_data.get_class(k);
 					}
-					PrintWriter writer2 = new PrintWriter("ytrain.txt", "UTF-8");
+					PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "ytrain.txt", "UTF-8");
 					writer2.print(ArrayUtils.toString(ytrain));
 					writer2.close();
 				}
 				//print and export resultS
 				result.printResults(datasetName, i, "");
+				AppContext.output_dir = null;
 
 				//export level is integer because I intend to add few levels in future, each level with a higher verbosity
 				/*if (AppContext.export_level > 0) {
@@ -201,9 +204,14 @@ public class ExperimentRunner {
 				Predictions_saved.add(forest1.predict(test_data.get_series(k)));
 			}*/
 				ProximityForestResult result1 = forest1.test(test_data);
+
+				//TODO: calculate proximities for the test points.
+				test_data = null; // erase test data.
+
 				//Now we print the Predictions array of the saved model to a text file.
-				PrintWriter writer0a = new PrintWriter("Predictions_saved.txt", "UTF-8");
+				PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", "UTF-8");
 				//writer0a.print(ArrayUtils.toString(Predictions_saved));
+				//TODO: output the predictions in terms of the original classes.
 				writer0a.print(ArrayUtils.toString(result1.Predictions));
 				writer0a.close();
 

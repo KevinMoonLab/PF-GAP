@@ -6,14 +6,14 @@ PF-GAP is an extension of the original PF model. First, PF-GAP extends PF by the
 
 ## Requirements
 
-Java 17. Recommended: python 3 with packages "numpy" and "subprocess".
+Java 17. Recommended: python 3 with packages "numpy", "subprocess", and "os".
 Optional: Maple (2016+). This only applies if you want to use Maple to compute distances.
 
 ## Using PF-GAP
 
-It is not necessary to clone this repository to use PF-GAP. One only needs the files in the Application folder, namely the .jar files and the proxUtil.py file. The remaining files in the Application folder, namely "PythonDistance.py" and "MapleDistance.mpl", are provided as examples if a user wants to define a distance measure using either python or Maple. This repository also includes a Demo.ipynb file to illustrate the use of PF-GAP.
+It is not necessary to clone this repository to use PF-GAP. One only needs three files in the Application folder, namely the .jar files and the proxUtil.py file. In the Application folder, the "PythonDistance.py" and "MapleDistance.mpl" files are provided as examples if a user wants to define a distance measure using either python or Maple. The "Demo.ipynb" file illustrates the use of PFGAP, with minimal data provided in the "Data/" folder in order to run the notebook. 
 
-The proxUtil.py file is not strictly necessary, but rather provides a convenient mechanism for calling the .jar files in python. The proxUtil.py file contains the function getProx, which calls the PFGAP.jar file, building and training a Proximity Forest using the training data, then applying Proximity Forest on the test data. The training/test data files are specified in the function arguments. Other parameters may be passed to this function as well, including the desired number of trees and r parameter. By default, the PFGAP.jar file creates a "Predictions.txt" file containing the predictions on the test dataset, a "ForestProximities.txt" file containing the array of forest proximities, and a "ytrain.txt" file containing the ground-truth class labels from the training dataset.
+The proxUtil.py file is not strictly necessary, but rather provides a convenient mechanism for calling the .jar files in python. The proxUtil.py file contains the function getProx, which calls the PFGAP.jar file, building and training a Proximity Forest using the training data, then applying Proximity Forest on the test data, optionally computing proximities for the training samples. The training/test data files are specified in the function arguments. Other parameters may be passed to this function as well, including the desired number of trees and r parameter. By default, the PFGAP.jar file creates a "Predictions.txt" file containing the predictions on the test dataset, a "ForestProximities.txt" file containing the array of forest proximities, and a "ytrain.txt" file containing the ground-truth class labels (currently re-mapped) from the training dataset. 
 
 The output of the getProxArrays() is twofold: the (numpy) array of proximities read from the "Proximities.txt" file, and the (numpy) array of training labels read from the "ytrain.txt" file. The proximity array can be symmetrized with the SymmetrizeProx(ProximityArray) function (not in-place). The getOutlierScores(ProximityArray,ytrain) function is used to compute within-class outlier scores: it returns a list.
 
