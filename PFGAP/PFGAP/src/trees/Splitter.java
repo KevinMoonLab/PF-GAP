@@ -7,7 +7,7 @@ import java.util.Map;
 import core.AppContext;
 import core.contracts.Dataset;
 import datasets.ListDataset;
-import distance.elastic.DistanceMeasure;
+import distance.DistanceMeasure;
 
 /**
  * 

@@ -1,10 +1,12 @@
 package distance.elastic;
 
-import static distance.elastic.DistanceTools.sim;
+import static distance.DistanceTools.sim;
 
 import java.io.Serializable;
 import java.util.Random;
 import core.contracts.Dataset;
+import distance.DistanceTools;
+import distance.MemorySpaceProvider;
 
 /**
  * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 

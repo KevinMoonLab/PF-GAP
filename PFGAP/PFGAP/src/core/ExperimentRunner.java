@@ -1,10 +1,7 @@
 package core;
 
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -38,9 +35,15 @@ public class ExperimentRunner {
 		//read data files
 		//we assume no header in the csv files, and that class label is in the first column, modify if necessary
 		ListDataset train_data_original;
-		ListDataset test_data_original =
-				CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
-						AppContext.target_column_is_first, csvSeparatpr);
+		ListDataset test_data_original = null; //we will overwrite this.
+		if(!Objects.equals(AppContext.testing_file, "littleblackraincloud")){
+			test_data_original =
+					CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
+							AppContext.target_column_is_first, csvSeparatpr);
+		}
+		//ListDataset test_data_original =
+		//		CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
+		//				AppContext.target_column_is_first, csvSeparatpr);
 		if(!eval) {
 			train_data_original =
 					CSVReader.readCSVToListDataset(AppContext.training_file, AppContext.csv_has_header,
@@ -63,7 +66,9 @@ public class ExperimentRunner {
 		 *
 		 */
 		train_data = train_data_original.reorder_class_labels(null);
-		test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+		if(!Objects.equals(AppContext.testing_file, "littleblackraincloud")) {
+			test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+		}
 
 
 		AppContext.setTraining_data(train_data);
@@ -121,15 +126,21 @@ public class ExperimentRunner {
 					}
 				}
 
-				//test model
-				ProximityForestResult result = forest.test(test_data);
-				test_data = null; // erase the test data information.
+				//test model if needed
+				if(!Objects.equals(AppContext.testing_file, "littleblackraincloud")) {
+					ProximityForestResult result = forest.test(test_data);
+					test_data = null; // erase the test data information.
 
-				//Now we print the Predictions array to a text file.
-				PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Predictions.txt", "UTF-8");
-				//TODO: output the predictions in terms of the original classes.
-				writer0.print(ArrayUtils.toString(result.Predictions));
-				writer0.close();
+					//Now we print the Predictions array to a text file.
+					PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Predictions.txt", "UTF-8");
+					//TODO: output the predictions in terms of the original classes.
+					writer0.print(ArrayUtils.toString(result.Predictions));
+					writer0.close();
+
+					//print and export resultS
+					result.printResults(datasetName, i, "");
+					//AppContext.output_dir = null;
+				}
 
 				if(AppContext.getprox) {
 					//Calculate array of forest proximities.
@@ -185,9 +196,9 @@ public class ExperimentRunner {
 					writer2.print(ArrayUtils.toString(ytrain));
 					writer2.close();
 				}
-				//print and export resultS
-				result.printResults(datasetName, i, "");
-				AppContext.output_dir = null;
+				////print and export resultS
+				//result.printResults(datasetName, i, "");
+				//AppContext.output_dir = null;
 
 				//export level is integer because I intend to add few levels in future, each level with a higher verbosity
 				/*if (AppContext.export_level > 0) {

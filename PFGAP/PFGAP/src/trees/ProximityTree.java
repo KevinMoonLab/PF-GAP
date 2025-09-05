@@ -8,8 +8,8 @@ import core.AppContext;
 import core.TreeStatCollector;
 import core.contracts.Dataset;
 import datasets.ListDataset;
-import distance.elastic.DistanceMeasure;
-import distance.elastic.MEASURE;
+import distance.DistanceMeasure;
+import distance.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
 
 import java.util.Random;

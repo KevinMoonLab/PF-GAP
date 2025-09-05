@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/PFGAPjava.iml" filepath="$PROJECT_DIR$/PFGAPjava.iml" />
+      <module fileurl="file://$PROJECT_DIR$/PFGAP.iml" filepath="$PROJECT_DIR$/PFGAP.iml" />
     </modules>
   </component>
 </project>
