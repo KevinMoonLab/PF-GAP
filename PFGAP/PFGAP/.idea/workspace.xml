@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ArtifactsWorkspaceSettings">
+    <artifacts-to-build>
+      <artifact name="PFGAP:jar" />
+    </artifacts-to-build>
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/PFGAP.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/.name" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/PF-GAP.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/misc.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/modules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/runConfigurations.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../.idea/vcs.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/Demo.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/Demo.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP_eval.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/proxUtil.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/proxUtil.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.classpath" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.name" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/artifacts/PFGAPjava_jar.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/artifacts/PFGAPjava_jar2.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.project" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/MANIFEST.MF" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/META-INF/MANIFEST.MF" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/PFGAPjava.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAPjava_jar/PFGAPjava.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAPjava_jar2/PFGAPjava.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/META-INF/MANIFEST.MF" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/application/PFApplication.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/application/PFApplicationEval.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/AppContext.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/CSVReader.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/ExperimentRunner.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/PFGAP.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/ProximityForestResult.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/TreeStatCollector.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/core/contracts/Dataset.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/datasets/ListDataset.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/DDTW.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/DTW.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/DistanceMeasure$1.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/DistanceMeasure.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/DistanceTools.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/ERP.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/Euclidean.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/LCSS.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/MEASURE.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/MSM.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/Manhattan.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/MapleDistance.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/MemorySpaceProvider.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/PythonDistance.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/TWE.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/WDDTW.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/distance/elastic/WDTW.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/pfgap.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/trees/ProximityForest.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/trees/ProximityTree$Node.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/trees/ProximityTree.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/trees/Splitter.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/util/GeneralUtilities.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/util/PrintUtilities.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/util/Sampler.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAPjava/util/Statistics.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" beforeDir="false" afterPath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplicationEval.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplicationEval.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DistanceMeasure.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DistanceTools.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/ERP.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/ERP.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MEASURE.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MSM.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/MSM.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MapleDistance.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MemorySpaceProvider.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/PythonDistance.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/TWE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/TWE.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pfgap.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/pfgap.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/util/PrintUtilities.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/util/PrintUtilities.java" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Class" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/../.." />
+  </component>
+  <component name="ProjectId" id="31L0Ijm2ycnp9KUaa2AZuKTNuQW" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
+    <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/lib/gson-2.8.2.jar" />
+    <property name="project.structure.last.edited" value="Artifacts" />
+    <property name="project.structure.proportion" value="0.28698552" />
+    <property name="project.structure.side.proportion" value="0.26373625" />
+    <property name="settings.editor.selected.configurable" value="preferences.lookFeel" />
+  </component>
+  <component name="RunManager" selected="Application.PFApplication">
+    <configuration name="PFApplication" type="Application" factoryName="Application">
+      <option name="ALTERNATIVE_JRE_PATH" value="17" />
+      <option name="MAIN_CLASS_NAME" value="application.PFApplication" />
+      <module name="PFGAP" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="PFApplicationEval" type="Application" factoryName="Application">
+      <option name="ALTERNATIVE_JRE_PATH" value="17" />
+      <option name="MAIN_CLASS_NAME" value="application.PFApplicationEval" />
+      <module name="PFGAP" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="PFGAPapp" type="Application" factoryName="Application">
+      <option name="ALTERNATIVE_JRE_PATH" value="17" />
+      <option name="MAIN_CLASS_NAME" value="pfgap" />
+      <module name="PFGAP" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <list>
+      <item itemvalue="Application.PFApplication" />
+      <item itemvalue="Application.PFGAPapp" />
+      <item itemvalue="Application.PFApplicationEval" />
+    </list>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="" />
+      <created>1755287967401</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1755287967401</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="oldMeFiltersMigrated" value="true" />
+  </component>
+</project>

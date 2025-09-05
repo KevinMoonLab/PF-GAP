@@ -3,6 +3,7 @@ package distance.elastic;
 import java.io.Serializable;
 import java.util.Random;
 import core.contracts.Dataset;
+import distance.DistanceTools;
 
 /**
  * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
@@ -127,7 +128,7 @@ public class ERP implements Serializable {
 	} 	
 	
 	public double get_random_g(Dataset d, Random r) {
-		double stdv = DistanceTools.stdv_p(d);		
+		double stdv = DistanceTools.stdv_p(d);
 		double g = r.nextDouble()*.8*stdv+0.2*stdv; //[0.2*stdv,stdv]
 		return g;
 	} 		

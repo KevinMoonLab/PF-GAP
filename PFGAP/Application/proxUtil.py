@@ -2,14 +2,19 @@ import subprocess
 import numpy as np
 import os
 
-def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF", out="", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
+def getProx(trainfile, testfile=None, getprox="true", savemodel="true", modelname="PF", out="", repeats=1, num_trees=11, r=5, on_tree="true", max_depth=0, shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", distances=None, memory='1g', parallelTrees="false", parallelProx="false"):
     #msgList = ['java', '-jar', '-Xmx1g', 'PFGAP.jar']
     msgList = ['java', '-jar'] #, '-Xmx1g', 'PFGAP.jar']
     msgList.extend(['-Xmx' + memory])
-    msgList.extend(['PFGAP.jar'])
+    msgList.extend(['PFGAP.jar', '-eval=false'])
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + trainfile])
-    msgList.extend(["-test=" + testfile])
+    
+    if testfile==None:
+        msgList.extend(["-test=" + "littleblackraincloud"])
+    else:
+        msgList.extend(["-test=" + testfile])
+    
     #msgList.extend(["-out=" + out])
     msgList.extend(["-repeats=" + str(repeats)])
     msgList.extend(["-trees=" + str(num_trees)])
@@ -46,8 +51,10 @@ def getProx(trainfile, testfile, getprox="true", savemodel="true", modelname="PF
     return
     
 
-def evalPF(testfile, modelname="PF", out="", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false"):
-    msgList = ['java', '-jar', '-Xmx1g', 'PFGAP_eval.jar']
+def evalPF(testfile, modelname="PF", out="", shuffle="false", export=1, verbosity=1, csv_has_header="false", target_column="first", parallelTrees="false", memory='1g'):
+    msgList = ['java', '-jar']
+    msgList.extend(['-Xmx' + memory])
+    msgList.extend(['PFGAP.jar', '-eval=true'])
     # Mostly, trainfile, testfile, num_trees, and r are what will be tampered with.
     msgList.extend(["-train=" + testfile])
     msgList.extend(["-test=" + testfile])

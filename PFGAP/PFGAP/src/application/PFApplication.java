@@ -2,7 +2,8 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
-import distance.elastic.MEASURE;
+//import distance.elastic.MEASURE;
+import distance.MEASURE;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -51,6 +52,9 @@ public class PFApplication {
 				String[] options = args[i].trim().split("=");
 				
 				switch(options[0]) {
+				case "-eval":
+					AppContext.eval = Boolean.parseBoolean(options[1]);
+					break;
 				case "-train":
 					AppContext.training_file = options[1];
 					break;
@@ -183,7 +187,8 @@ public class PFApplication {
 			}
 						
 			ExperimentRunner experiment = new ExperimentRunner();
-			experiment.run(false);
+			//experiment.run(false);
+			experiment.run(AppContext.eval);
 			
 		}catch(Exception e) {			
             PrintUtilities.abort(e);

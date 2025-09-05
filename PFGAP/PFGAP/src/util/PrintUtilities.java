@@ -2,6 +2,8 @@ package util;
 
 import core.AppContext;
 
+import java.util.Objects;
+
 public class PrintUtilities {
 
 	public static void abort(Exception e) {
@@ -32,12 +34,24 @@ public class PrintUtilities {
 
 	public static void printConfiguration() {
 		// TODO Auto-generated method stub
+		String testsize = "";
+		String testlen = "";
+		String testclass = "";
+		if (Objects.equals(AppContext.testing_file, "littleblackraincloud")){
+			testsize = "none";
+			testlen = "none";
+			testclass = "none";
+		}else{
+			testsize = String.valueOf(AppContext.getTesting_data().size());
+			testlen = String.valueOf(AppContext.getTesting_data().length());
+			testclass = String.valueOf(AppContext.getTesting_data().get_num_classes());
+		}
 		System.out.println("Running on configurations...");
 		System.out.println("Dataset: " + AppContext.getDatasetName() 
 		+ ", Training Data : " + AppContext.getTraining_data().size() + "x" + AppContext.getTraining_data().length()
-		+ " , Testing Data: " + AppContext.getTesting_data().size() + "x" + AppContext.getTesting_data().length()
+		+ " , Testing Data: " + testsize + "x" + testlen
 		+ ", Train #Classes: " + AppContext.getTraining_data().get_num_classes() 
-		+ ", Test #Classes: " + AppContext.getTesting_data().get_num_classes());
+		+ ", Test #Classes: " + testclass);
 		System.out.println("Repeats: " + AppContext.num_repeats + " , Trees: " + AppContext.num_trees  
 				+ " , Candidates per Split(r): " + AppContext.num_candidates_per_split);
 		System.out.println("Output Dir: " + AppContext.output_dir + ", Export: " + AppContext.export_level + ", Verbosity: " + AppContext.verbosity);

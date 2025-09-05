@@ -16,8 +16,8 @@ import core.AppContext;
 import core.ProximityForestResult;
 import core.contracts.Dataset;
 import datasets.ListDataset;
-import distance.elastic.DistanceMeasure;
-import distance.elastic.MEASURE;
+import distance.DistanceMeasure;
+import distance.MEASURE;
 import util.PrintUtilities;
 /**
  * 

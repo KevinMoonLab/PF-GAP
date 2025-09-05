@@ -1,8 +1,7 @@
 import core.CSVReader;
 import datasets.ListDataset;
-import distance.elastic.DistanceMeasure;
-import distance.elastic.MEASURE;
-import distance.elastic.MapleDistance;
+import distance.DistanceMeasure;
+import distance.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
 import trees.ProximityForest;
 import trees.ProximityTree;
@@ -37,7 +36,7 @@ public class pfgap{
 
         //ProximityForest PF = new ProximityForest(Treenum);
         //List<MEASURE> myMeasures = new List<MEASURE>() {MEASURE.maple};
-        MEASURE[] mything = {MEASURE.ddtw}; //{MEASURE.manhattan}; //{MEASURE.python}; //{MEASURE.maple};
+        MEASURE[] mything = {MEASURE.maple}; //{MEASURE.ddtw}; //{MEASURE.manhattan}; //{MEASURE.python}; //{MEASURE.maple};
         String[] myfile = {"DistS2.mpl"};
         //ProximityForest PF = new ProximityForest(Treenum,myfile);
         //ProximityForest PF = new ProximityForest(Treenum);

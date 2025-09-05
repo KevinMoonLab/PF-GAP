@@ -3,7 +3,7 @@ package application;
 import core.AppContext;
 import core.ExperimentRunner;
 import core.ProximityForestResult;
-import distance.elastic.MEASURE;
+import distance.MEASURE;
 import trees.ProximityForest;
 import util.GeneralUtilities;
 import util.PrintUtilities;

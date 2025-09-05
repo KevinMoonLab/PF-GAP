@@ -3,7 +3,8 @@ package core;
 import java.util.Random;
 
 import core.contracts.Dataset;
-import distance.elastic.MEASURE;
+//import distance.elastic.MEASURE;
+import distance.MEASURE;
 
 /**
  * 
@@ -41,6 +42,7 @@ public class AppContext {
 	public static String output_dir = "output/";
 	public static boolean csv_has_header = false;
 	public static boolean target_column_is_first = true;
+	public static boolean eval;
 
 
 	public static int num_repeats = 1;
