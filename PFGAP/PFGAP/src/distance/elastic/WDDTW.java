@@ -9,7 +9,12 @@ package distance.elastic;
 public class WDDTW extends WDTW{
 	protected double[] deriv1, deriv2;
 
-	public synchronized double distance(double[] first, double[] second, double bsf, double g) {
+	//public synchronized double distance(double[] first, double[] second, double bsf, double g) {
+	public synchronized double distance(Object First, Object Second, double bsf, double g) {
+
+		double[] first = (double[]) First;
+		double[] second = (double[]) Second;
+
 		if (deriv1 == null || deriv1.length != first.length) {
 			deriv1 = new double[first.length];
 		}

@@ -59,7 +59,46 @@ public class PFApplication {
 					AppContext.training_file = options[1];
 					break;
 				case "-test":
-					AppContext.testing_file = options[1];
+					if (Objects.equals(options[1], "None")) {
+						AppContext.testing_file = null;
+					} else {
+						AppContext.testing_file = options[1];
+					}
+					break;
+				case "-train_labels":
+					if (Objects.equals(options[1], "None")) {
+						AppContext.training_labels = null;
+					} else {
+						AppContext.training_labels = options[1];
+					}
+					break;
+				case "-test_labels":
+					if (Objects.equals(options[1], "None")) {
+						AppContext.testing_labels = null;
+					} else {
+						AppContext.testing_labels = options[1];
+					}
+					break;
+				case "-impute_train":
+					AppContext.impute_train = Boolean.parseBoolean(options[1]);
+					break;
+				case "-is2D":
+					AppContext.is2D = Boolean.parseBoolean(options[1]);
+					break;
+				case "-isNumeric":
+					AppContext.isNumeric = Boolean.parseBoolean(options[1]);
+					break;
+				case "-hasMissingValues":
+					AppContext.hasMissingValues = Boolean.parseBoolean(options[1]);
+					break;
+				case "-numImputes":
+					AppContext.numImputes = Integer.parseInt(options[1]);
+					break;
+				case "-firstSeparator":
+					AppContext.firstSeparator = options[1];
+					break;
+				case "-secondSeparator":
+					AppContext.secondSeparator = options[1];
 					break;
 				case "-out":
 					AppContext.output_dir = options[1];
@@ -163,6 +202,9 @@ public class PFApplication {
 					measuresByName.put("maple", MEASURE.maple);
 					measuresByName.put("python", MEASURE.python);
 					measuresByName.put("manhattan", MEASURE.manhattan);
+					measuresByName.put("shapeHoG1dDTW", MEASURE.shapeHoG1dDTW);
+					measuresByName.put("dtw_i", MEASURE.dtw_i);
+					measuresByName.put("dtw_d", MEASURE.dtw_d);
 
 					for (int j=0; j < numberofdists; j++){
 						MEASURE convertedEntry = measuresByName.get(contentsList.get(j));

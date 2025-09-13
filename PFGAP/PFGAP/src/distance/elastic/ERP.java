@@ -2,7 +2,8 @@ package distance.elastic;
 
 import java.io.Serializable;
 import java.util.Random;
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
 import distance.DistanceTools;
 
 /**
@@ -19,11 +20,14 @@ public class ERP implements Serializable {
 	
 	double[] curr, prev;
 
-	public synchronized double distance(double[] first, double[] second, double bsf, int windowSize, double gValue) {
+	//public synchronized double distance(double[] first, double[] second, double bsf, int windowSize, double gValue) {
+	public synchronized double distance(Object First, Object Second, double bsf, int windowSize, double gValue) {
 		// base case - we're assuming class val is last. If this is
 		// true, this method is fine,
 		// if not, we'll default to the DTW class
 
+		double[] first = (double[]) First;
+		double[] second = (double[]) Second;
 		int m = first.length;
 		int n = second.length;
 
@@ -121,13 +125,13 @@ public class ERP implements Serializable {
 		return Math.sqrt(curr[m - 1]);	//TODO do we need sqrt here
 	}
 	
-	public int get_random_window(Dataset d, Random r) {
+	public int get_random_window(ObjectDataset d, Random r) {
 //		int x = (d.length() +1) / 4;
 		int w = r.nextInt(d.length()/ 4+1);
 		return w;
 	} 	
 	
-	public double get_random_g(Dataset d, Random r) {
+	public double get_random_g(ObjectDataset d, Random r) {
 		double stdv = DistanceTools.stdv_p(d);
 		double g = r.nextDouble()*.8*stdv+0.2*stdv; //[0.2*stdv,stdv]
 		return g;

@@ -1,10 +1,16 @@
 package core;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
+import core.contracts.ObjectDataset;
 import distance.MEASURE;
+import imputation.MissingIndices;
 
 /**
  * 
@@ -39,10 +45,21 @@ public class AppContext {
 
 	public static String training_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TRAIN.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TRAIN.csv";
 	public static String testing_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TEST.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
+	public static String training_labels = null; // sometimes this is inferred from training_file.
+	public static String testing_labels = null; // sometimes this is inferred from testing_file.
+	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
+	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
+	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
+	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
+	public static String firstSeparator = "\t"; // the default for univariate time series.
+	public static String secondSeparator = ","; // is there a convention for this??
+	// in the matrix case, "rows" are separated by firstSeparator and "columns" by secondSeparator.
+	// in the list case (univariate time series, tabular data), only the firstSeparator is used.
 	public static String output_dir = "output/";
 	public static boolean csv_has_header = false;
 	public static boolean target_column_is_first = true;
 	public static boolean eval;
+	public static int length;
 
 
 	public static int num_repeats = 1;
@@ -56,6 +73,7 @@ public class AppContext {
 	
 	public static int print_test_progress_for_each_instances = 100;
 	
+	// These distances are the default when none are specified.
 	public static MEASURE[] enabled_distance_measures = new MEASURE[] {
 			MEASURE.euclidean,
 			MEASURE.dtw,
@@ -73,16 +91,28 @@ public class AppContext {
 	public static Runtime runtime = Runtime.getRuntime();
     public static boolean savemodel;
 	public static boolean getprox;
-	public static String modelname = "Ben2";
+	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;
 	public static int max_depth; //initializes to 0.
+	public static boolean impute_train = false;
+	// the missing indices are now part of the ListObjectDataset.
+	/*//public static ArrayList<Integer> missing_train_indices;
+	//public static List<Object> missing_train_indices = Collections.synchronizedList(new ArrayList<>());
+	public static List<MissingIndices> missing_train_indices = new CopyOnWriteArrayList<>();
+	//public static ArrayList<Integer> missing_test_indices;
+	public static List<MissingIndices> missing_test_indices = new CopyOnWriteArrayList<>();*/
 
-    private static transient Dataset train_data;
-	private static transient Dataset test_data;
-	private static String datasetName; 
-	
+	//private static transient Dataset train_data;
+	private static transient ObjectDataset train_data;
+	//private static transient Dataset test_data;
+	private static transient  ObjectDataset test_data;
+	private static String datasetName;
+	public static transient double[][] training_proximities;
+	public static boolean useSparseProximities = true; //should be dense if returned??
+	public static Map<Integer, Map<Integer, Double>> training_proximities_sparse;
+
 	static {
 		rand = new Random();
 	}
@@ -91,19 +121,23 @@ public class AppContext {
 		return rand;
 	}
 
-	public static Dataset getTraining_data() {
+	//public static Dataset getTraining_data() {
+	public static ObjectDataset getTraining_data() {
 		return train_data;
 	}
 
-	public static void setTraining_data(Dataset train_data) {
+	//public static void setTraining_data(Dataset train_data) {
+	public static void setTraining_data(ObjectDataset train_data) {
 		AppContext.train_data = train_data;
 	}
 
-	public static Dataset getTesting_data() {
+	//public static Dataset getTesting_data() {
+	public static ObjectDataset getTesting_data() {
 		return test_data;
 	}
 
-	public static void setTesting_data(Dataset test_data) {
+	//public static void setTesting_data(Dataset test_data) {
+	public static void setTesting_data(ObjectDataset test_data) {
 		AppContext.test_data = test_data;
 	}
 

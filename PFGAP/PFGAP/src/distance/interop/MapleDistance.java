@@ -51,7 +51,12 @@ public class MapleDistance implements Serializable {
         throw new IOException("Did not receive expected marker from Maple: " + marker);
     }
 
-    public static double distance(double[] t1, double[] t2) throws IOException {
+    //public static double distance(double[] t1, double[] t2) throws IOException {
+    public static double distance(Object T1, Object T2) throws IOException {
+
+        double[] t1 = (double[]) T1;
+        double[] t2 = (double[]) T2;
+
         if (!initialized) {
             initialize();
         }

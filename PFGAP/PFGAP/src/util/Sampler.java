@@ -7,8 +7,10 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
-import core.contracts.Dataset;
-import datasets.ListDataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
+//import datasets.ListDataset;
+import datasets.ListObjectDataset;
 
 public class Sampler {
 	
@@ -59,11 +61,13 @@ public class Sampler {
 	    }
 	} 	
 	
-	public static ListDataset uniform_sample(Dataset dataset, int n) {
+	//public static ListDataset uniform_sample(Dataset dataset, int n) {
+	public static ListObjectDataset uniform_sample(ObjectDataset dataset, int n) {
 		
 		n = n > dataset.size() ? dataset.size() : n;
 		
-		ListDataset sample = new ListDataset(n, dataset.length());
+		//ListDataset sample = new ListDataset(n, dataset.length());
+		ListObjectDataset sample = new ListObjectDataset(n);//, dataset.length());
 		
 		int[] indices = new int[n];
 		for (int i = 0; i < n; i++) {
@@ -80,8 +84,10 @@ public class Sampler {
 	}
 	
 	//TODO naive implementation, quick fix
-	public static ListDataset uniform_sample(Dataset dataset, int n, double[][] exclude) {
-		ListDataset sample = Sampler.uniform_sample(dataset, n);
+	//public static ListDataset uniform_sample(Dataset dataset, int n, double[][] exclude) {
+	public static ListObjectDataset uniform_sample(ObjectDataset dataset, int n, double[][] exclude) {
+		//ListDataset sample = Sampler.uniform_sample(dataset, n);
+		ListObjectDataset sample = Sampler.uniform_sample(dataset, n);
 		int size = sample.size();
 		
 		for (int i = 0; i < size; i++) {
@@ -95,13 +101,17 @@ public class Sampler {
 		return sample;
 	}
 	
-	public static ListDataset stratified_sample(Map<Integer, ListDataset> data_per_class, 
+	//public static ListDataset stratified_sample(Map<Integer, ListDataset> data_per_class,
+	public static ListObjectDataset stratified_sample(Map<Integer, ListObjectDataset> data_per_class,
 			int n_per_class, boolean shuffle, double[][] exclude) {
-		ListDataset sample = new ListDataset(data_per_class.size() * n_per_class);
-		ListDataset class_sample;
+		//ListDataset sample = new ListDataset(data_per_class.size() * n_per_class);
+		ListObjectDataset sample = new ListObjectDataset(data_per_class.size() * n_per_class);
+		//ListDataset class_sample;
+		ListObjectDataset class_sample;
 		int class_sample_size;
 		
-		for (Map.Entry<Integer, ListDataset> entry : data_per_class.entrySet()) {
+		//for (Map.Entry<Integer, ListDataset> entry : data_per_class.entrySet()) {
+		for (Map.Entry<Integer, ListObjectDataset> entry : data_per_class.entrySet()) {
 			
 			if (exclude == null) {
 				class_sample = Sampler.uniform_sample(entry.getValue(), n_per_class);
@@ -123,13 +133,14 @@ public class Sampler {
 		return sample;
 	}
 	
-	public static Map<Integer, ListDataset> stratified_sample_per_class(
-			Map<Integer, ListDataset> data_per_class, int n_per_class, 
+	//public static Map<Integer, ListDataset> stratified_sample_per_class(
+	public static Map<Integer, ListObjectDataset> stratified_sample_per_class(
+			Map<Integer, ListObjectDataset> data_per_class, int n_per_class,
 			boolean shuffle_each_class, double[][] exclude) {
-		Map<Integer, ListDataset> sample = new HashMap<Integer, ListDataset> ();
-		ListDataset class_sample;
+		Map<Integer, ListObjectDataset> sample = new HashMap<Integer, ListObjectDataset> ();
+		ListObjectDataset class_sample;
 		
-		for (Map.Entry<Integer, ListDataset> entry : data_per_class.entrySet()) {
+		for (Map.Entry<Integer, ListObjectDataset> entry : data_per_class.entrySet()) {
 			if (exclude == null) {
 				class_sample = Sampler.uniform_sample(entry.getValue(), n_per_class);
 			}else {
