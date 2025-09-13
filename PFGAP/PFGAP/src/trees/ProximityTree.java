@@ -6,8 +6,10 @@ import java.util.*;
 
 import core.AppContext;
 import core.TreeStatCollector;
-import core.contracts.Dataset;
-import datasets.ListDataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
+//import datasets.ListDataset;
+import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
 import distance.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
@@ -80,7 +82,8 @@ public class ProximityTree implements Serializable {
 
 	public ArrayList<Node> getLeaves() {return this.leaves;}
 	
-	public void train(Dataset data) throws Exception {
+	//public void train(Dataset data) throws Exception {
+	public void train(ListObjectDataset data) throws Exception {
 		//System.out.println("Training a tree");
 		if (this.chosen_distances.length == 0){
 			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
@@ -99,8 +102,8 @@ public class ProximityTree implements Serializable {
 		
 		this.root = new Node(null, null, ++node_counter, this);
 		//Try putting the in- and out-of-bag stuff here.
-		Dataset inbagData = new ListDataset();
-		Dataset oobData = new ListDataset();
+		ObjectDataset inbagData = new ListObjectDataset(); //ListDataset();
+		ObjectDataset oobData = new ListObjectDataset(); //ListDataset();
 
 			//First we get the in-bag indices.
 			int dummySize = data.size();
@@ -142,7 +145,7 @@ public class ProximityTree implements Serializable {
 			data.set_indices(this.getRootNode().InBagIndices);
 
 			// Now we need to get the sub sample corresponding to the in-bag indices.
-			Dataset data2 = new ListDataset(); //data;
+			ObjectDataset data2 = new ListObjectDataset(); //ListDataset(); //data;
 			for (int index : this.getRootNode().InBagIndices){
 				//System.out.println(Arrays.toString(data.get_series(index)));
 				//System.out.println(data.get_index(index));
@@ -152,7 +155,7 @@ public class ProximityTree implements Serializable {
 			//data = data2; //we're only training on in-bag samples.
 			inbagData = data2;
 			// Now we need to get the sub sample corresponding to the out-of-bag indices.
-			Dataset data3 = new ListDataset();
+			ObjectDataset data3 = new ListObjectDataset(); //new ListDataset();
 			for (int index : this.getRootNode().OutOfBagIndices){
 				//System.out.println(Arrays.toString(data.get_series(index)));
 				//System.out.println(data.get_index(index));
@@ -171,7 +174,8 @@ public class ProximityTree implements Serializable {
 		this.root.train(inbagData, oobData);
 	}
 	
-	public Integer predict(double[] query) throws Exception {
+	//public Integer predict(double[] query) throws Exception {
+	public Integer predict(Object query) throws Exception {
 		Node node = this.root;
 
 		while(!node.is_leaf()) {
@@ -393,7 +397,8 @@ public class ProximityTree implements Serializable {
 //			this.train();
 //		}		
 		
-		public void train(Dataset data, Dataset oobData) throws Exception {
+		//public void train(Dataset data, Dataset oobData) throws Exception {
+		public void train(ObjectDataset data, ObjectDataset oobData) throws Exception {
 //			System.out.println(this.node_depth + ":   " + (this.parent == null ? "r" : this.parent.node_id)  +"->"+ this.node_id +":"+ data.toString());
 			//System.out.println("The train method was called on a node");
 			//Debugging check
@@ -440,20 +445,23 @@ public class ProximityTree implements Serializable {
 			this.splitter = new Splitter(this);
 
 
-			Dataset[] best_splits = splitter.find_best_split(data);
-			Dataset[] oob_splits = new Dataset[best_splits.length];
+			//Dataset[] best_splits = splitter.find_best_split(data);
+			ObjectDataset[] best_splits = splitter.find_best_split(data);
+			//Dataset[] oob_splits = new Dataset[best_splits.length];
+			ObjectDataset[] oob_splits = new ObjectDataset[best_splits.length];
 			this.children = new Node[best_splits.length];
 			for (int i = 0; i < children.length; i++) {
 				this.children[i] = new Node(this, i, ++tree.node_counter, tree);
 				this.children[i].setInBagIndices(best_splits[i]._internal_indices_list());
-				oob_splits[i] = new ListDataset();
+				oob_splits[i] = new ListObjectDataset();
 			}
 			//Now we need to let the oob indices trickle down (set the oob indices for the children).
 			//System.out.println(oobData.size());
 			for (int i=0; i<oobData.size(); i++){
 				int ind = oobData.get_index(i);
 				int label = oobData.get_class(i);
-				double[] series = oobData.get_series(i);
+				//double[] series = oobData.get_series(i);
+				Object series = oobData.get_series(i);
 				int branch = splitter.find_closest_branch(oobData.get_series(i));
 				//if (this.children[branch] != null){
 				//	this.children[branch].OutOfBagIndices.add(ind);

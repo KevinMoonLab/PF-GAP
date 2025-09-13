@@ -36,7 +36,12 @@ public class PythonDistance implements Serializable {
         initialized = true;
     }
 
-    public static double distance(double[] t1, double[] t2) throws IOException {
+    //public static double distance(double[] t1, double[] t2) throws IOException {
+    public static double distance(Object T1, Object T2) throws IOException {
+
+        double[] t1 = (double[]) T1;
+        double[] t2 = (double[]) T2;
+
         synchronized (pythonLock) {
             if (!initialized) {
                 initialize();

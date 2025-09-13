@@ -2,7 +2,8 @@ package distance.elastic;
 
 import java.io.Serializable;
 import java.util.Random;
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
 import distance.DistanceTools;
 import distance.MemorySpaceProvider;
 
@@ -19,7 +20,11 @@ public class MSM implements Serializable {
 		
 	}
 	
-	public double distance(double[] first, double[] second, double bsf, double c) {
+	//public double distance(double[] first, double[] second, double bsf, double c) {
+	public double distance(Object First, Object Second, double bsf, double c) {
+
+		double[] first = (double[]) First;
+		double[] second = (double[]) Second;
 
 		int m = first.length, n = second.length;
 		int maxLength=(m>=n)?m:n;
@@ -68,7 +73,7 @@ public class MSM implements Serializable {
 		return dist;
 	}
 	
-	public double get_random_cost(Dataset d, Random r) {
+	public double get_random_cost(ObjectDataset d, Random r) {
 		return msmParams[r.nextInt(msmParams.length)];
 	}
 

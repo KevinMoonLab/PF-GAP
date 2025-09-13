@@ -1,5 +1,7 @@
-import core.CSVReader;
-import datasets.ListDataset;
+//import core.CSVReader;
+//import datasets.ListDataset;
+import core.DelimitedFileReader;
+import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
 import distance.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
@@ -45,10 +47,33 @@ public class pfgap{
         String train_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TRAIN.csv";
         String test_file = System.getProperty("user.dir") + "/Data/" + dataset + "_TEST.csv";
         //String test_file = "null";
-        ListDataset train_data = CSVReader.readCSVToListDataset(train_file,false, true,"\t");
+        //ListDataset train_data = CSVReader.readCSVToListDataset(train_file,false, true,"\t");
+        ListObjectDataset train_data = DelimitedFileReader.readToListObjectDataset(
+                train_file,
+                "",
+                "\t",
+                ",",
+                false,
+                false,
+                true,
+                false,
+                true);
+        //TODO: build missing values.
         // Here is the test set, if testing is desired.
         //String test_file = "/home/ben/Documents/SchoolGithub/Math_Dissertation/Data_Science/PFGAP/Data/GunPoint_TEST.csv";
-        ListDataset test_data = CSVReader.readCSVToListDataset(test_file,false, true,"\t");
+        //ListDataset test_data = CSVReader.readCSVToListDataset(test_file,false, true,"\t");
+        ListObjectDataset test_data = DelimitedFileReader.readToListObjectDataset(
+                test_file,
+                "",
+                "\t",
+                ",",
+                false,
+                false,
+                true,
+                false,
+                true
+        );
+        //TODO: build missing values.
         System.out.println("Training...");
         double t1 = System.currentTimeMillis();
         PF.train(train_data);

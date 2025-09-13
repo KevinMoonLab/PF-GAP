@@ -9,4 +9,6 @@ public enum MEASURE {
 	,shifazDTW, shifazDTWCV, shifazDDTW, shifazDDTWCV, shifazWDTW, shifazWDDTW
 	,shifazEUCLIDEAN, shifazERP, shifazMSM, shifazLCSS, shifazTWE
 	,maple,python,manhattan
+	,shapeHoG1dDTW
+	,dtw_i,dtw_d
 }

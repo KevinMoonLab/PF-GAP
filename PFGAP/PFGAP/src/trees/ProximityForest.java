@@ -14,8 +14,10 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import core.AppContext;
 import core.ProximityForestResult;
-import core.contracts.Dataset;
-import datasets.ListDataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
+//import datasets.ListDataset;
+import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
 import distance.MEASURE;
 import util.PrintUtilities;
@@ -105,7 +107,8 @@ public class ProximityForest implements Serializable{
 	
 	}*/
 
-	public void train(Dataset train_data) throws Exception {
+	//public void train(Dataset train_data) throws Exception {
+	public void train(ListObjectDataset train_data) throws Exception {
 		trainLock.lock();
 		try {
 			result.startTimeTrain = System.nanoTime();
@@ -172,10 +175,11 @@ public class ProximityForest implements Serializable{
 
 	//This is the previous test() method code before parallelization.
 	//ASSUMES CLASS labels HAVE BEEN reordered to start from 0 and contiguous
-	public ProximityForestResult test(Dataset test_data) throws Exception {
+	//public ProximityForestResult test(Dataset test_data) throws Exception {
+	public ProximityForestResult test(ListObjectDataset test_data) throws Exception {
 		result.startTimeTest = System.nanoTime();
 		//result.Predictions = new ArrayList<>();
-		num_votes = new int[test_data.length()]; //new int[test_data._get_initial_class_labels().size()];
+		num_votes = new int[test_data._get_initial_class_labels().size()]; //new int[test_data.length()]; //new int[test_data._get_initial_class_labels().size()];
 		max_voted_classes = new ArrayList<Integer>();
 		//ArrayList<Integer> Predictions = new ArrayList<>();
 		
@@ -266,7 +270,8 @@ public class ProximityForest implements Serializable{
 
 
 
-	public Integer predict(double[] query) throws Exception {
+	//public Integer predict(double[] query) throws Exception {
+	public Integer predict(Object query) throws Exception {
 		predictLock.lock();
 		try {
 			int max_vote_count = -1;

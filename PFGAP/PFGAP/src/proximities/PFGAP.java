@@ -1,10 +1,15 @@
-package core;
+package proximities;
 
+import core.AppContext;
+import datasets.ListObjectDataset;
 import trees.ProximityForest;
 import trees.ProximityTree;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -200,6 +205,127 @@ public class PFGAP{
         }
 
         return sum;
+    }*/
+
+
+    public static void computeTrainProximities(ProximityForest forest, ListObjectDataset train_data) throws ExecutionException, InterruptedException {
+        int N = train_data.size();
+
+        if (AppContext.useSparseProximities) {
+            Map<Integer, Map<Integer, Double>> sparseP = new HashMap<>();
+
+            if (AppContext.parallelProx) {
+                ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                List<Future<?>> futures = new ArrayList<>();
+
+                for (int k = 0; k < N; k++) {
+                    final int finalK = k;
+                    futures.add(executor.submit(() -> {
+                        Map<Integer, Double> rowMap = new HashMap<>();
+                        for (int j = 0; j < N; j++) {
+                            double prox = ForestProximity(finalK, j, forest);
+                            if (prox > 1e-6) {
+                                rowMap.put(j, prox);
+                            }
+                        }
+                        synchronized (sparseP) {
+                            sparseP.put(finalK, rowMap);
+                        }
+                    }));
+                }
+
+                for (Future<?> future : futures) {
+                    future.get();
+                }
+
+                executor.shutdown();
+
+            } else {
+                for (int k = 0; k < N; k++) {
+                    Map<Integer, Double> rowMap = new HashMap<>();
+                    for (int j = 0; j < N; j++) {
+                        double prox = ForestProximity(k, j, forest);
+                        if (prox > 1e-6) {
+                            rowMap.put(j, prox);
+                        }
+                    }
+                    sparseP.put(k, rowMap);
+                }
+            }
+
+            AppContext.training_proximities_sparse = sparseP;
+
+        } else {
+            double[][] PFGAP = new double[N][N];
+
+            if (AppContext.parallelProx) {
+                ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                List<Future<?>> futures = new ArrayList<>();
+
+                for (int k = 0; k < N; k++) {
+                    final int finalK = k;
+                    futures.add(executor.submit(() -> {
+                        for (int j = 0; j < N; j++) {
+                            double prox = ForestProximity(finalK, j, forest);
+                            PFGAP[finalK][j] = prox;
+                        }
+                    }));
+                }
+
+                for (Future<?> future : futures) {
+                    future.get();
+                }
+
+                executor.shutdown();
+
+            } else {
+                for (int k = 0; k < N; k++) {
+                    for (int j = 0; j < N; j++) {
+                        double prox = ForestProximity(k, j, forest);
+                        PFGAP[k][j] = prox;
+                    }
+                }
+            }
+
+            AppContext.training_proximities = PFGAP;
+        }
+    }
+
+
+
+    /*public static void computeTrainProximities(ProximityForest forest, ListObjectDataset train_data) throws ExecutionException, InterruptedException {
+        double[][] PFGAP = new double[train_data.size()][train_data.size()];
+        if(AppContext.parallelProx){
+            ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+            List<Future<?>> futures = new ArrayList<>();
+
+            for (int k = 0; k < train_data.size(); k++) {
+                final int finalK = k;
+                futures.add(executor.submit(() -> {
+                    for (int j = 0; j < train_data.size(); j++) {
+                        double prox = ForestProximity(finalK, j, forest);
+                        PFGAP[finalK][j] = prox;
+                    }
+                }));
+            }
+
+            // Wait for all tasks to complete
+            for (Future<?> future : futures) {
+                future.get(); // Handle exceptions as needed
+            }
+
+            executor.shutdown();
+
+        } else{
+            for (Integer k = 0; k < train_data.size(); k++) {
+                for (Integer j = 0; j < train_data.size(); j++) {
+                    Double prox = ForestProximity(k, j, forest);
+                    PFGAP[k][j] = prox;
+                }
+            }
+        }
+        AppContext.training_proximities = PFGAP;
     }*/
 
 

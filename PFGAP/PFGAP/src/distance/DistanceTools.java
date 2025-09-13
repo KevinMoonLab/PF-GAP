@@ -1,8 +1,10 @@
 package distance;
 
+import core.contracts.ObjectDataset;
+
 import java.util.List;
 
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
 
 /**
  * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
@@ -41,13 +43,13 @@ public class DistanceTools {
 			return (Math.abs(a - b) <= epsilon) ? 1 : 0;
 		}
 
-		public static double stdv_p(Dataset train) {
+		public static double stdv_p(ObjectDataset train) {
 
 			double sumx = 0;
 			double sumx2 = 0;
 			double[] ins2array;
 			for (int i = 0; i < train.size(); i++) {
-				ins2array = train.get_series(i);
+				ins2array = (double[]) train.get_series(i); // this casting makes an assumption about the data...
 				for (int j = 0; j < ins2array.length; j++) {
 										// avoid
 										// classVal

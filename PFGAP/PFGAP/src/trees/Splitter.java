@@ -5,8 +5,10 @@ import java.util.Arrays;
 import java.util.Map;
 
 import core.AppContext;
-import core.contracts.Dataset;
-import datasets.ListDataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
+//import datasets.ListDataset;
+import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
 
 /**
@@ -20,28 +22,32 @@ public class Splitter implements Serializable {
 	
 	protected int num_children; //may be move to splitter?
 	protected DistanceMeasure distance_measure;
-	protected double[][] exemplars;
+	//protected double[][] exemplars;
+	protected Object[] exemplars;
 	
 	protected DistanceMeasure temp_distance_measure;
-	protected double[][] temp_exemplars;	
+	//protected double[][] temp_exemplars;
+	protected Object[] temp_exemplars;
 	
-	ListDataset[] best_split = null;	
+	//ListDataset[] best_split = null;
+	ListObjectDataset[] best_split = null;
 	ProximityTree.Node node;
 	
 	public Splitter(ProximityTree.Node node) throws Exception {
 		this.node = node;	
 	}
 	
-	public ListDataset[] split_data(Dataset sample, Map<Integer, ListDataset> data_per_class) throws Exception {
+	//public ListDataset[] split_data(Dataset sample, Map<Integer, ListDataset> data_per_class) throws Exception {
+	public ListObjectDataset[] split_data(ObjectDataset sample, Map<Integer, ListObjectDataset> data_per_class) throws Exception {
 //		num_children = sample.get_num_classes();
-		ListDataset[] splits = new ListDataset[sample.get_num_classes()];
+		ListObjectDataset[] splits = new ListObjectDataset[sample.get_num_classes()];
 		temp_exemplars = new double[sample.get_num_classes()][];
 
 		int branch = 0;
-		for (Map.Entry<Integer, ListDataset> entry : data_per_class.entrySet()) {
+		for (Map.Entry<Integer, ListObjectDataset> entry : data_per_class.entrySet()) {
 			int r = AppContext.getRand().nextInt(entry.getValue().size());
 			
-			splits[branch] = new ListDataset(sample.size(), sample.length());
+			splits[branch] = new ListObjectDataset(sample.size()); //, sample.length());
 			//splits[branch] = new ListDataset(sample.size(), sample.length(), sample.length());
 			//use key just in case iteration order is not consistent
 			temp_exemplars[branch] = entry.getValue().get_series(r);
@@ -63,25 +69,30 @@ public class Splitter implements Serializable {
 		return splits;
 	}	
 
-	public int find_closest_branch(double[] query, DistanceMeasure dm, double[][] e) throws Exception{
+	//public int find_closest_branch(double[] query, DistanceMeasure dm, double[][] e) throws Exception{
+	public int find_closest_branch(Object query, DistanceMeasure dm, Object[] e) throws Exception{
 		return dm.find_closest_node(query, e, true, this.node.tree.getDistance_file());
 	}	
 	
-	public int find_closest_branch(double[] query) throws Exception{
+	//public int find_closest_branch(double[] query) throws Exception{
+	public int find_closest_branch(Object query) throws Exception{
 		return this.distance_measure.find_closest_node(query, exemplars, true, this.node.tree.getDistance_file());
 	}		
 	
-	public Dataset[] getBestSplits() {
+	//public Dataset[] getBestSplits() {
+	public ObjectDataset[] getBestSplits() {
 		return this.best_split;
 	}
 	
-	public ListDataset[] find_best_split(Dataset data) throws Exception {
+	//public ListDataset[] find_best_split(Dataset data) throws Exception {
+	//public ListDataset[] find_best_split(ObjectDataset data) throws Exception {
+	public ListObjectDataset[] find_best_split(ObjectDataset data) throws Exception {
 				
-		Map<Integer, ListDataset> data_per_class = data.split_classes();
+		Map<Integer, ListObjectDataset> data_per_class = data.split_classes();
 		
 		double weighted_gini = Double.POSITIVE_INFINITY;
 		double best_weighted_gini = Double.POSITIVE_INFINITY;
-		ListDataset[] splits = null;
+		ListObjectDataset[] splits = null;
 		int parent_size = data.size();
 	
 		for (int i = 0; i < AppContext.num_candidates_per_split; i++) {
@@ -128,7 +139,8 @@ public class Splitter implements Serializable {
 		return this.best_split;
 	}
 	
-	public double weighted_gini(int parent_size, ListDataset[] splits) {
+	//public double weighted_gini(int parent_size, ListDataset[] splits) {
+	public double weighted_gini(int parent_size, ListObjectDataset[] splits) {
 		double wgini = 0.0;
 		
 		for (int i = 0; i < splits.length; i++) {

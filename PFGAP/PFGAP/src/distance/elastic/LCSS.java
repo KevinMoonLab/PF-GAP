@@ -4,7 +4,9 @@ import static distance.DistanceTools.sim;
 
 import java.io.Serializable;
 import java.util.Random;
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
+import core.AppContext;
+import core.contracts.ObjectDataset;
 import distance.DistanceTools;
 import distance.MemorySpaceProvider;
 
@@ -20,7 +22,12 @@ public class LCSS implements Serializable {
 		
 	}
 	
-	public synchronized double distance(double[] series1, double[] series2, double bsf, int windowSize, double epsilon) {
+	//public synchronized double distance(double[] series1, double[] series2, double bsf, int windowSize, double epsilon) {
+	public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize, double epsilon) {
+
+		double[] series1 = (double[]) Series1;
+		double[] series2 = (double[]) Series2;
+
 		if (windowSize == -1) {
 			windowSize = series1.length;
 		}
@@ -92,12 +99,13 @@ public class LCSS implements Serializable {
 		}
 	}	
 	
-	public int get_random_window(Dataset d, Random r) {
+	public int get_random_window(ObjectDataset d, Random r) {
 //		int x = (d.length() +1) / 4;
-		return r.nextInt((d.length() +1) / 4); //TODO
+		//return r.nextInt((d.length() +1) / 4); //TODO
+		return r.nextInt((AppContext.length +1) / 4); //TODO
 	} 	
 	
-	public double get_random_epsilon(Dataset d, Random r) {
+	public double get_random_epsilon(ObjectDataset d, Random r) {
 		double stdTrain = DistanceTools.stdv_p(d);
 		double stdFloor = stdTrain * 0.2;
 		double e = r.nextDouble()*(stdTrain-stdFloor)+stdFloor;

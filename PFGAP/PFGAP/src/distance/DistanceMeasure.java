@@ -7,10 +7,13 @@ import java.util.List;
 import java.util.Random;
 
 import core.AppContext;
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
 import distance.elastic.*;
 import distance.interop.MapleDistance;
 import distance.interop.PythonDistance;
+import distance.multiTS.DTW_D;
+import distance.multiTS.DTW_I;
 
 //public class DistanceMeasure {
 public class DistanceMeasure implements Serializable {
@@ -43,6 +46,9 @@ public class DistanceMeasure implements Serializable {
 	private MapleDistance maple;
 	private PythonDistance python;
 	private Manhattan manhattan;
+	private ShapeHoG1dDTW shapeHoG1dDTW;
+	private DTW_I dtw_i;
+	private DTW_D dtw_d;
 
 	
 	public int windowSizeDTW =-1,
@@ -117,6 +123,15 @@ public class DistanceMeasure implements Serializable {
 			case manhattan:
 				manhattan = new Manhattan();
 				break;
+			case shapeHoG1dDTW:
+				shapeHoG1dDTW = new ShapeHoG1dDTW();
+				break;
+			case dtw_i:
+				dtw_i = new DTW_I();
+				break;
+			case dtw_d:
+				dtw_d = new DTW_D();
+				break;
 			default:
 				throw new Exception("Unknown distance measure");
 				//System.out.println("Using Custom Distance...");
@@ -124,7 +139,8 @@ public class DistanceMeasure implements Serializable {
 		}
 		
 	}
-	public void select_random_params(Dataset d, Random r) {
+	//public void select_random_params(Dataset d, Random r) {
+	public void select_random_params(ObjectDataset d, Random r) {
 		switch (this.distance_measure) {
 		case euclidean:
 		case shifazEUCLIDEAN:
@@ -169,6 +185,9 @@ public class DistanceMeasure implements Serializable {
 		case shifazDDTW:
 			this.windowSizeDDTW = d.length();	
 			break;
+		case shapeHoG1dDTW:
+			this.windowSizeDDTW = d.length();
+			break;
 		case ddtwcv:
 		case shifazDDTWCV:
 			this.windowSizeDDTW = ddtwcv.get_random_window(d, r);
@@ -179,11 +198,13 @@ public class DistanceMeasure implements Serializable {
 		}
 	}
 
-	public double distance(double[] s, double[] t) throws IOException, InterruptedException {
+	//public double distance(double[] s, double[] t) throws IOException, InterruptedException {
+	public double distance(Object s, Object t) throws IOException, InterruptedException {
 		return this.distance(s, t, Double.POSITIVE_INFINITY);
 	}
 	
-	public double distance(double[] s, double[] t, double bsf) throws IOException, InterruptedException {
+	//public double distance(double[] s, double[] t, double bsf) throws IOException, InterruptedException {
+	public double distance(Object s, Object t, double bsf) throws IOException, InterruptedException {
 		double distance = Double.POSITIVE_INFINITY;
 		
 		switch (this.distance_measure) {
@@ -217,7 +238,7 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case dtw:
 		case shifazDTW:
-			distance = dtw.distance(s, t, bsf, s.length);
+			distance = dtw.distance(s, t, bsf, ((double[]) s).length);
 			break;
 		case dtwcv:
 		case shifazDTWCV:
@@ -225,26 +246,35 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case ddtw:
 		case shifazDDTW:
-			distance = ddtw.distance(s, t, bsf, s.length);
+			distance = ddtw.distance(s, t, bsf, ((double[]) s).length);
 			break;
 		case ddtwcv:
 		case shifazDDTWCV:
 			distance = ddtwcv.distance(s, t, bsf, this.windowSizeDDTW);
 			break;
-			case maple:
-				//distance = MapleDistance.distance(s,t,dfile[0]);
-				distance = maple.distance(s,t);
-				//distance = MapleDistance.distance(s,t);
-				break;
-			case python:
-				//distance = PythonDistance.distance(s,t,dfile[0]);
-				distance = python.distance(s,t);
-				//distance = PythonDistance.distance(s,t);
-				break;
-			case manhattan:
-				distance = manhattan.distance(s,t,bsf);
-				break;
-			default:
+		case maple:
+			//distance = MapleDistance.distance(s,t,dfile[0]);
+			distance = maple.distance(s,t);
+			//distance = MapleDistance.distance(s,t);
+			break;
+		case python:
+			//distance = PythonDistance.distance(s,t,dfile[0]);
+			distance = python.distance(s,t);
+			//distance = PythonDistance.distance(s,t);
+			break;
+		case manhattan:
+			distance = manhattan.distance(s,t,bsf);
+			break;
+		case shapeHoG1dDTW:
+			distance = shapeHoG1dDTW.distance(s,t,bsf,((double[]) s).length);
+			break;
+		case dtw_i:
+			distance = dtw_i.distance(s,t,bsf,((double[]) s).length);
+			break;
+		case dtw_d:
+			distance = dtw_d.distance(s,t,bsf,((double[]) s).length);
+			break;
+		default:
 //			throw new Exception("Unknown distance measure");
 //			break;
 		}
@@ -320,9 +350,14 @@ public class DistanceMeasure implements Serializable {
 	//just to reuse this data structure
 	List<Integer> closest_nodes = new ArrayList<Integer>();
 	
+	//public int find_closest_node(
+	//		double[] query,
+	//		double[][] exemplars,
+	//		boolean train,
+	//		String... dfile) throws Exception{
 	public int find_closest_node(
-			double[] query, 
-			double[][] exemplars,
+			Object query,
+			Object[] exemplars,
 			boolean train,
 			String... dfile) throws Exception{
 		closest_nodes.clear();
@@ -330,7 +365,8 @@ public class DistanceMeasure implements Serializable {
 		double bsf = Double.POSITIVE_INFINITY;		
 
 		for (int i = 0; i < exemplars.length; i++) {
-			double[] exemplar = exemplars[i];	//TODO indices must match
+			//double[] exemplar = exemplars[i];	//TODO indices must match
+			Object exemplar = exemplars[i];	//TODO indices must match
 
 			if (AppContext.config_skip_distance_when_exemplar_matches_query && exemplar == query) {
 				return i;

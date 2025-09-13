@@ -1,11 +1,14 @@
 package distance.elastic;
 
+import core.AppContext;
+import core.contracts.ObjectDataset;
+
 import static java.lang.Math.sqrt;
 
 import java.io.Serializable;
 import java.util.Random;
 
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
 
 /**
  * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
@@ -21,7 +24,12 @@ public class DTW implements Serializable {
 	}
 	
 	//A fast DTW implemented by Geoff Webb
-	public synchronized double distance(double[] series1, double[] series2,double bsf, int windowSize) {
+	//public synchronized double distance(double[] series1, double[] series2,double bsf, int windowSize) {
+	public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize) {
+
+		double[] series1 = (double[]) Series1;
+		double[] series2 = (double[]) Series2;
+
 		if (windowSize == -1) {
 			windowSize = series1.length;
 		}
@@ -139,8 +147,9 @@ public class DTW implements Serializable {
 		double x = A - B;
 		return x * x;
 	}
-	public int get_random_window(Dataset d, Random r) {
-		return r.nextInt((d.length() +1) / 4);
+	public int get_random_window(ObjectDataset d, Random r) {
+		//return r.nextInt((d.length() +1) / 4);
+		return r.nextInt((AppContext.length +1) / 4); //TODO
 	}
 
 }

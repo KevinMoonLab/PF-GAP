@@ -3,7 +3,8 @@ package distance.elastic;
 import java.io.Serializable;
 import java.util.Random;
 
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
+import core.contracts.ObjectDataset;
 import distance.MemorySpaceProvider;
 
 /**
@@ -18,7 +19,11 @@ public class TWE implements Serializable {
 		
 	}
 	
-	public double distance(double[] ta, double[] tb, double bsf, double nu, double lambda) {
+	//public double distance(double[] ta, double[] tb, double bsf, double nu, double lambda) {
+	public double distance(Object Ta, Object Tb, double bsf, double nu, double lambda) {
+
+		double[] ta = (double[]) Ta;
+		double[] tb = (double[]) Tb;
 
 		int m = ta.length;
 		int n = tb.length;
@@ -140,12 +145,12 @@ public class TWE implements Serializable {
 		return dist;
 	}
 	
-	public double get_random_nu(Dataset d, Random r) {
+	public double get_random_nu(ObjectDataset d, Random r) {
 		double nu = twe_nuParams[r.nextInt(twe_nuParams.length)];
 		return nu;
 	} 	
 	
-	public double get_random_lambda(Dataset d, Random r) {
+	public double get_random_lambda(ObjectDataset d, Random r) {
 		double lambda = twe_lamdaParams[r.nextInt(twe_lamdaParams.length)];
 		return lambda;
 	} 		

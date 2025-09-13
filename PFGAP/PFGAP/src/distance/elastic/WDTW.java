@@ -1,8 +1,10 @@
 package distance.elastic;
 
+import core.contracts.ObjectDataset;
+
 import java.io.Serializable;
 import java.util.Random;
-import core.contracts.Dataset;
+//import core.contracts.Dataset;
 
 /**
  * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
@@ -30,7 +32,12 @@ public class WDTW implements Serializable {
 	}	
 	
 	//fast WDTW implemented by Geoff Webb
-	public synchronized double distance(double[] first, double[] second, double bsf, double g) {
+	//public synchronized double distance(double[] first, double[] second, double bsf, double g) {
+	public synchronized double distance(Object First, Object Second, double bsf, double g) {
+
+		double[] first = (double[]) First;
+		double[] second = (double[]) Second;
+
 		this.setG(g, Math.max(first.length,second.length));
 
 		double[] prevRow = new double[second.length];
@@ -122,7 +129,7 @@ public class WDTW implements Serializable {
 		}
 	}
 	
-	public double get_random_g(Dataset d, Random r) {
+	public double get_random_g(ObjectDataset d, Random r) {
 		return r.nextDouble();
 	}
 	

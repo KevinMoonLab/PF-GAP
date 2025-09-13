@@ -37,7 +37,7 @@ public class PrintUtilities {
 		String testsize = "";
 		String testlen = "";
 		String testclass = "";
-		if (Objects.equals(AppContext.testing_file, "littleblackraincloud")){
+		if (AppContext.testing_file == null){
 			testsize = "none";
 			testlen = "none";
 			testclass = "none";

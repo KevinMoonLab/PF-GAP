@@ -7,7 +7,12 @@ public class Manhattan implements Serializable {
 
     }
 
-    public synchronized double distance(double[] s, double[] t, double bsf){
+    //public synchronized double distance(double[] s, double[] t, double bsf){
+    public synchronized double distance(Object S, Object T, double bsf){
+
+        double[] t = (double[]) T;
+        double[] s = (double[]) S;
+
         int i = 0;
         double total = 0;
         //Integer[] plist = new Integer[]{1,3,4};

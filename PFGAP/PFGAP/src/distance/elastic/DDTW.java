@@ -13,7 +13,12 @@ public class DDTW extends DTW{
 		
 	}
 	
-	public synchronized double distance(double[] series1, double[] series2, double bsf, int w) {
+	//public synchronized double distance(double[] series1, double[] series2, double bsf, int w) {
+	public synchronized double distance(Object Series1, Object Series2, double bsf, int w) {
+
+		double[] series1 = (double[]) Series1;
+		double[] series2 = (double[]) Series2;
+
 //		System.out.println("calling ddtw with w="+w);
 
 		if (deriv1 == null || deriv1.length != series1.length) {

@@ -7,7 +7,12 @@ public class Euclidean implements Serializable {
 
 	}	
 		
-	public synchronized double distance(double[] s, double[] t, double bsf){
+	//public synchronized double distance(double[] s, double[] t, double bsf){
+	public synchronized double distance(Object S, Object T, double bsf){
+
+		double[] s = (double[]) T;
+		double[] t = (double[]) S;
+
 		int i = 0;
 		double total = 0;
 
