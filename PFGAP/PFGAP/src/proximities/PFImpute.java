@@ -118,7 +118,121 @@ public class PFImpute {
         }
     }
 
+
+    public static void testNumericImpute(ListObjectDataset testData, ListObjectDataset trainData) {
+        List<Object> testRaw = testData.getData();
+        List<Object> trainRaw = trainData.getData();
+
+        if (testData.getMissingIndices().is2D()) {
+            List<List<List<Integer>>> missingIndices2D = testData.getMissingIndices().indices2D;
+
+            List<Object> updated = IntStream.range(0, testRaw.size())
+                    .parallel()
+                    .mapToObj(j -> {
+                        double[][] matrix = (double[][]) testRaw.get(j);
+                        List<List<Integer>> missingRows = missingIndices2D.get(j);
+                        double[][] updatedMatrix = new double[matrix.length][];
+
+                        for (int i = 0; i < matrix.length; i++) {
+                            double[] row = matrix[i];
+                            List<Integer> missing = missingRows.get(i);
+                            double[] updatedRow = Arrays.copyOf(row, row.length);
+
+                            for (int k : missing) {
+                                double weightedSum = 0;
+                                double totalWeight = 0;
+
+                                if (AppContext.useSparseProximities) {
+                                    Map<Integer, Double> neighbors = AppContext.testing_training_proximities_sparse.get(j);
+                                    for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
+                                        int n = entry.getKey();
+                                        double weight = entry.getValue();
+                                        double[][] trainMatrix = (double[][]) trainRaw.get(n);
+                                        if (!trainData.getMissingIndices().indices2D.get(n).get(i).contains(k)) {
+                                            weightedSum += weight * trainMatrix[i][k];
+                                            totalWeight += weight;
+                                        }
+                                    }
+                                } else {
+                                    double[][] P = AppContext.testing_training_proximities;
+                                    for (int n = 0; n < trainRaw.size(); n++) {
+                                        double weight = P[j][n];
+                                        if (weight > EPSILON &&
+                                                !trainData.getMissingIndices().indices2D.get(n).get(i).contains(k)) {
+                                            double[][] trainMatrix = (double[][]) trainRaw.get(n);
+                                            weightedSum += weight * trainMatrix[i][k];
+                                            totalWeight += weight;
+                                        }
+                                    }
+                                }
+
+                                updatedRow[k] = totalWeight > 0 ? weightedSum / totalWeight : row[k];
+                            }
+
+                            updatedMatrix[i] = updatedRow;
+                        }
+
+                        return (Object) updatedMatrix;
+                    })
+                    .collect(Collectors.toList());
+
+            testData.setData(updated);
+
+        } else {
+            List<List<Integer>> missingIndices1D = testData.getMissingIndices().indices1D;
+
+            List<Object> updated = IntStream.range(0, testRaw.size())
+                    .parallel()
+                    .mapToObj(j -> {
+                        double[] row = (double[]) testRaw.get(j);
+                        List<Integer> missing = missingIndices1D.get(j);
+                        double[] updatedRow = Arrays.copyOf(row, row.length);
+
+                        for (int k : missing) {
+                            double weightedSum = 0;
+                            double totalWeight = 0;
+
+                            if (AppContext.useSparseProximities) {
+                                Map<Integer, Double> neighbors = AppContext.testing_training_proximities_sparse.get(j);
+                                for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
+                                    int n = entry.getKey();
+                                    double weight = entry.getValue();
+                                    double[] trainRow = (double[]) trainRaw.get(n);
+                                    if (!trainData.getMissingIndices().indices1D.get(n).contains(k)) {
+                                        weightedSum += weight * trainRow[k];
+                                        totalWeight += weight;
+                                    }
+                                }
+                            } else {
+                                double[][] P = AppContext.testing_training_proximities;
+                                for (int n = 0; n < trainRaw.size(); n++) {
+                                    double weight = P[j][n];
+                                    if (weight > EPSILON &&
+                                            !trainData.getMissingIndices().indices1D.get(n).contains(k)) {
+                                        double[] trainRow = (double[]) trainRaw.get(n);
+                                        weightedSum += weight * trainRow[k];
+                                        totalWeight += weight;
+                                    }
+                                }
+                            }
+
+                            updatedRow[k] = totalWeight > 0 ? weightedSum / totalWeight : row[k];
+                        }
+
+                        return (Object) updatedRow;
+                    })
+                    .collect(Collectors.toList());
+
+            testData.setData(updated);
+        }
+    }
+
+
     public static void trainCategoricalImpute(ListObjectDataset dataToUpdate) {
+        // To be implemented later
+    }
+
+    public static void testCategoricalImpute(ListObjectDataset dataToUpdate) {
         // To be implemented later
     }
 

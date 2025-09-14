@@ -189,7 +189,7 @@ public class ProximityForest implements Serializable{
 		
 		for (int i=0; i < size; i++){
 			actual_class = test_data.get_class(i);
-			predicted_class = predict(test_data.get_series(i));
+			predicted_class = predict(test_data.get_series(i), i);
 			result.Predictions.add(predicted_class);
 			if (actual_class != predicted_class){
 				result.errors++;
@@ -271,7 +271,7 @@ public class ProximityForest implements Serializable{
 
 
 	//public Integer predict(double[] query) throws Exception {
-	public Integer predict(Object query) throws Exception {
+	public Integer predict(Object query, int Index) throws Exception {
 		predictLock.lock();
 		try {
 			int max_vote_count = -1;
@@ -287,7 +287,7 @@ public class ProximityForest implements Serializable{
 					futures.add(executor.submit(() -> {
 						int label = 0;
 						try {
-							label = trees[index].predict(query);
+							label = trees[index].predict(query, Index);
 						} catch (Exception e) {
 							e.printStackTrace();
 						}
@@ -320,7 +320,7 @@ public class ProximityForest implements Serializable{
 				max_voted_classes.clear();
 
 				for (int i = 0; i < trees.length; i++) {
-					label = trees[i].predict(query);
+					label = trees[i].predict(query, Index);
 					num_votes[label]++;
 				}
 

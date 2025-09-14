@@ -7,36 +7,16 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Application/Demo.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/Demo.ipynb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/CSVReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/CSVReader.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/PFGAP.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceTools.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceTools.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/MEASURE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/MEASURE.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/DDTW.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/DTW.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/ERP.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/ERP.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MSM.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/MSM.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/TWE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/TWE.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/WDDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/WDDTW.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/WDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/WDTW.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DTW_I.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/pfgap.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/pfgap.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/PFGAP.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximities/PFGAP.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/PFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximities/PFImpute.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/util/GeneralUtilities.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/util/GeneralUtilities.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/util/PrintUtilities.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/util/PrintUtilities.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/util/Sampler.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/util/Sampler.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

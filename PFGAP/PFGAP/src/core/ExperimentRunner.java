@@ -17,6 +17,7 @@ import util.GeneralUtilities;
 import util.PrintUtilities;
 
 import static application.PFApplication.UCR_dataset;
+import static proximities.PFGAP.computeTestTrainProximities;
 import static proximities.PFGAP.computeTrainProximities;
 
 
@@ -154,19 +155,19 @@ public class ExperimentRunner {
 				//ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
 
 				if (AppContext.hasMissingValues && AppContext.isNumeric) {
+					System.out.println("Imputing the training set...");
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
-					System.out.println("Performing initial imputation...");
 					MeanImpute.Impute(train_data);
 					for (int j = 0; j < AppContext.numImputes; j++){
 						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 						ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
 						forest.train(train_data);
-						System.out.println("Updating missing values...");
 						computeTrainProximities(forest, train_data);
 						PFImpute.trainNumericImpute(train_data);
 						//forest = null;
 						//System.gc();
 					}
+					System.out.println("Done imputing the training set.");
 				}
 
 				//train model
@@ -194,10 +195,46 @@ public class ExperimentRunner {
 					);
 				}
 
+
+
 				//test model if needed
 				if(AppContext.testing_file != null) {
+
+
+					//Perform imputation, if needed.
+					if (AppContext.hasMissingValues && AppContext.isNumeric) {
+						System.out.println("Imputing the test dataset...");
+						//first, do the mean impute. Later, we'll let users select which imputer to use.
+						MeanImpute.Impute(test_data);
+						for (int j = 0; j < AppContext.numImputes; j++){
+							//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
+							//ProximityForestResult result = forest.test(test_data);
+							forest.test(test_data);
+							computeTestTrainProximities(forest, test_data, train_data); //what is train_data??
+							PFImpute.testNumericImpute(test_data, train_data); //again, is train_data defined??
+						}
+						System.out.println("Done imputing the test dataset.");
+					}
+
+					// Might this be too soon?
+					if (AppContext.impute_test) {
+						GeneralUtilities.writeDelimitedData(
+								test_data.getData(),
+								AppContext.output_dir + AppContext.testing_file,
+								AppContext.firstSeparator,
+								AppContext.secondSeparator
+						);
+					}
+
+
 					ProximityForestResult result = forest.test(test_data);
-					test_data = null; // erase the test data information.
+
+
+
+
+					if (!AppContext.getprox) {
+						test_data = null; // erase the test data information (or after test/train prox)
+					}
 
 					//Now we print the Predictions array to a text file.
 					PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Predictions.txt", "UTF-8");
@@ -213,17 +250,17 @@ public class ExperimentRunner {
 				if(AppContext.getprox) {
 					//Calculate array of forest proximities.
 					AppContext.useSparseProximities = false;
-					System.out.println("Computing Forest Proximities...");
+					System.out.println("Computing Training Proximities...");
 					double t5 = System.currentTimeMillis();
 					computeTrainProximities(forest, train_data);
 					double t6 = System.currentTimeMillis();
-					System.out.print("Done Computing Forest Proximities. ");
+					System.out.print("Done Computing Training Proximities. ");
 					System.out.print("Computation time: ");
 					System.out.println(t6 - t5 + "ms");
 
 
 					//Now we print the PFGAP array to a text file.
-					PrintWriter writer = new PrintWriter(AppContext.output_dir + "ForestProximities.txt", "UTF-8");
+					PrintWriter writer = new PrintWriter(AppContext.output_dir + "TrainingProximities.txt", "UTF-8");
 					//writer.print(ArrayUtils.toString(PFGAP));
 					writer.print(ArrayUtils.toString(AppContext.training_proximities));
 					writer.close();
@@ -234,6 +271,29 @@ public class ExperimentRunner {
 					PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "ytrain.txt", "UTF-8");
 					writer2.print(ArrayUtils.toString(ytrain));
 					writer2.close();
+
+					System.out.println("Computing Test/Train Proximities...");
+					double t7 = System.currentTimeMillis();
+					computeTestTrainProximities(forest, test_data, train_data);
+					double t8 = System.currentTimeMillis();
+					System.out.print("Done Computing Test/Train Proximities. ");
+					System.out.print("Computation time: ");
+					System.out.println(t8 - t7 + "ms");
+
+
+					//Now we print the PFGAP array to a text file.
+					PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", "UTF-8");
+					//writer.print(ArrayUtils.toString(PFGAP));
+					writer3.print(ArrayUtils.toString(AppContext.testing_training_proximities));
+					writer3.close();
+					Integer[] ytest = new Integer[test_data.size()];
+					for (Integer k = 0; k < test_data.size(); k++) {
+						ytest[k] = test_data.get_class(k);
+					}
+					PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", "UTF-8");
+					writer4.print(ArrayUtils.toString(ytest));
+					writer4.close();
+					test_data = null;
 				}
 				////print and export resultS
 				//result.printResults(datasetName, i, "");
@@ -253,7 +313,46 @@ public class ExperimentRunner {
 			for (int k=0; k < test_data.size(); k++){
 				Predictions_saved.add(forest1.predict(test_data.get_series(k)));
 			}*/
+
+				//Perform imputation, if needed.
+				if (AppContext.hasMissingValues && AppContext.isNumeric) {
+					//first, do the mean impute. Later, we'll let users select which imputer to use.
+					System.out.println("Performing initial imputation...");
+					MeanImpute.Impute(test_data);
+					for (int j = 0; j < AppContext.numImputes; j++){
+						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
+						System.out.println("Updating missing values...");
+						computeTestTrainProximities(forest1, test_data, train_data); //what is train_data??
+						PFImpute.testNumericImpute(test_data, train_data); //again, is train_data defined??
+					}
+				}
+
 				ProximityForestResult result1 = forest1.test(test_data);
+
+				if (AppContext.getprox) {
+					AppContext.useSparseProximities = false;
+					System.out.println("Computing Test/Train Proximities...");
+					double t7 = System.currentTimeMillis();
+					computeTestTrainProximities(forest1, test_data, train_data);
+					double t8 = System.currentTimeMillis();
+					System.out.print("Done Computing Test/Train Proximities. ");
+					System.out.print("Computation time: ");
+					System.out.println(t8 - t7 + "ms");
+
+
+					//Now we print the PFGAP array to a text file.
+					PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", "UTF-8");
+					//writer.print(ArrayUtils.toString(PFGAP));
+					writer3.print(ArrayUtils.toString(AppContext.testing_training_proximities));
+					writer3.close();
+					Integer[] ytest = new Integer[test_data.size()];
+					for (Integer k = 0; k < test_data.size(); k++) {
+						ytest[k] = test_data.get_class(k);
+					}
+					PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", "UTF-8");
+					writer4.print(ArrayUtils.toString(ytest));
+					writer4.close();
+				}
 
 				//TODO: calculate proximities for the test points.
 				test_data = null; // erase test data.
