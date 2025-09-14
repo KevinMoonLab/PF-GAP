@@ -5,10 +5,7 @@ import datasets.ListObjectDataset;
 import trees.ProximityForest;
 import trees.ProximityTree;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,6 +24,22 @@ public class PFGAP{
             }
         }
         return Si;
+    }
+
+    public static ArrayList<ProximityTree> getSiTest(Integer i, ProximityForest pf){
+        /*// this seems a bit overkill: shouldn't all of the trees be returned??
+        ArrayList<ProximityTree> Si = new ArrayList<ProximityTree>();
+        ProximityTree[] trees = pf.getTrees();
+        for(ProximityTree tree:trees){
+            ArrayList<Integer> test = tree.getRootNode().TestIndices;
+            System.out.println(test);
+            if(test.contains(i)){
+                Si.add(tree);
+            }
+        }
+        return Si;*/
+        ProximityTree[] trees = pf.getTrees();
+        return new ArrayList<ProximityTree>(Arrays.asList(trees));
     }
 
     //Here is the parallel code.
@@ -90,6 +103,23 @@ public class PFGAP{
         return Ji;
     }
 
+    public static ArrayList<Integer> getJiTest(Integer i, ProximityTree t){
+        ArrayList<Integer> Ji = new ArrayList<>();
+        ArrayList<ProximityTree.Node> leaves = t.getLeaves();
+        //System.out.println(leaves.size());
+        for (ProximityTree.Node leaf : leaves){
+            ArrayList<Integer> inbags = leaf.getInBagIndices();
+            ArrayList<Integer> test = leaf.TestIndices;
+            //System.out.println(oob);
+            //System.out.println(i);
+            if(test.contains(i)){
+                Ji = inbags;
+                //System.out.print(Ji);
+            }
+        }
+        return Ji;
+    }
+
     // Here is the parallel code.
     /*public static ArrayList<Integer> getJi(Integer i, ProximityTree t) {
         ArrayList<Integer> Ji = new ArrayList<>();
@@ -140,6 +170,28 @@ public class PFGAP{
         for (ProximityTree t : Si){
             Integer cj = t.getRootNode().getMultiplicities().get(j);
             ArrayList<Integer> Mi = getJi(i,t);
+            if (Mi.contains(j)){
+                double Cj = (double) cj;
+                terms.add((Cj/Mi.size())/ Si.size());
+            }
+            else{
+                terms.add((double) 0);
+            }
+        }
+        double sum = 0;
+        for (Double term : terms){
+            sum += term;
+        }
+        return sum;
+    }
+
+    public static Double ForestProximityTestTrain(Integer i, Integer j, ProximityForest pf){
+        ArrayList<ProximityTree> Si = getSiTest(i,pf);
+        //Double[] terms = new Double[]{};
+        ArrayList<Double> terms = new ArrayList<>();
+        for (ProximityTree t : Si){
+            Integer cj = t.getRootNode().getMultiplicities().get(j);
+            ArrayList<Integer> Mi = getJiTest(i,t);
             if (Mi.contains(j)){
                 double Cj = (double) cj;
                 terms.add((Cj/Mi.size())/ Si.size());
@@ -288,6 +340,91 @@ public class PFGAP{
             }
 
             AppContext.training_proximities = PFGAP;
+        }
+    }
+
+
+    public static void computeTestTrainProximities(ProximityForest forest, ListObjectDataset test_data, ListObjectDataset train_data) throws ExecutionException, InterruptedException {
+        int N = train_data.size();
+        int K = test_data.size();
+
+        if (AppContext.useSparseProximities) {
+            Map<Integer, Map<Integer, Double>> sparseP = new HashMap<>();
+
+            if (AppContext.parallelProx) {
+                ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                List<Future<?>> futures = new ArrayList<>();
+
+                for (int k = 0; k < K; k++) {
+                    final int finalK = k;
+                    futures.add(executor.submit(() -> {
+                        Map<Integer, Double> rowMap = new HashMap<>();
+                        for (int j = 0; j < N; j++) {
+                            double prox = ForestProximityTestTrain(finalK, j, forest);
+                            if (prox > 1e-6) {
+                                rowMap.put(j, prox);
+                            }
+                        }
+                        synchronized (sparseP) {
+                            sparseP.put(finalK, rowMap);
+                        }
+                    }));
+                }
+
+                for (Future<?> future : futures) {
+                    future.get();
+                }
+
+                executor.shutdown();
+
+            } else {
+                for (int k = 0; k < K; k++) {
+                    Map<Integer, Double> rowMap = new HashMap<>();
+                    for (int j = 0; j < N; j++) {
+                        double prox = ForestProximityTestTrain(k, j, forest);
+                        if (prox > 1e-6) {
+                            rowMap.put(j, prox);
+                        }
+                    }
+                    sparseP.put(k, rowMap);
+                }
+            }
+
+            AppContext.testing_training_proximities_sparse = sparseP;
+
+        } else {
+            double[][] PFGAP = new double[K][N];
+
+            if (AppContext.parallelProx) {
+                ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                List<Future<?>> futures = new ArrayList<>();
+
+                for (int k = 0; k < K; k++) {
+                    final int finalK = k;
+                    futures.add(executor.submit(() -> {
+                        for (int j = 0; j < N; j++) {
+                            double prox = ForestProximityTestTrain(finalK, j, forest);
+                            PFGAP[finalK][j] = prox;
+                        }
+                    }));
+                }
+
+                for (Future<?> future : futures) {
+                    future.get();
+                }
+
+                executor.shutdown();
+
+            } else {
+                for (int k = 0; k < K; k++) {
+                    for (int j = 0; j < N; j++) {
+                        double prox = ForestProximityTestTrain(k, j, forest);
+                        PFGAP[k][j] = prox;
+                    }
+                }
+            }
+
+            AppContext.testing_training_proximities = PFGAP;
         }
     }
 

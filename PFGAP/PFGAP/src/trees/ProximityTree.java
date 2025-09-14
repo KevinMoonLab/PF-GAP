@@ -105,69 +105,69 @@ public class ProximityTree implements Serializable {
 		ObjectDataset inbagData = new ListObjectDataset(); //ListDataset();
 		ObjectDataset oobData = new ListObjectDataset(); //ListDataset();
 
-			//First we get the in-bag indices.
-			int dummySize = data.size();
-			int[]  randomIntsArray = IntStream.generate(() -> new Random().nextInt(dummySize)).limit(data.size()).toArray();
-			//InBagIndices = new ArrayList<Integer>();
-			for(int i=0; i<randomIntsArray.length; i++){
-				this.getRootNode().InBagIndices.add(randomIntsArray[i]);
+		//First we get the in-bag indices.
+		int dummySize = data.size();
+		int[]  randomIntsArray = IntStream.generate(() -> new Random().nextInt(dummySize)).limit(data.size()).toArray();
+		//InBagIndices = new ArrayList<Integer>();
+		for(int i=0; i<randomIntsArray.length; i++){
+			this.getRootNode().InBagIndices.add(randomIntsArray[i]);
+		}
+		//int[] num = IntStream.range(0, data.size()).toArray();
+		int[] distinctInBag = Arrays.stream(randomIntsArray).distinct().toArray();
+		//setInBagIndices(distinctInBag);
+		//setInBagIndices(randomIntsArray);
+
+		this.getRootNode().multiplicities = new HashMap<Integer,Integer>();
+		//now we compute the multiplicities (number of times the indices occur in the in-bag sample)
+		for (int i=0; i<this.getRootNode().InBagIndices.size(); i++){
+			if (this.getRootNode().multiplicities.containsKey((this.getRootNode().InBagIndices.get(i)))){
+				this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),this.getRootNode().multiplicities.get(this.getRootNode().InBagIndices.get(i))+1);
 			}
-			//int[] num = IntStream.range(0, data.size()).toArray();
-			int[] distinctInBag = Arrays.stream(randomIntsArray).distinct().toArray();
-			//setInBagIndices(distinctInBag);
-			//setInBagIndices(randomIntsArray);
-
-			this.getRootNode().multiplicities = new HashMap<Integer,Integer>();
-			//now we compute the multiplicities (number of times the indices occur in the in-bag sample)
-			for (int i=0; i<this.getRootNode().InBagIndices.size(); i++){
-				if (this.getRootNode().multiplicities.containsKey((this.getRootNode().InBagIndices.get(i)))){
-					this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),this.getRootNode().multiplicities.get(this.getRootNode().InBagIndices.get(i))+1);
-				}
-				else{
-					this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),1);
-				}
+			else{
+				this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),1);
 			}
+		}
 
-			//now we need to get the out-of-bag indices.
-			ArrayList<Integer> result = new ArrayList<Integer>(); //out-of-bag
-			//ArrayList<Integer> resultA = (ArrayList<Integer>) InBagIndices; //new ArrayList<Integer>(); //for converting inbag
-			for (int i = 0; i < randomIntsArray.length; i++){
-				Boolean isInBag = ArrayUtils.contains(distinctInBag, i);
-				if (!isInBag){result.add(i);}
-				//else{resultA.add(i);}
-			}
-			int[] result2 = result.stream().mapToInt(i -> i).toArray();
-			//OutOfBagIndices = new ArrayList<Integer>();
-			for(int i=0; i<result2.length; i++){
-				this.getRootNode().OutOfBagIndices.add(result2[i]);
-			}
-			//setOutOfBagIndices(result2);
-			data.set_indices(this.getRootNode().InBagIndices);
+		//now we need to get the out-of-bag indices.
+		ArrayList<Integer> result = new ArrayList<Integer>(); //out-of-bag
+		//ArrayList<Integer> resultA = (ArrayList<Integer>) InBagIndices; //new ArrayList<Integer>(); //for converting inbag
+		for (int i = 0; i < randomIntsArray.length; i++){
+			Boolean isInBag = ArrayUtils.contains(distinctInBag, i);
+			if (!isInBag){result.add(i);}
+			//else{resultA.add(i);}
+		}
+		int[] result2 = result.stream().mapToInt(i -> i).toArray();
+		//OutOfBagIndices = new ArrayList<Integer>();
+		for(int i=0; i<result2.length; i++){
+			this.getRootNode().OutOfBagIndices.add(result2[i]);
+		}
+		//setOutOfBagIndices(result2);
+		data.set_indices(this.getRootNode().InBagIndices);
 
-			// Now we need to get the sub sample corresponding to the in-bag indices.
-			ObjectDataset data2 = new ListObjectDataset(); //ListDataset(); //data;
-			for (int index : this.getRootNode().InBagIndices){
-				//System.out.println(Arrays.toString(data.get_series(index)));
-				//System.out.println(data.get_index(index));
-				data2.add(data.get_class(index), data.get_series(index), index);
+		// Now we need to get the sub sample corresponding to the in-bag indices.
+		ObjectDataset data2 = new ListObjectDataset(); //ListDataset(); //data;
+		for (int index : this.getRootNode().InBagIndices){
+			//System.out.println(Arrays.toString(data.get_series(index)));
+			//System.out.println(data.get_index(index));
+			data2.add(data.get_class(index), data.get_series(index), index);
 
-			}
-			//data = data2; //we're only training on in-bag samples.
-			inbagData = data2;
-			// Now we need to get the sub sample corresponding to the out-of-bag indices.
-			ObjectDataset data3 = new ListObjectDataset(); //new ListDataset();
-			for (int index : this.getRootNode().OutOfBagIndices){
-				//System.out.println(Arrays.toString(data.get_series(index)));
-				//System.out.println(data.get_index(index));
-				data3.add(data.get_class(index), data.get_series(index), index);
+		}
+		//data = data2; //we're only training on in-bag samples.
+		inbagData = data2;
+		// Now we need to get the sub sample corresponding to the out-of-bag indices.
+		ObjectDataset data3 = new ListObjectDataset(); //new ListDataset();
+		for (int index : this.getRootNode().OutOfBagIndices){
+			//System.out.println(Arrays.toString(data.get_series(index)));
+			//System.out.println(data.get_index(index));
+			data3.add(data.get_class(index), data.get_series(index), index);
 
-			}
-			oobData = data3;
-			//System.out.println(Arrays.toString(data.get_series(0)));
-			//System.out.println(data.get_index(0));
+		}
+		oobData = data3;
+		//System.out.println(Arrays.toString(data.get_series(0)));
+		//System.out.println(data.get_index(0));
 
 
-			//Integer[] result = s1.toArray(new Integer[s1.size()]);
+		//Integer[] result = s1.toArray(new Integer[s1.size()]);
 
 
 
@@ -175,13 +175,13 @@ public class ProximityTree implements Serializable {
 	}
 	
 	//public Integer predict(double[] query) throws Exception {
-	public Integer predict(Object query) throws Exception {
+	public Integer predict(Object query, int index) throws Exception {
 		Node node = this.root;
 
 		while(!node.is_leaf()) {
 			node = node.children[node.splitter.find_closest_branch(query)];
 		}
-
+		node.TestIndices.add(index);
 		return node.label();
 	}	
 
@@ -328,6 +328,7 @@ public class ProximityTree implements Serializable {
 	
 		protected ArrayList<Integer> InBagIndices; //int[] InBagIndices;
 		protected ArrayList<Integer> OutOfBagIndices; //ArrayList<Integer> OutOfBagIndices;
+		public ArrayList<Integer> TestIndices;
 		protected Map<Integer, Integer> multiplicities;
 		//protected transient Node parent;	//dont need this, but it helps to debug
 		//protected transient ProximityTree tree;
@@ -352,6 +353,7 @@ public class ProximityTree implements Serializable {
 			this.tree = tree;
 			this.InBagIndices = new ArrayList<>();
 			this.OutOfBagIndices = new ArrayList<>();
+			this.TestIndices = new ArrayList<>();
 			this.multiplicities = null;
 			
 			if (parent != null) {

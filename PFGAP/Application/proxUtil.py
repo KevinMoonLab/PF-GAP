@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import os
 
-def PF_Train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_iterations=5, return_imputed_training=False, data_dimension=1, numeric_data=True, row_separator=",", column_separator=":"):
+def PF_Train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, data_dimension=1, numeric_data=True, row_separator=",", column_separator=":"):
     
     TFdict = {True:"true", False:"false"}
     if (data_dimension not in [1,2]):
@@ -39,6 +39,7 @@ def PF_Train(train_file, test_file=None, train_labels=None, test_labels=None, re
     msgList.extend(["-hasMissingValues=" + TFdict[impute_training_data]])
     msgList.extend(["-numImputes=" + str(impute_iterations)])
     msgList.extend(["-impute_train=" + TFdict[return_imputed_training]])
+    msgList.extend(["-impute_test=" + TFdict[return_imputed_testing]])
     msgList.extend(["-is2D=" + TFdict[is2D]])
     msgList.extend(["-isNumeric=" + TFdict[numeric_data]])
     

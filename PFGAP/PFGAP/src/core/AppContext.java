@@ -97,6 +97,7 @@ public class AppContext {
 	public static boolean parallelProx = false; //false;
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
+	public static boolean impute_test = false;
 	// the missing indices are now part of the ListObjectDataset.
 	/*//public static ArrayList<Integer> missing_train_indices;
 	//public static List<Object> missing_train_indices = Collections.synchronizedList(new ArrayList<>());
@@ -110,8 +111,10 @@ public class AppContext {
 	private static transient  ObjectDataset test_data;
 	private static String datasetName;
 	public static transient double[][] training_proximities;
+	public static transient double[][] testing_training_proximities;
 	public static boolean useSparseProximities = true; //should be dense if returned??
 	public static Map<Integer, Map<Integer, Double>> training_proximities_sparse;
+	public static Map<Integer, Map<Integer, Double>> testing_training_proximities_sparse;
 
 	static {
 		rand = new Random();

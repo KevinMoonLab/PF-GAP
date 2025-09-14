@@ -82,6 +82,9 @@ public class PFApplication {
 				case "-impute_train":
 					AppContext.impute_train = Boolean.parseBoolean(options[1]);
 					break;
+				case "-impute_test":
+					AppContext.impute_test = Boolean.parseBoolean(options[1]);
+					break;
 				case "-is2D":
 					AppContext.is2D = Boolean.parseBoolean(options[1]);
 					break;
