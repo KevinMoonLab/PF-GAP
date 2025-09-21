@@ -162,6 +162,16 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
+    public Map<Integer, Integer> invertLabelMap(Map<Integer, Integer> originalToNew) {
+        Map<Integer, Integer> newToOriginal = new HashMap<>();
+        for (Map.Entry<Integer, Integer> entry : originalToNew.entrySet()) {
+            newToOriginal.put(entry.getValue(), entry.getKey());
+        }
+        return newToOriginal;
+    }
+
+
+    @Override
     public void set_indices(ArrayList<Integer> indices) {
         this.indices = indices;
     }

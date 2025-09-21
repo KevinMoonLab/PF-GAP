@@ -269,10 +269,10 @@ public class DistanceMeasure implements Serializable {
 			distance = shapeHoG1dDTW.distance(s,t,bsf,((double[]) s).length);
 			break;
 		case dtw_i:
-			distance = dtw_i.distance(s,t,bsf,((double[]) s).length);
+			distance = dtw_i.distance(s,t,bsf,((double[][]) s).length);
 			break;
 		case dtw_d:
-			distance = dtw_d.distance(s,t,bsf,((double[]) s).length);
+			distance = dtw_d.distance(s,t,bsf,((double[][]) s).length);
 			break;
 		default:
 //			throw new Exception("Unknown distance measure");

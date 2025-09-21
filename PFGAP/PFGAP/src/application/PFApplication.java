@@ -97,11 +97,11 @@ public class PFApplication {
 				case "-numImputes":
 					AppContext.numImputes = Integer.parseInt(options[1]);
 					break;
-				case "-firstSeparator":
-					AppContext.firstSeparator = options[1];
+				case "-entry_separator":
+					AppContext.entry_separator = options[1];
 					break;
-				case "-secondSeparator":
-					AppContext.secondSeparator = options[1];
+				case "-array_separator":
+					AppContext.array_separator = options[1];
 					break;
 				case "-out":
 					AppContext.output_dir = options[1];
@@ -144,6 +144,9 @@ public class PFApplication {
 					break;
 				case "-verbosity":
 					AppContext.verbosity =  Integer.parseInt(options[1]);
+					break;
+				case "-get_training_outlier_scores":
+					AppContext.get_training_outlier_scores = Boolean.parseBoolean(options[1]);
 					break;
 				case "-getprox":
 					AppContext.getprox = Boolean.parseBoolean(options[1]);

@@ -1,16 +1,19 @@
 package core;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 //import datasets.ListDataset;
 import datasets.ListObjectDataset;
 import imputation.MeanImpute;
 import imputation.MissingIndicesBuilder;
 import org.apache.commons.lang3.ArrayUtils;
+import proximities.OutlierScorer;
 import proximities.PFImpute;
 import trees.ProximityForest;
 import util.GeneralUtilities;
@@ -55,8 +58,8 @@ public class ExperimentRunner {
 					DelimitedFileReader.readToListObjectDataset(
 							AppContext.testing_file,
 							AppContext.testing_labels,
-							AppContext.firstSeparator,
-							AppContext.secondSeparator,
+							AppContext.entry_separator,
+							AppContext.array_separator,
 							AppContext.csv_has_header,
 							AppContext.is2D,
 							AppContext.isNumeric,
@@ -74,8 +77,8 @@ public class ExperimentRunner {
 					DelimitedFileReader.readToListObjectDataset(
 							AppContext.training_file,
 							AppContext.training_labels,
-							AppContext.firstSeparator,
-							AppContext.secondSeparator,
+							AppContext.entry_separator,
+							AppContext.array_separator,
 							AppContext.csv_has_header,
 							AppContext.is2D,
 							AppContext.isNumeric,
@@ -126,9 +129,10 @@ public class ExperimentRunner {
 		String datasetName = training_file.getName().replaceAll("_TRAIN.txt", "");	//this is just some quick fix for UCR datasets
 		AppContext.setDatasetName(datasetName);
 
-		if(!eval) {
-			PrintUtilities.printConfiguration();
-		}
+		//Is this really important?
+		//if(!eval) {
+		//	PrintUtilities.printConfiguration();
+		//}
 
 		System.out.println();
 
@@ -190,8 +194,8 @@ public class ExperimentRunner {
 					GeneralUtilities.writeDelimitedData(
 							train_data.getData(),
 							AppContext.output_dir + AppContext.training_file,
-							AppContext.firstSeparator,
-							AppContext.secondSeparator
+							AppContext.array_separator,
+							AppContext.entry_separator
 					);
 				}
 
@@ -221,8 +225,8 @@ public class ExperimentRunner {
 						GeneralUtilities.writeDelimitedData(
 								test_data.getData(),
 								AppContext.output_dir + AppContext.testing_file,
-								AppContext.firstSeparator,
-								AppContext.secondSeparator
+								AppContext.array_separator,
+								AppContext.entry_separator
 						);
 					}
 
@@ -237,9 +241,14 @@ public class ExperimentRunner {
 					}
 
 					//Now we print the Predictions array to a text file.
-					PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Predictions.txt", "UTF-8");
-					//TODO: output the predictions in terms of the original classes.
-					writer0.print(ArrayUtils.toString(result.Predictions));
+					List<Integer> predictedLabels = test_data._internal_class_list(); // reordered labels
+					Map<Integer, Integer> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+					List<Integer> originalPredictions = predictedLabels.stream()
+							.map(newToOriginal::get)
+							.collect(Collectors.toList());
+					PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
+					//writer0.print(ArrayUtils.toString(result.Predictions));
+					writer0.print(ArrayUtils.toString(originalPredictions));
 					writer0.close();
 
 					//print and export resultS
@@ -247,53 +256,102 @@ public class ExperimentRunner {
 					//AppContext.output_dir = null;
 				}
 
-				if(AppContext.getprox) {
-					//Calculate array of forest proximities.
+				// what if they want outlier scores?
+				if(AppContext.get_training_outlier_scores && AppContext.getprox) {
+					// in this case, we use a dense representation of the proximities.
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Training Proximities...");
-					double t5 = System.currentTimeMillis();
 					computeTrainProximities(forest, train_data);
-					double t6 = System.currentTimeMillis();
-					System.out.print("Done Computing Training Proximities. ");
-					System.out.print("Computation time: ");
-					System.out.println(t6 - t5 + "ms");
+					System.out.println("Computing Training Outlier Scores...");
+					double[] scores = OutlierScorer.getOutlierScores(
+							AppContext.useSparseProximities,
+							false, // symmetrize??
+							true, // parallelize
+							train_data._internal_class_array(),
+							AppContext.training_proximities,
+							AppContext.training_proximities_sparse
+					);
+
+					PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "outlier_scores.txt", StandardCharsets.UTF_8);
+					writer2.print(ArrayUtils.toString(scores));
+					writer2.close();
+
+				}
+
+				if(AppContext.get_training_outlier_scores && !AppContext.getprox) {
+					// In this case we can use a sparse representation, since we won't need to return the proximities.
+					AppContext.useSparseProximities = false;
+					System.out.println("Computing Training Proximities...");
+					computeTrainProximities(forest, train_data);
+					// and now the outlier scores
+					System.out.println("Computing Training Outlier Scores...");
+					double[] scores = OutlierScorer.getOutlierScores(
+							AppContext.useSparseProximities,
+							false, // symmetrize??
+							true, // parallelize
+							train_data._internal_class_array(),
+							AppContext.training_proximities,
+							AppContext.training_proximities_sparse
+					);
+
+					PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "outlier_scores.txt", StandardCharsets.UTF_8);
+					writer2.print(ArrayUtils.toString(scores));
+					writer2.close();
+
+				}
+
+				if(AppContext.getprox) {
+					//Calculate array of forest proximities.
+					if (!AppContext.get_training_outlier_scores) {
+						// if a user already wants the scores, the proximities have already been computed.
+						AppContext.useSparseProximities = false;
+						System.out.println("Computing Training Proximities...");
+						double t5 = System.currentTimeMillis();
+						computeTrainProximities(forest, train_data);
+						double t6 = System.currentTimeMillis();
+						System.out.print("Done Computing Training Proximities. ");
+						System.out.print("Computation time: ");
+						System.out.println(t6 - t5 + "ms");
+					}
 
 
 					//Now we print the PFGAP array to a text file.
-					PrintWriter writer = new PrintWriter(AppContext.output_dir + "TrainingProximities.txt", "UTF-8");
+					PrintWriter writer = new PrintWriter(AppContext.output_dir + "TrainingProximities.txt", StandardCharsets.UTF_8);
 					//writer.print(ArrayUtils.toString(PFGAP));
 					writer.print(ArrayUtils.toString(AppContext.training_proximities));
 					writer.close();
-					Integer[] ytrain = new Integer[train_data.size()];
-					for (Integer k = 0; k < train_data.size(); k++) {
-						ytrain[k] = train_data.get_class(k);
+					//Integer[] ytrain = new Integer[train_data.size()];
+					//for (Integer k = 0; k < train_data.size(); k++) {
+					//	ytrain[k] = train_data.get_class(k);
+					//}
+					//PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "ytrain.txt", "UTF-8");
+					//writer2.print(ArrayUtils.toString(ytrain));
+					//writer2.close();
+
+					if (test_data != null) {
+						System.out.println("Computing Test/Train Proximities...");
+						double t7 = System.currentTimeMillis();
+						computeTestTrainProximities(forest, test_data, train_data);
+						double t8 = System.currentTimeMillis();
+						System.out.print("Done Computing Test/Train Proximities. ");
+						System.out.print("Computation time: ");
+						System.out.println(t8 - t7 + "ms");
+
+
+						//Now we print the PFGAP array to a text file.
+						PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", StandardCharsets.UTF_8);
+						//writer.print(ArrayUtils.toString(PFGAP));
+						writer3.print(ArrayUtils.toString(AppContext.testing_training_proximities));
+						writer3.close();
+						//Integer[] ytest = new Integer[test_data.size()];
+						//for (int k = 0; k < test_data.size(); k++) {
+						//	ytest[k] = test_data.get_class(k);
+						//}
+						//PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", StandardCharsets.UTF_8);
+						//writer4.print(ArrayUtils.toString(ytest));
+						//writer4.close();
+						test_data = null;
 					}
-					PrintWriter writer2 = new PrintWriter(AppContext.output_dir + "ytrain.txt", "UTF-8");
-					writer2.print(ArrayUtils.toString(ytrain));
-					writer2.close();
-
-					System.out.println("Computing Test/Train Proximities...");
-					double t7 = System.currentTimeMillis();
-					computeTestTrainProximities(forest, test_data, train_data);
-					double t8 = System.currentTimeMillis();
-					System.out.print("Done Computing Test/Train Proximities. ");
-					System.out.print("Computation time: ");
-					System.out.println(t8 - t7 + "ms");
-
-
-					//Now we print the PFGAP array to a text file.
-					PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", "UTF-8");
-					//writer.print(ArrayUtils.toString(PFGAP));
-					writer3.print(ArrayUtils.toString(AppContext.testing_training_proximities));
-					writer3.close();
-					Integer[] ytest = new Integer[test_data.size()];
-					for (Integer k = 0; k < test_data.size(); k++) {
-						ytest[k] = test_data.get_class(k);
-					}
-					PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", "UTF-8");
-					writer4.print(ArrayUtils.toString(ytest));
-					writer4.close();
-					test_data = null;
 				}
 				////print and export resultS
 				//result.printResults(datasetName, i, "");
@@ -341,28 +399,33 @@ public class ExperimentRunner {
 
 
 					//Now we print the PFGAP array to a text file.
-					PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", "UTF-8");
+					PrintWriter writer3 = new PrintWriter(AppContext.output_dir + "TestTrainProximities.txt", StandardCharsets.UTF_8);
 					//writer.print(ArrayUtils.toString(PFGAP));
 					writer3.print(ArrayUtils.toString(AppContext.testing_training_proximities));
 					writer3.close();
-					Integer[] ytest = new Integer[test_data.size()];
-					for (Integer k = 0; k < test_data.size(); k++) {
-						ytest[k] = test_data.get_class(k);
-					}
-					PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", "UTF-8");
-					writer4.print(ArrayUtils.toString(ytest));
-					writer4.close();
+					//Integer[] ytest = new Integer[test_data.size()];
+					//for (int k = 0; k < test_data.size(); k++) {
+					//	ytest[k] = test_data.get_class(k);
+					//}
+					//PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", StandardCharsets.UTF_8);
+					//writer4.print(ArrayUtils.toString(ytest));
+					//writer4.close();
 				}
 
-				//TODO: calculate proximities for the test points.
-				test_data = null; // erase test data.
-
 				//Now we print the Predictions array of the saved model to a text file.
-				PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", "UTF-8");
+				List<Integer> predictedLabels = test_data._internal_class_list(); // reordered labels
+				Map<Integer, Integer> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+				List<Integer> originalPredictions = predictedLabels.stream()
+						.map(newToOriginal::get)
+						.collect(Collectors.toList());
+				PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
 				//writer0a.print(ArrayUtils.toString(Predictions_saved));
 				//TODO: output the predictions in terms of the original classes.
-				writer0a.print(ArrayUtils.toString(result1.Predictions));
+				//writer0a.print(ArrayUtils.toString(result1.Predictions));
+				writer0a.print(ArrayUtils.toString(originalPredictions));
 				writer0a.close();
+
+				test_data = null; // erase test data.
 
 			}
 
