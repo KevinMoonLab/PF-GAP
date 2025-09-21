@@ -54,8 +54,8 @@ public class DelimitedFileReader {
     public static ListObjectDataset readToListObjectDataset(
             String dataFileName,
             String labelFileName,
-            String rowSeparator,
-            String columnSeparator,
+            String entry_separator,
+            String array_separator,
             boolean hasHeader,
             boolean is2D,
             boolean isNumeric,
@@ -80,7 +80,7 @@ public class DelimitedFileReader {
                     if (hasMissingValues){ //must be Double since there's missing data
                         if (is2D){
                             // numeric, has missing values, 2D: Double[][]
-                            Double[][] data = RowParser.parseBoxedDoubleMatrix(line, rowSeparator, columnSeparator);
+                            Double[][] data = RowParser.parseBoxedDoubleMatrix(line, array_separator, entry_separator);
                             Integer label = labels.get(i);
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
@@ -91,7 +91,7 @@ public class DelimitedFileReader {
                             // numeric, missing values, 1D: Double[]
                             //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                             //MissingIndicesBuilder.buildFrom(data, isTrain);
-                            Double[] data = RowParser.parseBoxedDoubleArray(line, rowSeparator);
+                            Double[] data = RowParser.parseBoxedDoubleArray(line, entry_separator);
                             Integer label = labels.get(i);
                             dataset.add(label, data, i);
                             AppContext.length = data.length;
@@ -100,7 +100,7 @@ public class DelimitedFileReader {
                         // Should be double since there's no missing data.
                         if (is2D){
                             // numeric, no missing values, 2D: double[][]
-                            double[][] data = RowParser.parseDoubleMatrix(line, rowSeparator, columnSeparator);
+                            double[][] data = RowParser.parseDoubleMatrix(line, array_separator, entry_separator);
                             Integer label = labels.get(i);
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
@@ -113,7 +113,7 @@ public class DelimitedFileReader {
                                 // this is the original case
                                 //System.out.println(line);
                                 //String[] lineArray = line.split("\t"); //line.split(rowSeparator);
-                                String[] lineArray = line.split(rowSeparator);
+                                String[] lineArray = line.split(entry_separator);
                                 //System.out.println(Arrays.toString(lineArray));
                                 ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst);
                                 dataset.add(parsed.label, parsed.features, i);
@@ -125,7 +125,7 @@ public class DelimitedFileReader {
                                 //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                             } else {
                                 // this is like the original case, except when labels are provided separately.
-                                double[] data = RowParser.parseDoubleArray(line, rowSeparator);
+                                double[] data = RowParser.parseDoubleArray(line, entry_separator);
                                 Integer label = labels.get(i);
                                 dataset.add(label, data, i);
                                 //dataset.setLength(data.length);
@@ -139,7 +139,7 @@ public class DelimitedFileReader {
                 } else{
                     // it is either Object[] or Object[][] since it's not all numeric.
                     if (is2D) {
-                        Object[][] data = RowParser.parse2DRow(line, rowSeparator, columnSeparator);
+                        Object[][] data = RowParser.parse2DRow(line, array_separator, entry_separator);
                         Integer label = labels.get(i);
                         dataset.add(label, data, i);
                         //dataset.setLength(data[0].length); //just the first one: risky.
@@ -147,7 +147,7 @@ public class DelimitedFileReader {
                         //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                         //MissingIndicesBuilder.buildFrom(data, isTrain);
                     } else {
-                        Object[] data = RowParser.parse1DRow(line, columnSeparator);
+                        Object[] data = RowParser.parse1DRow(line, entry_separator);
                         Integer label = labels.get(i);
                         dataset.add(label, data, i);
                         //dataset.setLength(data.length);
@@ -303,11 +303,11 @@ public class DelimitedFileReader {
             return parsed;
         }
 
-        public static double[][] parseDoubleMatrix(String row, String rowSeparator, String columnSeparator) {
-            String[] rowStrings = row.split(rowSeparator);
+        public static double[][] parseDoubleMatrix(String row, String array_separator, String entry_separator) {
+            String[] rowStrings = row.split(array_separator);
             double[][] matrix = new double[rowStrings.length][];
             for (int i = 0; i < rowStrings.length; i++) {
-                matrix[i] = parseDoubleArray(rowStrings[i], columnSeparator);
+                matrix[i] = parseDoubleArray(rowStrings[i], entry_separator);
             }
             return matrix;
         }
@@ -323,11 +323,11 @@ public class DelimitedFileReader {
             return parsed;
         }
 
-        public static Double[][] parseBoxedDoubleMatrix(String row, String rowSeparator, String columnSeparator) {
-            String[] rowStrings = row.split(rowSeparator);
+        public static Double[][] parseBoxedDoubleMatrix(String row, String array_separator, String entry_separator) {
+            String[] rowStrings = row.split(array_separator);
             Double[][] matrix = new Double[rowStrings.length][];
             for (int i = 0; i < rowStrings.length; i++) {
-                matrix[i] = parseBoxedDoubleArray(rowStrings[i], columnSeparator);
+                matrix[i] = parseBoxedDoubleArray(rowStrings[i], entry_separator);
             }
             return matrix;
         }
@@ -347,11 +347,11 @@ public class DelimitedFileReader {
          * Each row is parsed using the same logic as parse1DRow.
          */
         // for Object[][]
-        public static Object[][] parse2DRow(String row, String rowSeparator, String columnSeparator) {
-            String[] rowStrings = row.split(rowSeparator);
+        public static Object[][] parse2DRow(String row, String array_separator, String entry_separator) {
+            String[] rowStrings = row.split(array_separator);
             Object[][] matrix = new Object[rowStrings.length][];
             for (int i = 0; i < rowStrings.length; i++) {
-                matrix[i] = parse1DRow(rowStrings[i], columnSeparator);
+                matrix[i] = parse1DRow(rowStrings[i], entry_separator);
             }
             return matrix;
         }

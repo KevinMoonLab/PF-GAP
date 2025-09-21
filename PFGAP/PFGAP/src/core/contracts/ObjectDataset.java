@@ -26,6 +26,8 @@ public interface ObjectDataset {
 
     public int getLength();
 
+    public  Map<Integer, Integer> invertLabelMap(Map<Integer, Integer> originalToNew);
+
     public void add(Integer label, Object series, Integer index);
 
     //public void add(Integer label, Object[] series, Integer index);

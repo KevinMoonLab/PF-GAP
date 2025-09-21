@@ -51,15 +51,15 @@ public class AppContext {
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
-	public static String firstSeparator = "\t"; // the default for univariate time series.
-	public static String secondSeparator = ","; // is there a convention for this??
+	public static String entry_separator = "\t"; // the default for univariate time series (tsv).
+	public static String array_separator = ":"; // is there a convention for this??
 	// in the matrix case, "rows" are separated by firstSeparator and "columns" by secondSeparator.
 	// in the list case (univariate time series, tabular data), only the firstSeparator is used.
 	public static String output_dir = "output/";
 	public static boolean csv_has_header = false;
 	public static boolean target_column_is_first = true;
 	public static boolean eval;
-	public static int length;
+	public static int length; //firstSeparator
 
 
 	public static int num_repeats = 1;
@@ -91,6 +91,7 @@ public class AppContext {
 	public static Runtime runtime = Runtime.getRuntime();
     public static boolean savemodel;
 	public static boolean getprox;
+	public static boolean get_training_outlier_scores;
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
 	public static boolean parallelTrees = false; //false;

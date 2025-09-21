@@ -34,11 +34,11 @@ public class GeneralUtilities {
 	 *
 	 * @param data The data to write
 	 * @param filePath The output file path
-	 * @param firstSeparator Separator between top-level objects
-	 * @param secondSeparator Separator within nested arrays
+	 * @param firstSeparator Separator between top-level objects (array separator)
+	 * @param secondSeparator Separator within nested arrays (entry separator)
 	 * @throws IOException If writing fails
 	 */
-	public static void writeDelimitedData(List<Object> data, String filePath, String secondSeparator, String firstSeparator) throws IOException {
+	public static void writeDelimitedData(List<Object> data, String filePath, String firstSeparator, String secondSeparator) throws IOException {
 		// switching the arguments above is a "cheap" and confusing fix...
 		File file = new File(filePath);
 		File parentDir = file.getParentFile();
