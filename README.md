@@ -46,6 +46,7 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 
 ## 📂 Repository Structure
 
+```bash
 PF-GAP/
 ├── PFGAP/
 │   └── PFGAP/              # Java source code
@@ -57,6 +58,7 @@ PF-GAP/
 │   ├── PythonDistance.py   # Example Python distance
 │   └── MapleDistance.mpl   # Example Maple distance
 └── README.md
+```
 
 
 ## ⚡ Quickstart
