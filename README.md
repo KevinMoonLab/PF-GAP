@@ -30,6 +30,34 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 
 ---
 
+
+## 🛠 Installation
+
+### Requirements
+
+- **Java 17+**
+- **Python 3.8+** (tested with Python 3.13)
+- Python packages:
+  ```bash
+  pip install numpy pandas matplotlib scikit-learn aeon
+ ```
+- Optional: **Maple 2016+** (for Maple-based distance functions)
+
+## 📂 Repository Structure
+
+PF-GAP/
+├── PFGAP/
+│   └── PFGAP/              # Java source code
+├── Application/
+│   ├── PFGAP.jar           # Compiled Java executable
+│   ├── PF_wrapper.py       # Python interface to PFGAP.jar
+│   ├── demo_*.py           # Demo scripts (converted from notebooks)
+│   ├── Data/               # Sample datasets
+│   ├── PythonDistance.py   # Example Python distance
+│   └── MapleDistance.mpl   # Example Maple distance
+└── README.md
+
+
 ## ⚡ Quickstart
 
 ```bash
@@ -108,7 +136,7 @@ distances=["python"]  # or ["maple"]
 
 ### Example MDS Visualization
 
-![Demo MDS GunPoint Train](Demo_MDS_GunPointTrain.png)
+![Demo MDS GunPoint Train](PFGAP/Application/Demo_MDS_GunPointTrain.pdf)
 
 ---
 
