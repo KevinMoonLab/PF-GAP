@@ -233,13 +233,6 @@ public class ExperimentRunner {
 
 					ProximityForestResult result = forest.test(test_data);
 
-
-
-
-					if (!AppContext.getprox) {
-						test_data = null; // erase the test data information (or after test/train prox)
-					}
-
 					//Now we print the Predictions array to a text file.
 					List<Integer> predictedLabels = test_data._internal_class_list(); // reordered labels
 					Map<Integer, Integer> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
@@ -254,6 +247,11 @@ public class ExperimentRunner {
 					//print and export resultS
 					result.printResults(datasetName, i, "");
 					//AppContext.output_dir = null;
+
+					if (!AppContext.getprox) {
+						test_data = null; // erase the test data information (or after test/train prox)
+					}
+
 				}
 
 				// what if they want outlier scores?
