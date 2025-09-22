@@ -20,55 +20,42 @@ public class DTW_D implements Serializable {
         int len1 = series1[0].length;
         int len2 = series2[0].length;
 
+        // Validate all rows have consistent time lengths
+        for (int d = 0; d < dims1; d++) {
+            if (series1[d].length != len1 || series2[d].length != len2) {
+                throw new IllegalArgumentException("All dimensions must have consistent time lengths.");
+            }
+        }
+
         if (windowSize == -1) {
             windowSize = Math.max(len1, len2);
         }
 
-        double[] prevRow = new double[len2];
-        double[] currentRow = new double[len2];
+        double[][] cost = new double[len1][len2];
 
-        // Initialize first row
-        prevRow[0] = squaredDistanceAt(series1, series2, 0, 0);
-        if (prevRow[0] > bsf * bsf) return Double.POSITIVE_INFINITY;
-
-        for (int j = 1; j < Math.min(len2, 1 + windowSize); j++) {
-            prevRow[j] = prevRow[j - 1] + squaredDistanceAt(series1, series2, 0, j);
-            if (prevRow[j] > bsf * bsf) return Double.POSITIVE_INFINITY;
-        }
-
-        // Second row
-        if (len1 >= 2) {
-            currentRow[0] = prevRow[0] + squaredDistanceAt(series1, series2, 1, 0);
-            if (currentRow[0] > bsf * bsf) return Double.POSITIVE_INFINITY;
-
-            currentRow[1] = prevRow[0] + squaredDistanceAt(series1, series2, 1, 1);
-            if (currentRow[1] > bsf * bsf) return Double.POSITIVE_INFINITY;
-
-            for (int j = 2; j < Math.min(len2, windowSize + 2); j++) {
-                currentRow[j] = Math.min(currentRow[j - 1], prevRow[j - 1]) + squaredDistanceAt(series1, series2, 1, j);
-                if (currentRow[j] > bsf * bsf) return Double.POSITIVE_INFINITY;
-            }
-        }
-
-        // Remaining rows
-        for (int i = 2; i < len1; i++) {
+        for (int i = 0; i < len1; i++) {
             int jStart = Math.max(0, i - windowSize);
             int jStop = Math.min(len2 - 1, i + windowSize);
 
-            double[] tmp = prevRow;
-            prevRow = currentRow;
-            currentRow = tmp;
+            for (int j = jStart; j <= jStop; j++) {
+                double dist = squaredDistanceAt(series1, series2, i, j);
 
-            currentRow[jStart] = Math.min(prevRow[jStart], prevRow[Math.max(0, jStart - 1)]) + squaredDistanceAt(series1, series2, i, jStart);
-            if (currentRow[jStart] > bsf * bsf) return Double.POSITIVE_INFINITY;
+                if (i == 0 && j == 0) {
+                    cost[i][j] = dist;
+                } else {
+                    double minPrev = Double.POSITIVE_INFINITY;
+                    if (i > 0 && j > 0) minPrev = Math.min(minPrev, cost[i - 1][j - 1]);
+                    if (i > 0) minPrev = Math.min(minPrev, cost[i - 1][j]);
+                    if (j > 0) minPrev = Math.min(minPrev, cost[i][j - 1]);
 
-            for (int j = jStart + 1; j <= jStop; j++) {
-                currentRow[j] = min(prevRow[j - 1], currentRow[j - 1], prevRow[j]) + squaredDistanceAt(series1, series2, i, j);
-                if (currentRow[j] > bsf * bsf) return Double.POSITIVE_INFINITY;
+                    cost[i][j] = dist + minPrev;
+                }
+
+                if (cost[i][j] > bsf * bsf) return Double.POSITIVE_INFINITY;
             }
         }
 
-        double finalDist = Math.sqrt(currentRow[len2 - 1]);
+        double finalDist = Math.sqrt(cost[len1 - 1][len2 - 1]);
         return finalDist > bsf ? Double.POSITIVE_INFINITY : finalDist;
     }
 
@@ -80,9 +67,4 @@ public class DTW_D implements Serializable {
         }
         return sum;
     }
-
-    private double min(double a, double b, double c) {
-        return Math.min(a, Math.min(b, c));
-    }
 }
-

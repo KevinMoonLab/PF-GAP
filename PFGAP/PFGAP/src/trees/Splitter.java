@@ -41,7 +41,8 @@ public class Splitter implements Serializable {
 	public ListObjectDataset[] split_data(ObjectDataset sample, Map<Integer, ListObjectDataset> data_per_class) throws Exception {
 //		num_children = sample.get_num_classes();
 		ListObjectDataset[] splits = new ListObjectDataset[sample.get_num_classes()];
-		temp_exemplars = new Object[sample.get_num_classes()][]; //double[sample.get_num_classes()][];
+		//temp_exemplars = new Object[sample.get_num_classes()][]; //double[sample.get_num_classes()][];
+		temp_exemplars = new Object[sample.get_num_classes()];
 
 		int branch = 0;
 		for (Map.Entry<Integer, ListObjectDataset> entry : data_per_class.entrySet()) {

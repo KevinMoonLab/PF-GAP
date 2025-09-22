@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import os
 
-def PF_Train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False):
+def train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False):
     
     TFdict = {True:"true", False:"false"}
     if (data_dimension not in [1,2]):
@@ -71,10 +71,10 @@ def PF_Train(train_file, test_file=None, train_labels=None, test_labels=None, re
     return
 
 
-def PF_Predict(model_name, testfile, test_labels=None, output_directory="", shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", parallel_train=False, memory='1g', data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":"):
+def predict(model_name, testfile, test_labels=None, output_directory="", shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", parallel_train=False, memory='1g', data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":"):
     
     TFdict = {True:"true", False:"false"}
-    if (data_dimension!=1 or data_dimension!=2):
+    if (data_dimension not in [1,2]):
         print("Keyword argument 'data_dimension' must be 1 or 2.")
         return
     else:
@@ -82,6 +82,11 @@ def PF_Predict(model_name, testfile, test_labels=None, output_directory="", shuf
             is2D = False
         else:
             is2D = True
+    
+    if entry_separator=="\t":
+        entry_separator = "\\t"
+    if array_separator=="\t":
+        array_separator = "\\t"
     
     msgList = ['java', '-jar']
     msgList.extend(['-Xmx' + memory])
@@ -93,10 +98,10 @@ def PF_Predict(model_name, testfile, test_labels=None, output_directory="", shuf
     msgList.extend(["-shuffle=" + TFdict[shuffle]])
     msgList.extend(["-export=" + str(export)])
     msgList.extend(["-verbosity=" + str(verbosity)])
-    msgList.extend(["-csv_has_header=" + file_has_header])
+    msgList.extend(["-csv_has_header=" + TFdict[file_has_header]])
     msgList.extend(["-target_column=" + target_column])
     msgList.extend(["-modelname=" + model_name])
-    msgList.extend(["-parallelTrees=" + TF[parallel_train]])
+    msgList.extend(["-parallelTrees=" + TFdict[parallel_train]])
     msgList.extend(["-is2D=" + TFdict[is2D]])
     msgList.extend(["-isNumeric=" + TFdict[numeric_data]])
     msgList.extend(["-entry_separator=" + entry_separator])
@@ -118,7 +123,7 @@ def PF_Predict(model_name, testfile, test_labels=None, output_directory="", shuf
 def getArray(filename):
     # this simply reads the Java arrays as numpy arrays.
     # Intended for outlier scores and proximities.
-    f1 = open(proxfile)
+    f1 = open(filename)
     f2 = f1.read()
     f2 = f2.replace("{","[")
     f2 = f2.replace("}","]")
