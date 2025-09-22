@@ -141,13 +141,13 @@ Depending on options, PF-GAP may generate:
 
 Use `PF_wrapper.getArray(filename)` to load proximity or outlier arrays.
 
-🔹 Outlier Scores
+🔹 **Outlier Scores**
 
 - Set return_training_outlier_scores=True to compute intra-class outlier scores.
 - These are saved to outlier_scores.txt in the output directory.
-- Use PF_wrapper.getArray("outlier_scores.txt") to load them as a NumPy array.
+- Use PF_wrapper.getArray(output_directory + "outlier_scores.txt") to load them as a NumPy array.
 
-🔹 Imputed Data
+🔹 **Imputed Data**
 
 - If impute_training_data=True and return_imputed_training=True, the imputed training set is saved to:
 
@@ -163,7 +163,7 @@ Use `PF_wrapper.getArray(filename)` to load proximity or outlier arrays.
 
 - These files preserve the original format and delimiters.
 
-🔹 Proximity Matrices
+🔹 **Proximity Matrices**
 
 - If return_proximities=True, proximity matrices are saved to:
 
@@ -196,5 +196,6 @@ pt = PF_wrapper.getArray(str(output_directory) + "TestTrainProximities.txt")
 
 If you use PF-GAP in your work, please cite:
 
+> Ben Shaw, Jake Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon.
 > **Forest Proximities for Time Series**, IntelliSys 2025  
-> [Project Page](https://sites.google.com/view/forest-proximities)
+> [arXiv preprint](https://arxiv.org/abs/2410.03098)
