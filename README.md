@@ -38,9 +38,10 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 - **Java 17+**
 - **Python 3.8+** (tested with Python 3.13)
 - Python packages:
-  ```bash
+
+```bash
   pip install numpy pandas matplotlib scikit-learn aeon
- ```
+```
 - Optional: **Maple 2016+** (for Maple-based distance functions)
 
 ## 📂 Repository Structure
