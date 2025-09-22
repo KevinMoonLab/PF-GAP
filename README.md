@@ -1,38 +1,200 @@
 # PF-GAP
 
-This repository provides an implementation of PF-GAP. This implementation makes extensive use of the java-based implementation of proximity forests (referred to here as the PF model, https://github.com/fpetitjean/ProximityForest/tree/master).
+[![Java](https://img.shields.io/badge/Java-17%2B-blue.svg)](https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-PF-GAP is an extension of the original PF model. First, PF-GAP extends PF by the inclusion of RF-GAP proximities (https://github.com/jakerhodes/RF-GAP-Python), useful in particular for outlier detection, imputation, and visualization. Second, PF-GAP allows for distance customization, extending the PF model to any data type for which a distance measure can be defined (and where class labels are given). Note that in order to use GAP proximities, PF-GAP also uses bootstrap sampling, though the original PF model does not.
+PF-GAP is a flexible, extensible framework for proximity-based learning on time series and structured data. It builds on the original [Proximity Forest (PF)](https://github.com/fpetitjean/ProximityForest) model and introduces:
 
-## Requirements
+- **GAP proximities** for imputation, outlier detection, and visualization
+- **Custom distance functions** (in Python, Maple, or Java)
+- **Support for multivariate and variable-length time series**
+- **Parallel training and proximity computation**
+- **Flexible data formatting and imputation options**
 
-Java 17. Recommended: python 3 with packages "numpy", "subprocess", and "os".
-Optional: Maple (2016+). This only applies if you want to use Maple to compute distances.
+---
+## 📚 Table of Contents
 
-## Using PF-GAP
+1. [Installation](#installation)
+2. [Repository Structure](#repository-structure)
+3. [Quickstart](#quickstart)
+4. [Usage](#usage)
+   - [Training](#training)
+   - [Prediction](#prediction)
+   - [Imputation](#imputation)
+   - [Custom Distances](#custom-distances)
+5. [Demo Notebooks](#demo-notebooks)
+6. [Data Format](#data-format)
+7. [Output Files](#output-files)
+8. [Citation](#citation)
 
-It is not necessary to clone this repository to use PF-GAP. One only needs three files in the Application folder, namely the .jar files and the proxUtil.py file. In the Application folder, the "PythonDistance.py" and "MapleDistance.mpl" files are provided as examples if a user wants to define a distance measure using either python or Maple. The "Demo.ipynb" file illustrates the use of PFGAP, with minimal data provided in the "Data/" folder in order to run the notebook. 
+---
 
-The proxUtil.py file is not strictly necessary, but rather provides a convenient mechanism for calling the PFGAP.jar file in python. The proxUtil.py file contains the function getProx, which calls the PFGAP.jar file, building and training a Proximity Forest using the training data, then applying Proximity Forest on the test data (if supplied), optionally computing proximities for the training samples. The training/test data files are specified in the function arguments. Other parameters may be passed to this function as well, including the desired number of trees and r parameter. By default, the PFGAP.jar file creates a "Predictions.txt" file containing the predictions on the test dataset, a "ForestProximities.txt" file containing the array of forest proximities, and a "ytrain.txt" file containing the ground-truth class labels (currently re-mapped) from the training dataset. 
+## ⚡ Quickstart
 
-The output of the getProxArrays() is twofold: the (numpy) array of proximities read from the "Proximities.txt" file, and the (numpy) array of training labels read from the "ytrain.txt" file. The proximity array can be symmetrized with the SymmetrizeProx(ProximityArray) function (not in-place). The getOutlierScores(ProximityArray,ytrain) function is used to compute within-class outlier scores: it returns a list.
+```bash
+# From the Application directory
+python demo_gunpoint.py
+```
 
-By Default, the getProx() function also creates a modelname.ser file of the serialized trained proximity forest. This can be used to evaluate additional test data using the evalPF(testdata, modelname="PF") function, which function calls the PFGAP.jar file to perform the evaluation. The PFGAP.jar file also creates a "Predictions_saved.txt" file containing the model predictions on the evaluated data.
+# 🚀 Usage
 
-## Custom Distances in Python or Maple
+# Training
+Use PF_wrapper.train() to train a proximity forest:
 
-The "distances" keyword can be used to specify which distances are to be used (using proxUtil.py, this is passed using a list of strings). For a Python-defined distance, the keyword argument is ["python"], while for a Maple-defined distance, the keyword argument is ["maple"]. In either case, a file, "PythonDistance.py" or "MapleDistance.mpl", respectively, must be provided.
+```python
+import PF_wrapper as PF
 
-At the time of writing, if a python- or maple-defined distance is used, only a single distance should be used at a time, meaning the keyword argument "distances" should contain a list of only a single element, which element is either "python" or "maple", respectively. Currently, python (or Maple) is called in Java via the command terminal, and the output is then read back into Java. Future improvements to this interface (using Jython and/or OpenMaple) may be considered in the future. (Of course, most distances can also just be written in Java, which would be the faster option.)
+PF.train(
+    train_file="Data/GunPoint_TRAIN.tsv",
+    model_name="Spartacus",
+    return_proximities=True,
+    output_directory="training_output",
+    entry_separator="\t"
+)
+```
 
-When creating a "PythonDistance.py" or "MapleDistance.mpl" file, the name of the function/procedure to compute distances must be named "Distance" and must take, as input, two lists. See the provided PythonDistance.py and MapleDistance.mpl files in the Application folder for examples.
+# Prediction
+Use PF_wrapper.predict() to evaluate a saved model on a test set:
 
-## Data format
+```python
+PF.predict(
+    model_name="training_output/Spartacus",
+    testfile="Data/GunPoint_TEST.tsv",
+    entry_separator="\t"
+)
+```
 
-The program is designed to be compatible with .tsv files formatted in the same way as files from the UCR 2018 repository (https://www.cs.ucr.edu/~eamonn/time_series_data_2018/). In particular, the class label and the data is given in the same file.
+# Imputation
+PF-GAP supports iterative imputation for both training and test sets:
 
-For more generic data types with user-defined distances, it is possible to pass a .tsv file into PF-GAP containing the training labels and indices corresponding to the training instances. Then, a user-created distance can reference another datafile using the indices which are passed from PF-GAP to the custom distance.
+```python
+PF.train(
+    train_file="Data/differentlengths.txt",
+    test_file="Data/differentlengths_test.txt",
+    train_labels="Data/differentlabels.txt",
+    test_labels="Data/differentlabels_test.txt",
+    impute_training_data=True,
+    return_imputed_training=True,
+    impute_testing_data=True,
+    return_imputed_testing=True,
+    impute_iterations=5,
+    data_dimension=2,
+    entry_separator=",",
+    array_separator=":"
+)
+```
 
-## Associsted Papers
+Custom Distances
+You can define your own distance function in:
 
-"Forest Proximities for Time Series," IntelliSys 2025. Project page: https://sites.google.com/view/forest-proximities
+- *Python:* PythonDistance.py with a function Distance(list1, list2)
+- *Maple:* MapleDistance.mpl with a function Distance(list1, list2)
+
+Specify the distance source using:
+
+```python
+distances=["python"]  # or ["maple"]
+```
+
+
+## 📊 Demo Notebooks
+
+| Demo | Description |
+|------|-------------|
+| `demo_gunpoint.py` | Classic PF classification on UCR GunPoint dataset |
+| `demo_multi_impute.py` | Imputation on multivariate time series with missing values |
+| `demo_load_japanese.py` | Large-scale multivariate classification with variable-length sequences |
+
+### Example MDS Visualization
+
+![Demo MDS GunPoint Train](Demo_MDS_GunPointTrain.png)
+
+---
+
+## 📄 Data Format
+
+PF-GAP supports flexible input formats:
+
+- **UCR-style `.tsv` files** (label + data in one file)
+- **Custom delimited files** with:
+  - `entry_separator` (e.g., `","`, `"	"`)
+  - `array_separator` (e.g., `":"` for 2D arrays)
+
+For multivariate or 3D data, use `data_dimension=2`.
+
+---
+
+## 📂 Output Files
+
+Depending on options, PF-GAP may generate:
+
+| File | Description |
+|------|-------------|
+| `Predictions.txt` | Predictions on test set |
+| `Predictions_saved.txt` | Predictions from a saved model |
+| `TrainingProximities.txt` | Proximity matrix for training set |
+| `TestTrainProximities.txt` | Proximities between test and train |
+| `outlier_scores.txt` | Intra-class outlier scores |
+| `imputed_train.txt` | Imputed training data (if requested) |
+| `imputed_test.txt` | Imputed test data (if requested) |
+
+Use `PF_wrapper.getArray(filename)` to load proximity or outlier arrays.
+
+🔹 Outlier Scores
+
+- Set return_training_outlier_scores=True to compute intra-class outlier scores.
+- These are saved to outlier_scores.txt in the output directory.
+- Use PF_wrapper.getArray("outlier_scores.txt") to load them as a NumPy array.
+
+🔹 Imputed Data
+
+- If impute_training_data=True and return_imputed_training=True, the imputed training set is saved to:
+
+```bash
+[output_directory]/[train_file].txt
+```
+
+- Similarly, return_imputed_testing=True saves:
+
+```bash
+[output_directory]/[test_file].txt
+```
+
+- These files preserve the original format and delimiters.
+
+🔹 Proximity Matrices
+
+- If return_proximities=True, proximity matrices are saved to:
+
+    - TrainingProximities.txt (train vs. train)
+    - TestTrainProximities.txt (test vs. train)
+
+
+- These are used internally for imputation and outlier detection, but can also be used for:
+
+    - **MDS or PHATE visualization**
+    - **Clustering**
+    - **Custom analysis**
+
+
+Load them with:
+
+```python
+p = PF_wrapper.getArray(str(output_directory) + "TrainingProximities.txt")
+```
+
+or:
+
+```python
+pt = PF_wrapper.getArray(str(output_directory) + "TestTrainProximities.txt")
+```
+
+---
+
+## 📖 Citation
+
+If you use PF-GAP in your work, please cite:
+
+> **Forest Proximities for Time Series**, IntelliSys 2025  
+> [Project Page](https://sites.google.com/view/forest-proximities)
