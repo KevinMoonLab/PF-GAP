@@ -57,7 +57,8 @@ public class pfgap{
                 false,
                 true,
                 false,
-                true);
+                true,
+                false);
         //TODO: build missing values.
         // Here is the test set, if testing is desired.
         //String test_file = "/home/ben/Documents/SchoolGithub/Math_Dissertation/Data_Science/PFGAP/Data/GunPoint_TEST.csv";
@@ -71,7 +72,8 @@ public class pfgap{
                 false,
                 true,
                 false,
-                true
+                true,
+                false
         );
         //TODO: build missing values.
         System.out.println("Training...");
@@ -96,7 +98,7 @@ public class pfgap{
         double t5 = System.currentTimeMillis();
         Double[][] PFGAP = new Double[train_data.size()][train_data.size()];
         for (Integer i=0; i< train_data.size(); i++){
-            for (Integer j=0; j< train_data.size(); j++){
+            for (int j = 0; j< train_data.size(); j++){
                 Double prox = ForestProximity(i,j,PF);
                 PFGAP[i][j] = prox;
             }
@@ -113,13 +115,13 @@ public class pfgap{
         PrintWriter writer = new PrintWriter("Results/Proximities/" + dataset + "_Proximities.txt", "UTF-8");
         writer.print(ArrayUtils.toString(PFGAP));
         writer.close();
-        Integer[] ytrain = new Integer[train_data.size()];
+        /*Integer[] ytrain = new Integer[train_data.size()];
         for(Integer i=0; i< train_data.size(); i++){
             ytrain[i] = train_data.get_class(i);
         }
         PrintWriter writer2 = new PrintWriter("Results/ytrain/" + dataset + "_ytrain.txt", "UTF-8");
         writer2.print(ArrayUtils.toString(ytrain));
-        writer2.close();
+        writer2.close();*/
 
 
     }

@@ -10,7 +10,6 @@ import java.util.stream.Collectors;
 
 //import datasets.ListDataset;
 import datasets.ListObjectDataset;
-import imputation.MeanImpute;
 import imputation.MissingIndicesBuilder;
 import org.apache.commons.lang3.ArrayUtils;
 import proximities.OutlierScorer;
@@ -54,6 +53,7 @@ public class ExperimentRunner {
 			/*test_data_original =
 					CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
 							AppContext.target_column_is_first, csvSeparatpr);*/
+			//TODO: make testing_labels optional.
 			test_data_original =
 					DelimitedFileReader.readToListObjectDataset(
 							AppContext.testing_file,
@@ -64,7 +64,8 @@ public class ExperimentRunner {
 							AppContext.is2D,
 							AppContext.isNumeric,
 							AppContext.hasMissingValues,
-							AppContext.target_column_is_first);
+							AppContext.target_column_is_first,
+							AppContext.isRegression);
 		}
 		//ListDataset test_data_original =
 		//		CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
@@ -83,7 +84,8 @@ public class ExperimentRunner {
 							AppContext.is2D,
 							AppContext.isNumeric,
 							AppContext.hasMissingValues,
-							AppContext.target_column_is_first);
+							AppContext.target_column_is_first,
+							AppContext.isRegression);
 		}
 		else{
 			train_data_original = test_data_original;
@@ -101,14 +103,22 @@ public class ExperimentRunner {
 		 * After thats done, we will not be reordering class here.
 		 *
 		 */
-		train_data = train_data_original.reorder_class_labels(null);
+		if (!AppContext.isRegression) {
+			train_data = train_data_original.reorder_class_labels(null);
+		} else {
+			train_data = train_data_original; //do we need to make a deep copy?
+		}
 		//train_data.setLength(train_data_original.length());
 		if (AppContext.hasMissingValues){
 			train_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(train_data.getData()));
 		}
 
 		if(AppContext.testing_file != null) {
-			test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+			if (!AppContext.isRegression) {
+				test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+			} else {
+				test_data = test_data_original; // again do we need to make a copy?
+			}
 			//test_data.setLength(test_data_original.length());
 			if (AppContext.hasMissingValues){
 				test_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(test_data.getData()));
@@ -161,7 +171,7 @@ public class ExperimentRunner {
 				if (AppContext.hasMissingValues && AppContext.isNumeric) {
 					System.out.println("Imputing the training set...");
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
-					MeanImpute.Impute(train_data);
+					AppContext.initial_imputer.Impute(train_data);
 					for (int j = 0; j < AppContext.numImputes; j++){
 						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 						ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
@@ -206,10 +216,9 @@ public class ExperimentRunner {
 
 
 					//Perform imputation, if needed.
-					if (AppContext.hasMissingValues && AppContext.isNumeric) {
+					if (AppContext.hasMissingValues) {
 						System.out.println("Imputing the test dataset...");
-						//first, do the mean impute. Later, we'll let users select which imputer to use.
-						MeanImpute.Impute(test_data);
+						AppContext.initial_imputer.Impute(test_data);
 						for (int j = 0; j < AppContext.numImputes; j++){
 							//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 							//ProximityForestResult result = forest.test(test_data);
@@ -234,15 +243,23 @@ public class ExperimentRunner {
 					ProximityForestResult result = forest.test(test_data);
 
 					//Now we print the Predictions array to a text file.
-					List<Integer> predictedLabels = test_data._internal_class_list(); // reordered labels
-					Map<Integer, Integer> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
-					List<Integer> originalPredictions = predictedLabels.stream()
-							.map(newToOriginal::get)
-							.collect(Collectors.toList());
-					PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
-					//writer0.print(ArrayUtils.toString(result.Predictions));
-					writer0.print(ArrayUtils.toString(originalPredictions));
-					writer0.close();
+					List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
+					if (!AppContext.isRegression) {
+						Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+						List<Object> originalPredictions = predictedLabels.stream()
+								.map(newToOriginal::get)
+								.collect(Collectors.toList());
+						PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
+						//writer0.print(ArrayUtils.toString(result.Predictions));
+						writer0.print(ArrayUtils.toString(originalPredictions));
+						writer0.close();
+					} else {
+						PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
+						//writer0.print(ArrayUtils.toString(result.Predictions));
+						writer0.print(ArrayUtils.toString(predictedLabels));
+						writer0.close();
+					}
+
 
 					//print and export resultS
 					result.printResults(datasetName, i, "");
@@ -254,8 +271,8 @@ public class ExperimentRunner {
 
 				}
 
-				// what if they want outlier scores?
-				if(AppContext.get_training_outlier_scores && AppContext.getprox) {
+				// what if they want outlier scores? must be a classification problem.
+				if(AppContext.get_training_outlier_scores && AppContext.getprox && !AppContext.isRegression) {
 					// in this case, we use a dense representation of the proximities.
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Training Proximities...");
@@ -276,7 +293,7 @@ public class ExperimentRunner {
 
 				}
 
-				if(AppContext.get_training_outlier_scores && !AppContext.getprox) {
+				if(AppContext.get_training_outlier_scores && !AppContext.getprox && !AppContext.isRegression) {
 					// In this case we can use a sparse representation, since we won't need to return the proximities.
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Training Proximities...");
@@ -374,7 +391,7 @@ public class ExperimentRunner {
 				if (AppContext.hasMissingValues && AppContext.isNumeric) {
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
 					System.out.println("Performing initial imputation...");
-					MeanImpute.Impute(test_data);
+					AppContext.initial_imputer.Impute(test_data);
 					for (int j = 0; j < AppContext.numImputes; j++){
 						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 						System.out.println("Updating missing values...");
@@ -411,17 +428,23 @@ public class ExperimentRunner {
 				}
 
 				//Now we print the Predictions array of the saved model to a text file.
-				List<Integer> predictedLabels = test_data._internal_class_list(); // reordered labels
-				Map<Integer, Integer> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
-				List<Integer> originalPredictions = predictedLabels.stream()
-						.map(newToOriginal::get)
-						.collect(Collectors.toList());
-				PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
-				//writer0a.print(ArrayUtils.toString(Predictions_saved));
-				//TODO: output the predictions in terms of the original classes.
-				//writer0a.print(ArrayUtils.toString(result1.Predictions));
-				writer0a.print(ArrayUtils.toString(originalPredictions));
-				writer0a.close();
+				List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
+				if (!AppContext.isRegression) {
+					Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+					List<Object> originalPredictions = predictedLabels.stream()
+							.map(newToOriginal::get)
+							.collect(Collectors.toList());
+					PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
+					//writer0a.print(ArrayUtils.toString(Predictions_saved));
+					//TODO: output the predictions in terms of the original classes.
+					//writer0a.print(ArrayUtils.toString(result1.Predictions));
+					writer0a.print(ArrayUtils.toString(originalPredictions));
+					writer0a.close();
+				} else {
+					PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
+					writer0a.print(ArrayUtils.toString(predictedLabels));
+					writer0a.close();
+				}
 
 				test_data = null; // erase test data.
 

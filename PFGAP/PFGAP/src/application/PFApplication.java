@@ -4,9 +4,12 @@ import core.AppContext;
 import core.ExperimentRunner;
 //import distance.elastic.MEASURE;
 import distance.MEASURE;
+import imputation.LinearImpute;
+import imputation.MeanImpute;
+import imputation.MedianImpute;
+import imputation.ModeImpute;
 import util.GeneralUtilities;
 import util.PrintUtilities;
-
 import java.io.IOException;
 import java.util.*;
 
@@ -39,7 +42,7 @@ public class PFApplication {
 			"-csv_has_header=false", 
 			"-target_column=first"	//first or last
             };
-	
+
 	public static void main(String[] args) throws IOException {
 		//Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir testdir0"});
 		try {
@@ -78,6 +81,18 @@ public class PFApplication {
 					} else {
 						AppContext.testing_labels = options[1];
 					}
+					break;
+				case "-isRegression":
+					AppContext.isRegression = Boolean.parseBoolean(options[1]);
+					break;
+				case "-purity_measure":
+					AppContext.purity_measure = options[1];
+					break;
+				case "-voting":
+					AppContext.voting = options[1];
+					break;
+				case "-purity_threshold":
+					AppContext.purity_threshold = Double.parseDouble(options[1]);
 					break;
 				case "-impute_train":
 					AppContext.impute_train = Boolean.parseBoolean(options[1]);
@@ -163,6 +178,27 @@ public class PFApplication {
 				case "-parallelProx":
 					AppContext.parallelProx = Boolean.parseBoolean(options[1]);
 					break;
+				case "-initial_imputer":
+					String inputString = options[1];
+
+					switch (inputString.toLowerCase()) {
+						case "mean":
+							AppContext.initial_imputer = new MeanImpute();
+							break;
+						case "linear":
+							AppContext.initial_imputer = new LinearImpute();
+							break;
+						case "median":
+							AppContext.initial_imputer = new MedianImpute();
+							break;
+						case "mode":
+							AppContext.initial_imputer = new ModeImpute();
+							break;
+						default:
+							throw new IllegalArgumentException("Unknown imputer: " + options[1]);
+					}
+					break;
+
 				case "-distances":
 					String temp = options[1];
 					String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'

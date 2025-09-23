@@ -12,44 +12,6 @@ import java.util.stream.Collectors;
 
 public class DelimitedFileReader {
 
-    /*public static ListDataset readToListDataset(String fileName, boolean hasHeader, boolean targetColumnIsFirst, String separator) {
-        File f = new File(fileName);
-        ListDataset dataset = null;
-        int i = 0;
-        long start = System.nanoTime();
-
-        try (BufferedReader br = new BufferedReader(new FileReader(fileName))) {
-            System.out.print("reading file [" + f.getName() + "]:");
-
-            int[] fileInfo = FileInfoExtractor.getFileInformation(fileName, hasHeader, separator);
-            int expectedSize = fileInfo[0];
-            int dataLength = fileInfo[1] - 1;
-
-            dataset = new ListDataset(expectedSize, dataLength);
-
-            if (hasHeader) br.readLine(); // skip header
-
-            String line;
-            while ((line = br.readLine()) != null) {
-                String[] lineArray = line.split(separator);
-                ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst);
-                dataset.add(parsed.label, parsed.features, i);
-
-                ProgressLogger.logProgress(i);
-                i++;
-            }
-
-            long end = System.nanoTime();
-            ProgressLogger.logDuration(start, end);
-
-        } catch (IOException e) {
-            PrintUtilities.abort(e);
-        }
-
-        return dataset;
-    }*/
-
-
     // this is the more generic reader.
     public static ListObjectDataset readToListObjectDataset(
             String dataFileName,
@@ -60,7 +22,8 @@ public class DelimitedFileReader {
             boolean is2D,
             boolean isNumeric,
             boolean hasMissingValues,
-            boolean targetColumnIsFirst
+            boolean targetColumnIsFirst,
+            boolean isRegression
     ) {
         ListObjectDataset dataset = new ListObjectDataset();
         File f = new File(dataFileName);
@@ -68,7 +31,8 @@ public class DelimitedFileReader {
         long start = System.nanoTime();
 
         try {
-            List<Integer> labels = readLabels(labelFileName, hasHeader);
+            //List<Integer> labels = readLabels(labelFileName, hasHeader);
+            List<Object> labels = readGenericLabels(labelFileName, hasHeader, isRegression);
             BufferedReader br = new BufferedReader(new FileReader(dataFileName));
             if (hasHeader) br.readLine(); // skip header
 
@@ -81,18 +45,16 @@ public class DelimitedFileReader {
                         if (is2D){
                             // numeric, has missing values, 2D: Double[][]
                             Double[][] data = RowParser.parseBoxedDoubleMatrix(line, array_separator, entry_separator);
-                            Integer label = labels.get(i);
+                            //Integer label = labels.get(i);
+                            Object label = labels.get(i);
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
                             AppContext.length = data[0].length;
-                            //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
-                            //MissingIndicesBuilder.buildFrom(data, isTrain);
                         } else {
                             // numeric, missing values, 1D: Double[]
-                            //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
-                            //MissingIndicesBuilder.buildFrom(data, isTrain);
                             Double[] data = RowParser.parseBoxedDoubleArray(line, entry_separator);
-                            Integer label = labels.get(i);
+                            //Integer label = labels.get(i);
+                            Object label = labels.get(i);
                             dataset.add(label, data, i);
                             AppContext.length = data.length;
                         }
@@ -101,37 +63,28 @@ public class DelimitedFileReader {
                         if (is2D){
                             // numeric, no missing values, 2D: double[][]
                             double[][] data = RowParser.parseDoubleMatrix(line, array_separator, entry_separator);
-                            Integer label = labels.get(i);
+                            //Integer label = labels.get(i);
+                            Object label = labels.get(i);
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
                             AppContext.length = data[0].length;
-                            // there should be no missing data: do we have to construct this?
-                            //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                         } else {
                             // numeric, no missing values, 1D: double[].
                             if (labelFileName == null){
                                 // this is the original case
-                                //System.out.println(line);
-                                //String[] lineArray = line.split("\t"); //line.split(rowSeparator);
                                 String[] lineArray = line.split(entry_separator);
-                                //System.out.println(Arrays.toString(lineArray));
-                                ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst);
+                                ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst, isRegression);
                                 dataset.add(parsed.label, parsed.features, i);
                                 //dataset.setLength(parsed.features.length);
                                 AppContext.length = parsed.features.length;
-                                //System.out.println(parsed.features.length);
-                                //System.out.println(dataset.length());
-                                // there should be no missing data: do we have to construct this?
-                                //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                             } else {
                                 // this is like the original case, except when labels are provided separately.
                                 double[] data = RowParser.parseDoubleArray(line, entry_separator);
-                                Integer label = labels.get(i);
+                                //Integer label = labels.get(i);
+                                Object label = labels.get(i);
                                 dataset.add(label, data, i);
                                 //dataset.setLength(data.length);
                                 AppContext.length = data.length;
-                                // there should be no missing data: do we have to construct this?
-                                //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
                             }
 
                         }
@@ -140,25 +93,20 @@ public class DelimitedFileReader {
                     // it is either Object[] or Object[][] since it's not all numeric.
                     if (is2D) {
                         Object[][] data = RowParser.parse2DRow(line, array_separator, entry_separator);
-                        Integer label = labels.get(i);
+                        //Integer label = labels.get(i);
+                        Object label = labels.get(i);
                         dataset.add(label, data, i);
                         //dataset.setLength(data[0].length); //just the first one: risky.
                         AppContext.length = data[0].length;
-                        //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
-                        //MissingIndicesBuilder.buildFrom(data, isTrain);
                     } else {
                         Object[] data = RowParser.parse1DRow(line, entry_separator);
-                        Integer label = labels.get(i);
+                        //Integer label = labels.get(i);
+                        Object label = labels.get(i);
                         dataset.add(label, data, i);
                         //dataset.setLength(data.length);
                         AppContext.length = data.length;
-                        //AppContext.missing_train_indices.add(MissingIndicesBuilder.buildFrom(data, isTrain));
-                        //MissingIndicesBuilder.buildFrom(data, isTrain);
                     }
                 }
-
-                //Integer label = labels.get(i);
-                //dataset.add(label, data, i);
 
                 ProgressLogger.logProgress(i);
                 i++;
@@ -244,12 +192,38 @@ public class DelimitedFileReader {
     }
 
 
+    public static List<Object> readGenericLabels(String labelFileName, boolean hasHeader, boolean isRegression) throws IOException {
+        List<Object> labels = new ArrayList<>();
+        if (Objects.equals(labelFileName, null)) { //this is for when labels exist in the training/testing files.
+            return labels;
+        }
+        try (BufferedReader br = new BufferedReader(new FileReader(labelFileName))) {
+            if (hasHeader) br.readLine();
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (isRegression) {
+                    labels.add(Double.parseDouble(line.trim()));
+                } else {
+                    try {
+                        labels.add(Integer.parseInt(line.trim()));
+                    } catch (NumberFormatException e) {
+                        labels.add(line.trim()); // fallback to string label
+                    }
+                }
+            }
+        }
+        return labels;
+    }
+
+
 
     public static class ParsedDoubleRow {
-        public final int label;
+        //public final int label;
+        public final Object label;
         public final double[] features;
 
-        public ParsedDoubleRow(int label, double[] features) {
+        public ParsedDoubleRow(Object label, double[] features) {
             this.label = label;
             this.features = features;
         }
@@ -273,13 +247,13 @@ public class DelimitedFileReader {
         }
 
 
-        public static ParsedDoubleRow parseDoubleRow(String[] lineArray, boolean targetColumnIsFirst) {
+        public static ParsedDoubleRow parseDoubleRow(String[] lineArray, boolean targetColumnIsFirst, boolean isRegression) {
             int dataLength = lineArray.length - 1;
             double[] features = new double[dataLength];
-            int label;
+            //int label;
+            Object label;
 
-            if (targetColumnIsFirst) {
-                //System.out.println(lineArray[0]);
+            /*if (targetColumnIsFirst) {
                 label = Integer.parseInt(lineArray[0]);
                 for (int j = 1; j <= dataLength; j++) {
                     features[j - 1] = Double.parseDouble(lineArray[j]);
@@ -289,10 +263,38 @@ public class DelimitedFileReader {
                 for (int j = 0; j < dataLength; j++) {
                     features[j] = Double.parseDouble(lineArray[j]);
                 }
+            }*/
+
+
+            if (targetColumnIsFirst) {
+                label = isRegression
+                        ? Double.parseDouble(lineArray[0])
+                        : tryParseLabel(lineArray[0]);
+                for (int j = 1; j <= dataLength; j++) {
+                    features[j - 1] = Double.parseDouble(lineArray[j]);
+                }
+            } else {
+                label = isRegression
+                        ? Double.parseDouble(lineArray[dataLength])
+                        : tryParseLabel(lineArray[dataLength]);
+                for (int j = 0; j < dataLength; j++) {
+                    features[j] = Double.parseDouble(lineArray[j]);
+                }
             }
+
 
             return new ParsedDoubleRow(label, features);
         }
+
+
+        private static Object tryParseLabel(String token) {
+            try {
+                return Integer.parseInt(token.trim());
+            } catch (NumberFormatException e) {
+                return token.trim(); // fallback to string
+            }
+        }
+
 
         public static double[] parseDoubleArray(String row, String separator) { // for no labels
             String[] tokens = row.split(separator);
@@ -375,16 +377,6 @@ public class DelimitedFileReader {
                 return trimmed; // fallback to String
             }
 
-
-            /*if (token == null || token.trim().isEmpty() || token.equalsIgnoreCase("null")) return null;
-            try {
-                return Double.parseDouble(token);
-            } catch (NumberFormatException e1) {
-                if (token.equalsIgnoreCase("true") || token.equalsIgnoreCase("false")) {
-                    return Boolean.parseBoolean(token);
-                }
-                return token; // fallback to String
-            }*/
         }
     }
 

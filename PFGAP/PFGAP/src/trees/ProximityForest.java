@@ -2,9 +2,7 @@ package trees;
 
 import java.io.Serializable;
 import java.lang.reflect.Array;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -41,8 +39,9 @@ public class ProximityForest implements Serializable{
 	protected ProximityTree trees[];
 	public String prefix;
 	
-	int[] num_votes;
-	List<Integer> max_voted_classes;
+	//int[] num_votes;
+	//List<Integer> max_voted_classes;
+	List<Object> predictions;
 
 	private final ReentrantLock trainLock = new ReentrantLock();
 	private final ReentrantLock predictLock = new ReentrantLock();
@@ -178,45 +177,40 @@ public class ProximityForest implements Serializable{
 	//public ProximityForestResult test(Dataset test_data) throws Exception {
 	public ProximityForestResult test(ListObjectDataset test_data) throws Exception {
 		result.startTimeTest = System.nanoTime();
-		//result.Predictions = new ArrayList<>();
-		num_votes = new int[test_data._get_initial_class_labels().size()]; //new int[test_data.length()]; //new int[test_data._get_initial_class_labels().size()];
-		max_voted_classes = new ArrayList<Integer>();
-		//ArrayList<Integer> Predictions = new ArrayList<>();
-		
-		int predicted_class;
-		int actual_class;
+		result.Predictions = new ArrayList<>();
+
 		int size = test_data.size();
-		
-		for (int i=0; i < size; i++){
-			actual_class = test_data.get_class(i);
-			predicted_class = predict(test_data.get_series(i), i);
-			result.Predictions.add(predicted_class);
-			if (actual_class != predicted_class){
+		for (int i = 0; i < size; i++) {
+			Object actual_label = test_data.get_class(i);
+			Object predicted_label = predict(test_data.get_series(i), i);
+			result.Predictions.add(predicted_label);
+
+			if (!Objects.equals(actual_label, predicted_label)) {
 				result.errors++;
-			}else{
+			} else {
 				result.correct++;
 			}
-			
+
 			if (AppContext.verbosity > 0) {
 				if (i % AppContext.print_test_progress_for_each_instances == 0) {
 					System.out.print("*");
-				}				
+				}
 			}
 		}
-		
+
 		result.endTimeTest = System.nanoTime();
 		result.elapsedTimeTest = result.endTimeTest - result.startTimeTest;
-		
+
 		if (AppContext.verbosity > 0) {
 			System.out.println();
 		}
-		
-		
-		assert test_data.size() == result.errors + result.correct;		
-		result.accuracy  = ((double) result.correct) / test_data.size();
+
+		assert test_data.size() == result.errors + result.correct;
+
+		result.accuracy = ((double) result.correct) / test_data.size();
 		result.error_rate = 1 - result.accuracy;
 
-        return result;
+		return result;
 	}
 
 	//This is the work-in-progress parallel test method.
@@ -271,27 +265,24 @@ public class ProximityForest implements Serializable{
 
 
 	//public Integer predict(double[] query) throws Exception {
-	public Integer predict(Object query, int Index) throws Exception {
+	public Object predict(Object query, int index) throws Exception {
 		predictLock.lock();
 		try {
-			int max_vote_count = -1;
-			int temp_count;
+			List<Object> predictions = Collections.synchronizedList(new ArrayList<>());
 
 			if (AppContext.parallelTrees) {
-				AtomicIntegerArray voteCounts = new AtomicIntegerArray(num_votes.length);
 				ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 				List<Future<?>> futures = new ArrayList<>();
 
 				for (int i = 0; i < trees.length; i++) {
-					final int index = i;
+					final int treeIndex = i;
 					futures.add(executor.submit(() -> {
-						int label = 0;
 						try {
-							label = trees[index].predict(query, Index);
+							Object label = trees[treeIndex].predict(query, index);
+							predictions.add(label);
 						} catch (Exception e) {
 							e.printStackTrace();
 						}
-						voteCounts.incrementAndGet(label);
 					}));
 				}
 
@@ -300,49 +291,49 @@ public class ProximityForest implements Serializable{
 				}
 
 				executor.shutdown();
+			} else {
+				for (int i = 0; i < trees.length; i++) {
+					Object label = trees[i].predict(query, index);
+					predictions.add(label);
+				}
+			}
 
-				max_voted_classes.clear();
-				for (int i = 0; i < voteCounts.length(); i++) {
-					temp_count = voteCounts.get(i);
-					if (temp_count > max_vote_count) {
-						max_vote_count = temp_count;
-						max_voted_classes.clear();
-						max_voted_classes.add(i);
-					} else if (temp_count == max_vote_count) {
-						max_voted_classes.add(i);
+			if (AppContext.isRegression) {
+				List<Double> numeric = new ArrayList<>();
+				for (Object pred : predictions) {
+					if (pred instanceof Number) {
+						numeric.add(((Number) pred).doubleValue());
 					}
+				}
+
+				if (AppContext.voting.equalsIgnoreCase("mean")) {
+					return numeric.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+				} else if (AppContext.voting.equalsIgnoreCase("median")) {
+					Collections.sort(numeric);
+					int n = numeric.size();
+					return (n % 2 == 1)
+							? numeric.get(n / 2)
+							: (numeric.get(n / 2 - 1) + numeric.get(n / 2)) / 2.0;
+				} else {
+					throw new IllegalArgumentException("Unknown voting method: " + AppContext.voting);
 				}
 			} else {
-				int label;
-				for (int i = 0; i < num_votes.length; i++) {
-					num_votes[i] = 0;
-				}
-				max_voted_classes.clear();
-
-				for (int i = 0; i < trees.length; i++) {
-					label = trees[i].predict(query, Index);
-					num_votes[label]++;
+				Map<Object, Integer> voteCounts = new HashMap<>();
+				for (Object pred : predictions) {
+					voteCounts.put(pred, voteCounts.getOrDefault(pred, 0) + 1);
 				}
 
-				for (int i = 0; i < num_votes.length; i++) {
-					temp_count = num_votes[i];
-					if (temp_count > max_vote_count) {
-						max_vote_count = temp_count;
-						max_voted_classes.clear();
-						max_voted_classes.add(i);
-					} else if (temp_count == max_vote_count) {
-						max_voted_classes.add(i);
+				Object majority = null;
+				int max = 0;
+				for (Map.Entry<Object, Integer> entry : voteCounts.entrySet()) {
+					if (entry.getValue() > max) {
+						max = entry.getValue();
+						majority = entry.getKey();
 					}
 				}
+
+				return majority;
 			}
-
-			int r = AppContext.getRand().nextInt(max_voted_classes.size());
-
-			if (max_voted_classes.size() > 1) {
-				this.result.majority_vote_match_count++;
-			}
-
-			return max_voted_classes.get(r);
 		} finally {
 			predictLock.unlock();
 		}

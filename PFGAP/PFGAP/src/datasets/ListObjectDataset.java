@@ -6,6 +6,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import core.contracts.ObjectDataset;
 import imputation.MissingIndices;
+import purity.Gini;
+import purity.Variance;
 import util.ObjectDataUtils; // is this needed here?
 
 public class ListObjectDataset implements ObjectDataset, Serializable {
@@ -13,9 +15,12 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     //private List<Object[]> data;
     private List<Object> data;
     private boolean is2D; //when each data instance is 2d, like multivariate time series.
-    private List<Integer> labels;
-    private Map<Integer, Integer> classMap;
-    private Map<Integer, Integer> initialClassLabels;
+    //private List<Integer> labels;
+    private List<Object> labels;
+    //private Map<Integer, Integer> classMap;
+    private Map<Object, Integer> classMap;
+    //private Map<Integer, Integer> initialClassLabels;
+    private Map<Object, Integer> initialClassLabels;
     private ArrayList<Integer> indices;
     private MissingIndices missingIndices;
     private int length;
@@ -92,11 +97,14 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public void add(Integer label, Object series, Integer index) {
+    //public void add(Integer label, Object series, Integer index) {
+    public void add(Object label, Object series, Integer index) {
         this.data.add(series);
         this.labels.add(label);
         this.indices.add(index);
-        classMap.put(label, classMap.getOrDefault(label, 0) + 1);
+        if (label instanceof Integer || label instanceof String) {
+            classMap.put(label, classMap.getOrDefault(label, 0) + 1);
+        }
     }
 
 
@@ -120,10 +128,13 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
 
     @Override
     public void remove(int i) {
-        Integer label = this.labels.get(i);
-        classMap.put(label, classMap.get(label) - 1);
-        if (classMap.get(label) <= 0) {
-            classMap.remove(label);
+        //Integer label = this.labels.get(i);
+        Object label = this.labels.get(i);
+        if (classMap.containsKey(label)) {
+            classMap.put(label, classMap.get(label) - 1);
+            if (classMap.get(label) <= 0) {
+                classMap.remove(label);
+            }
         }
 
         this.data.remove(i);
@@ -137,7 +148,7 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public Integer get_class(int i) {
+    public Object get_class(int i) {
         return this.labels.get(i);
     }
 
@@ -152,19 +163,19 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public int get_class_size(Integer label) {
+    public int get_class_size(Object label) {
         return this.classMap.getOrDefault(label, 0);
     }
 
     @Override
-    public Map<Integer, Integer> get_class_map() {
+    public Map<Object, Integer> get_class_map() {
         return this.classMap;
     }
 
     @Override
-    public Map<Integer, Integer> invertLabelMap(Map<Integer, Integer> originalToNew) {
-        Map<Integer, Integer> newToOriginal = new HashMap<>();
-        for (Map.Entry<Integer, Integer> entry : originalToNew.entrySet()) {
+    public Map<Integer, Object> invertLabelMap(Map<Object, Integer> originalToNew) {
+        Map<Integer, Object> newToOriginal = new HashMap<>();
+        for (Map.Entry<Object, Integer> entry : originalToNew.entrySet()) {
             newToOriginal.put(entry.getValue(), entry.getKey());
         }
         return newToOriginal;
@@ -177,33 +188,37 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public int[] get_unique_classes() {
-        Set<Integer> keys = this.classMap.keySet();
+    public Object[] get_unique_classes() {
+
+        Set<Object> keys = this.classMap.keySet();
+        return keys.toArray();
+
+        /*Set<Integer> keys = this.classMap.keySet();
         int[] unique = new int[keys.size()];
         int i = 0;
         for (Integer key : keys) {
             unique[i++] = key;
         }
-        return unique;
+        return unique;*/
     }
 
     @Override
-    public Set<Integer> get_unique_classes_as_set() {
+    public Set<Object> get_unique_classes_as_set() {
         return this.classMap.keySet();
     }
 
     @Override
-    public Map<Integer, ListObjectDataset> split_classes() {
-        Map<Integer, ListObjectDataset> split = new LinkedHashMap<>();
+    public Map<Object, ListObjectDataset> split_classes() {
+        Map<Object, ListObjectDataset> split = new LinkedHashMap<>();
         for (int i = 0; i < this.size(); i++) {
-            Integer label = this.labels.get(i);
+            Object label = this.labels.get(i);
             split.putIfAbsent(label, new ListObjectDataset(this.classMap.get(label))); //ListObjectDataset(this.classMap.get(label), this.length()));
             split.get(label).add(label, this.data.get(i), this.indices.get(i));
         }
         return split;
     }
 
-    @Override
+    /*@Override
     public double gini() {
         double sum = 0;
         double p;
@@ -213,6 +228,20 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
             sum += p * p;
         }
         return 1 - sum;
+    }*/
+
+    @Override
+    public double purity(String method) {
+        switch (method.toLowerCase()) {
+            case "gini":
+                return Gini.compute(this.labels);
+            case "variance":
+                return Variance.compute(this.labels);
+            //case "entropy":
+            //    return Entropy.computeEntropy(this.labels); // optional
+            default:
+                throw new IllegalArgumentException("Unknown purity method: " + method);
+        }
     }
 
     @Override
@@ -221,7 +250,7 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public List<Integer> _internal_class_list() {
+    public List<Object> _internal_class_list() {
         return this.labels;
     }
 
@@ -236,17 +265,34 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
-    public int[] _internal_class_array() {
-        int[] arr = new int[this.labels.size()];
+    public Object[] _internal_class_array() {
+        return labels.toArray();
+        /*int[] arr = new int[this.labels.size()];
         for (int i = 0; i < labels.size(); i++) {
             arr[i] = labels.get(i);
         }
-        return arr;
+        return arr;*/
     }
 
     @Override
-    public ListObjectDataset reorder_class_labels(Map<Integer, Integer> newOrder) {
-        ListObjectDataset newDataset = new ListObjectDataset(this.size()); //ListObjectDataset(this.size(), this.length());
+    public ListObjectDataset reorder_class_labels(Map<Object, Integer> newOrder) { //error ***
+
+        ListObjectDataset newDataset = new ListObjectDataset();
+        if (newOrder == null) newOrder = new HashMap<>();
+        AtomicInteger newLabel = new AtomicInteger();
+
+        for (int i = 0; i < this.size(); i++) {
+            Object oldLabel = labels.get(i);
+            Integer mappedLabel = newOrder.computeIfAbsent(oldLabel, k -> newLabel.getAndIncrement());
+            newDataset.add(mappedLabel, data.get(i), indices.get(i));
+        }
+
+        newDataset.setInitialClassOrder(newOrder);
+        newDataset.setReordered(true);
+        return newDataset;
+
+
+        /*ListObjectDataset newDataset = new ListObjectDataset(this.size()); //ListObjectDataset(this.size(), this.length());
         if (newOrder == null) newOrder = new HashMap<>();
 
         AtomicInteger newLabel = new AtomicInteger();
@@ -258,11 +304,11 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
 
         newDataset.setInitialClassOrder(newOrder);
         newDataset.setReordered(true);
-        return newDataset;
+        return newDataset;*/
     }
 
     @Override
-    public Map<Integer, Integer> _get_initial_class_labels() {
+    public Map<Object, Integer> _get_initial_class_labels() {
         return this.initialClassLabels;
     }
 
@@ -270,7 +316,7 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
         this.isReordered = status;
     }
 
-    public void setInitialClassOrder(Map<Integer, Integer> initialOrder) {
+    public void setInitialClassOrder(Map<Object, Integer> initialOrder) {
         this.initialClassLabels = initialOrder;
     }
 
@@ -287,7 +333,8 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
         Collections.shuffle(indices, rand);
 
         List<Object> newData = new ArrayList<>();
-        List<Integer> newLabels = new ArrayList<>();
+        //List<Integer> newLabels = new ArrayList<>();
+        List<Object> newLabels = new ArrayList<>();
         List<Integer> newIndices = new ArrayList<>();
 
         for (int i : indices) {

@@ -38,37 +38,35 @@ public class Splitter implements Serializable {
 	}
 	
 	//public ListDataset[] split_data(Dataset sample, Map<Integer, ListDataset> data_per_class) throws Exception {
-	public ListObjectDataset[] split_data(ObjectDataset sample, Map<Integer, ListObjectDataset> data_per_class) throws Exception {
-//		num_children = sample.get_num_classes();
-		ListObjectDataset[] splits = new ListObjectDataset[sample.get_num_classes()];
-		//temp_exemplars = new Object[sample.get_num_classes()][]; //double[sample.get_num_classes()][];
-		temp_exemplars = new Object[sample.get_num_classes()];
+	public ListObjectDataset[] split_data(ObjectDataset sample, Map<Object, ListObjectDataset> data_per_class) throws Exception {
+		ListObjectDataset[] splits;
+		temp_exemplars = new Object[AppContext.isRegression ? 2 : sample.get_num_classes()];
 
-		int branch = 0;
-		for (Map.Entry<Integer, ListObjectDataset> entry : data_per_class.entrySet()) {
-			int r = AppContext.getRand().nextInt(entry.getValue().size());
-			
-			splits[branch] = new ListObjectDataset(sample.size()); //, sample.length());
-			//splits[branch] = new ListDataset(sample.size(), sample.length(), sample.length());
-			//use key just in case iteration order is not consistent
-			temp_exemplars[branch] = entry.getValue().get_series(r);
-			branch++;
-		}
-		
-		int sample_size = sample.size();
-		int closest_branch = -1;
-		for (int j = 0; j < sample_size; j++) {
-			closest_branch = this.find_closest_branch(sample.get_series(j), 
-					temp_distance_measure, temp_exemplars);
-			if (closest_branch == -1) {
-				assert false;
+		if (AppContext.isRegression) {
+			splits = new ListObjectDataset[2];
+			for (int i = 0; i < 2; i++) {
+				splits[i] = new ListObjectDataset(sample.size());
+				int r = AppContext.getRand().nextInt(sample.size());
+				temp_exemplars[i] = sample.get_series(r);
 			}
-			//splits[closest_branch].add(sample.get_class(j), sample.get_series(j));
+		} else {
+			splits = new ListObjectDataset[sample.get_num_classes()];
+			int branch = 0;
+			for (Map.Entry<Object, ListObjectDataset> entry : data_per_class.entrySet()) {
+				splits[branch] = new ListObjectDataset(sample.size());
+				int r = AppContext.getRand().nextInt(entry.getValue().size());
+				temp_exemplars[branch] = entry.getValue().get_series(r);
+				branch++;
+			}
+		}
+
+		for (int j = 0; j < sample.size(); j++) {
+			int closest_branch = find_closest_branch(sample.get_series(j), temp_distance_measure, temp_exemplars);
 			splits[closest_branch].add(sample.get_class(j), sample.get_series(j), sample._internal_indices_list().get(j));
 		}
 
 		return splits;
-	}	
+	}
 
 	//public int find_closest_branch(double[] query, DistanceMeasure dm, double[][] e) throws Exception{
 	public int find_closest_branch(Object query, DistanceMeasure dm, Object[] e) throws Exception{
@@ -88,47 +86,25 @@ public class Splitter implements Serializable {
 	//public ListDataset[] find_best_split(Dataset data) throws Exception {
 	//public ListDataset[] find_best_split(ObjectDataset data) throws Exception {
 	public ListObjectDataset[] find_best_split(ObjectDataset data) throws Exception {
-				
-		Map<Integer, ListObjectDataset> data_per_class = data.split_classes();
-		
-		double weighted_gini = Double.POSITIVE_INFINITY;
-		double best_weighted_gini = Double.POSITIVE_INFINITY;
+		Map<Object, ListObjectDataset> data_per_class = AppContext.isRegression
+				? null
+				: data.split_classes();
+
+		double best_weighted_purity = Double.POSITIVE_INFINITY;
 		ListObjectDataset[] splits = null;
 		int parent_size = data.size();
-	
+
 		for (int i = 0; i < AppContext.num_candidates_per_split; i++) {
+			temp_distance_measure = selectDistanceMeasure(data);
 
-			if (this.node.tree.getChosen_distances().length==0){
-				if (AppContext.random_dm_per_node) {
-					int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-					temp_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
-				}else {
-					//NOTE: num_candidates_per_split has no effect if random_dm_per_node == false (if DM is selected once per tree)
-					//after experiments we found that DM selection per node is better since it diversifies the ensemble
-					temp_distance_measure = node.tree.tree_distance_measure;
-				}
+			splits = AppContext.isRegression
+					? split_data(data, null)
+					: split_data(data, data_per_class);
 
-				temp_distance_measure.select_random_params(data, AppContext.getRand());
-			} else{
-				if (AppContext.random_dm_per_node) {
-					int r = AppContext.getRand().nextInt(this.node.tree.getChosen_distances().length);
-					temp_distance_measure = new DistanceMeasure(this.node.tree.getChosen_distances()[r]);
-				}else {
-					//NOTE: num_candidates_per_split has no effect if random_dm_per_node == false (if DM is selected once per tree)
-					//after experiments we found that DM selection per node is better since it diversifies the ensemble
-					temp_distance_measure = node.tree.tree_distance_measure;
-				}
+			double weighted_purity = weighted_purity(parent_size, splits);
 
-				temp_distance_measure.select_random_params(data, AppContext.getRand());
-			}
-
-
-							
-			splits = split_data(data, data_per_class);
-			weighted_gini = weighted_gini(parent_size, splits);
-
-			if (weighted_gini <  best_weighted_gini) {
-				best_weighted_gini = weighted_gini;
+			if (weighted_purity < best_weighted_purity) {
+				best_weighted_purity = weighted_purity;
 				best_split = splits;
 				distance_measure = temp_distance_measure;
 				exemplars = temp_exemplars;
@@ -136,19 +112,39 @@ public class Splitter implements Serializable {
 		}
 
 		this.num_children = best_split.length;
-		
 		return this.best_split;
 	}
-	
-	//public double weighted_gini(int parent_size, ListDataset[] splits) {
-	public double weighted_gini(int parent_size, ListObjectDataset[] splits) {
-		double wgini = 0.0;
-		
-		for (int i = 0; i < splits.length; i++) {
-			wgini = wgini + ((double) splits[i].size() / parent_size) * splits[i].gini();
+
+	private DistanceMeasure selectDistanceMeasure(ObjectDataset data) throws Exception {
+		DistanceMeasure dm;
+		if (node.tree.getChosen_distances().length == 0) {
+			if (AppContext.random_dm_per_node) {
+				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
+				dm = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
+			} else {
+				dm = node.tree.tree_distance_measure;
+			}
+		} else {
+			if (AppContext.random_dm_per_node) {
+				int r = AppContext.getRand().nextInt(node.tree.getChosen_distances().length);
+				dm = new DistanceMeasure(node.tree.getChosen_distances()[r]);
+			} else {
+				dm = node.tree.tree_distance_measure;
+			}
 		}
 
-		return wgini;
-	}	
+		dm.select_random_params(data, AppContext.getRand());
+		return dm;
+	}
+
+
+	//public double weighted_gini(int parent_size, ListDataset[] splits) {
+	public double weighted_purity(int parent_size, ListObjectDataset[] splits) {
+		double wpurity = 0.0;
+		for (ListObjectDataset split : splits) {
+			wpurity += ((double) split.size() / parent_size) * split.purity(AppContext.purity_measure);
+		}
+		return wpurity;
+	}
 	
 }

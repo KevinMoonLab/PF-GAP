@@ -175,7 +175,7 @@ public class ProximityTree implements Serializable {
 	}
 	
 	//public Integer predict(double[] query) throws Exception {
-	public Integer predict(Object query, int index) throws Exception {
+	public Object predict(Object query, int index) throws Exception {
 		Node node = this.root;
 
 		while(!node.is_leaf()) {
@@ -339,7 +339,8 @@ public class ProximityTree implements Serializable {
 		protected int node_depth = 0;
 
 		protected boolean is_leaf = false;
-		protected Integer label;
+		//protected Integer label;
+		protected Object label; // for classification...
 
 //		protected transient Dataset data;				
 		protected Node[] children;
@@ -365,7 +366,7 @@ public class ProximityTree implements Serializable {
 			return this.is_leaf;
 		}
 		
-		public Integer label() {
+		public Object label() {
 			return this.label;
 		}	
 		
@@ -391,9 +392,55 @@ public class ProximityTree implements Serializable {
 		
 		public String toString() {
 			return "d: ";// + this.data.toString();
-		}		
+		}
 
-		
+
+		public static Object computeLeafLabel(List<Object> labels) {
+			if (labels == null || labels.isEmpty()) return null;
+
+			if (AppContext.isRegression) {
+				// Collect numeric values
+				List<Double> numericLabels = new ArrayList<>();
+				for (Object label : labels) {
+					if (label instanceof Number) {
+						numericLabels.add(((Number) label).doubleValue());
+					}
+				}
+
+				if (numericLabels.isEmpty()) return 0.0;
+
+				if (AppContext.voting.equalsIgnoreCase("mean")) {
+					return numericLabels.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+				} else if (AppContext.voting.equalsIgnoreCase("median")) {
+					Collections.sort(numericLabels);
+					int n = numericLabels.size();
+					return (n % 2 == 1)
+							? numericLabels.get(n / 2)
+							: (numericLabels.get(n / 2 - 1) + numericLabels.get(n / 2)) / 2.0;
+				} else {
+					throw new IllegalArgumentException("Unknown voting method: " + AppContext.voting);
+				}
+
+			} else {
+				// Classification: vote for majority label
+				Map<Object, Integer> frequencyMap = new HashMap<>();
+				for (Object label : labels) {
+					frequencyMap.put(label, frequencyMap.getOrDefault(label, 0) + 1);
+				}
+
+				Object mostFrequentLabel = null;
+				int maxFrequency = 0;
+				for (Map.Entry<Object, Integer> entry : frequencyMap.entrySet()) {
+					if (entry.getValue() > maxFrequency) {
+						maxFrequency = entry.getValue();
+						mostFrequentLabel = entry.getKey();
+					}
+				}
+
+				return mostFrequentLabel;
+			}
+		}
+
 //		public void train(Dataset data) throws Exception {
 //			this.data = data;
 //			this.train();
@@ -409,17 +456,25 @@ public class ProximityTree implements Serializable {
 //				this.is_leaf = true;
 //				return;
 			}
-			
-			if (data.gini() == 0) {
-				this.label = data.get_class(0);
+
+			if (!AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
+				this.label = computeLeafLabel(data._internal_class_list());
 				this.is_leaf = true;
 				this.tree.leaves.add(this);
 				return;
 			}
 
-			if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth){ //0 means no max depth.
+			if (AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
+				this.label = computeLeafLabel(data._internal_class_list());
+				this.is_leaf = true;
+				this.tree.leaves.add(this);
+				return;
+			}
+
+			/*if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth){ //0 means no max depth.
 				//first, get a count of each class present in the node. Then find the majority class.
-				int[] classes = data.get_unique_classes();
+				//int[] classes = data.get_unique_classes();
+				Object[] classes = data.get_unique_classes();
 				Map<Integer, Integer> frequencyMap = new HashMap<>();
 
 				// Count frequencies of each element
@@ -442,6 +497,15 @@ public class ProximityTree implements Serializable {
 				this.is_leaf = true;
 				this.tree.leaves.add(this);
 				return;
+			}*/
+
+			if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth) {
+
+				this.label = computeLeafLabel(data._internal_class_list());
+
+				this.is_leaf = true;
+				this.tree.leaves.add(this);
+				return;
 			}
 
 			this.splitter = new Splitter(this);
@@ -461,7 +525,8 @@ public class ProximityTree implements Serializable {
 			//System.out.println(oobData.size());
 			for (int i=0; i<oobData.size(); i++){
 				int ind = oobData.get_index(i);
-				int label = oobData.get_class(i);
+				//int label = oobData.get_class(i);
+				Object label = oobData.get_class(i);
 				//double[] series = oobData.get_series(i);
 				Object series = oobData.get_series(i);
 				int branch = splitter.find_closest_branch(oobData.get_series(i));
