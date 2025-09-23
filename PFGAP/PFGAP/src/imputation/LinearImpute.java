@@ -11,7 +11,7 @@ public class LinearImpute extends Imputer {
     private static final int CHUNK_SIZE = 1000;
 
 
-    public static void Impute(ListObjectDataset missingDS) {
+    public void Impute(ListObjectDataset missingDS) {
         List<Object> rawData = missingDS.getData();
         MissingIndices mi = missingDS.getMissingIndices();
 
