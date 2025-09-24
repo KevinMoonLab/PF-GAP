@@ -42,7 +42,7 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 
 - **Java 17+**
 - **Python 3.8+** (tested with Python 3.13)
-- Python packages:
+- Python packages (for running the demo files):
 
 ```bash
   pip install numpy pandas matplotlib scikit-learn aeon
@@ -141,6 +141,7 @@ distances=["python"]  # or ["maple"]
 | `demo_gunpoint.py` | Classic PF classification on UCR GunPoint dataset |
 | `demo_multi_impute.py` | Imputation on multivariate time series with missing values |
 | `demo_load_japanese.py` | Large-scale multivariate classification with variable-length sequences |
+| `demo_regression.py` | Time Series Extrinsic Regression on the FloodModeling1 dataset |
 
 ### Example MDS Visualization
 
@@ -179,9 +180,10 @@ Use `PF_wrapper.getArray(filename)` to load proximity or outlier arrays.
 
 🔹 **Outlier Scores**
 
-- Set return_training_outlier_scores=True to compute intra-class outlier scores.
+- Set return_training_outlier_scores=True to compute intra-class outlier scores for the training set.
 - These are saved to outlier_scores.txt in the output directory.
 - Use PF_wrapper.getArray(output_directory + "outlier_scores.txt") to load them as a NumPy array.
+- Note that outlier scores are not supported for regression.
 
 🔹 **Imputed Data**
 
@@ -230,7 +232,7 @@ pt = PF_wrapper.getArray(str(output_directory) + "TestTrainProximities.txt")
 
 ## 📖 Citation
 
-If you use PF-GAP in your work, please cite:
+If you use PF-GAP in your work, please cite the appropriate paper(s) from the following list:
 
 > Ben Shaw, Jake Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon.
 > **Forest Proximities for Time Series**, IntelliSys 2025  
