@@ -245,7 +245,8 @@ public class ExperimentRunner {
 					//Now we print the Predictions array to a text file.
 
 					if (!AppContext.isRegression) {
-						List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
+						//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
+						List<Object> predictedLabels = result.Predictions;
 						Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
 						List<Object> originalPredictions = predictedLabels.stream()
 								.map(newToOriginal::get)
@@ -433,7 +434,8 @@ public class ExperimentRunner {
 				//Now we print the Predictions array of the saved model to a text file.
 
 				if (!AppContext.isRegression) {
-					List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
+					//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
+					List<Object> predictedLabels = result1.Predictions;
 					Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
 					List<Object> originalPredictions = predictedLabels.stream()
 							.map(newToOriginal::get)
