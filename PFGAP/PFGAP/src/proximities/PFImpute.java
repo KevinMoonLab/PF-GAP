@@ -2,6 +2,7 @@ package proximities;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import imputation.MissingIndices;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -228,12 +229,116 @@ public class PFImpute {
     }
 
 
-    public static void trainCategoricalImpute(ListObjectDataset dataToUpdate) {
-        // To be implemented later
+    public static void trainCategoricalImpute(ListObjectDataset data) {
+        List<Object> rawData = data.getData();
+        MissingIndices mi = data.getMissingIndices();
+
+        if (mi.is2D()) {
+            IntStream.range(0, rawData.size()).parallel().forEach(i -> {
+                Object[][] instance = (Object[][]) rawData.get(i);
+                List<List<Integer>> missing = mi.indices2D.get(i);
+
+                for (int dim = 0; dim < instance.length; dim++) {
+                    for (int idx : missing.get(dim)) {
+                        Object imputed = getWeightedMode(i, dim, idx, true, data, true);
+                        instance[dim][idx] = imputed;
+                    }
+                }
+            });
+        } else {
+            IntStream.range(0, rawData.size()).parallel().forEach(i -> {
+                Object[] instance = (Object[]) rawData.get(i);
+                List<Integer> missing = mi.indices1D.get(i);
+
+                for (int idx : missing) {
+                    Object imputed = getWeightedMode(i, -1, idx, false, data, true);
+                    instance[idx] = imputed;
+                }
+            });
+        }
     }
 
-    public static void testCategoricalImpute(ListObjectDataset dataToUpdate) {
-        // To be implemented later
+    public static void testCategoricalImpute(ListObjectDataset data) {
+        List<Object> rawData = data.getData();
+        MissingIndices mi = data.getMissingIndices();
+
+        if (mi.is2D()) {
+            IntStream.range(0, rawData.size()).parallel().forEach(i -> {
+                Object[][] instance = (Object[][]) rawData.get(i);
+                List<List<Integer>> missing = mi.indices2D.get(i);
+
+                for (int dim = 0; dim < instance.length; dim++) {
+                    for (int idx : missing.get(dim)) {
+                        Object imputed = getWeightedMode(i, dim, idx, true, data, false);
+                        instance[dim][idx] = imputed;
+                    }
+                }
+            });
+        } else {
+            IntStream.range(0, rawData.size()).parallel().forEach(i -> {
+                Object[] instance = (Object[]) rawData.get(i);
+                List<Integer> missing = mi.indices1D.get(i);
+
+                for (int idx : missing) {
+                    Object imputed = getWeightedMode(i, -1, idx, false, data, false);
+                    instance[idx] = imputed;
+                }
+            });
+        }
+    }
+
+    private static Object getWeightedMode(int targetIndex, int dim, int featureIndex, boolean is2D, ListObjectDataset data, boolean istrain) {
+        Map<Object, Double> frequency = new HashMap<>();
+        Map<Integer, Double> proximities;
+
+        if (istrain) {
+            proximities = AppContext.useSparseProximities
+                    ? AppContext.training_proximities_sparse.getOrDefault(targetIndex, Collections.emptyMap())
+                    : convertDenseRowToMap(AppContext.training_proximities[targetIndex]);
+        } else {
+            proximities = AppContext.useSparseProximities
+                    ? AppContext.testing_training_proximities_sparse.getOrDefault(targetIndex, Collections.emptyMap())
+                    : convertDenseRowToMap(AppContext.testing_training_proximities[targetIndex]);
+        }
+
+        //Map<Integer, Double> proximities = AppContext.useSparseProximities
+        //        ? AppContext.training_proximities_sparse.getOrDefault(targetIndex, Collections.emptyMap())
+        //        : convertDenseRowToMap(AppContext.training_proximities[targetIndex]);
+
+        for (Map.Entry<Integer, Double> entry : proximities.entrySet()) {
+            int neighborIndex = entry.getKey();
+            double weight = entry.getValue();
+
+            Object neighbor = data.get_series(neighborIndex);
+            Object value;
+
+            if (is2D) {
+                Object[][] matrix = (Object[][]) neighbor;
+                value = matrix[dim][featureIndex];
+            } else {
+                Object[] row = (Object[]) neighbor;
+                value = row[featureIndex];
+            }
+
+            if (value != null) {
+                frequency.put(value, frequency.getOrDefault(value, 0.0) + weight);
+            }
+        }
+
+        return frequency.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(null);
+    }
+
+    private static Map<Integer, Double> convertDenseRowToMap(double[] row) {
+        Map<Integer, Double> map = new HashMap<>();
+        for (int i = 0; i < row.length; i++) {
+            if (row[i] != 0.0) {
+                map.put(i, row[i]);
+            }
+        }
+        return map;
     }
 
     public static Map<Integer, Map<Integer, Double>> buildSparseProximityMap(double[][] P, double epsilon) {

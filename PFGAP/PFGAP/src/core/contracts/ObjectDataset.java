@@ -26,9 +26,10 @@ public interface ObjectDataset {
 
     public int getLength();
 
-    public  Map<Integer, Integer> invertLabelMap(Map<Integer, Integer> originalToNew);
+    public  Map<Integer, Object> invertLabelMap(Map<Object, Integer> originalToNew);
 
-    public void add(Integer label, Object series, Integer index);
+    //public void add(Integer label, Object series, Integer index);
+    public void add(Object label, Object series, Integer index);
 
     //public void add(Integer label, Object[] series, Integer index);
 
@@ -38,7 +39,7 @@ public interface ObjectDataset {
 
     public Object get_series(int i);
 
-    public Integer get_class(int i);
+    public Object get_class(int i);
 
     public Integer get_index(int i);
 
@@ -46,31 +47,33 @@ public interface ObjectDataset {
 
     public void set_indices(ArrayList<Integer> indices);
 
-    public int get_class_size(Integer class_label);
+    public int get_class_size(Object class_label);
 
-    public Map<Integer, Integer> get_class_map();
+    public Map<Object, Integer> get_class_map();
 
-    public int[] get_unique_classes();
+    public Object[] get_unique_classes();
 
-    public Set<Integer> get_unique_classes_as_set();
+    public Set<Object> get_unique_classes_as_set();
 
-    public Map<Integer, ListObjectDataset> split_classes();
+    public Map<Object, ListObjectDataset> split_classes();
 
-    public double gini(); // we may need to define how gini works with mixed types
+    //public double gini(); // we may need to define how gini works with mixed types
+
+    public double purity(String method); // we may need to define how gini works with mixed types
 
     public List<Object> _internal_data_list();
 
-    public List<Integer> _internal_class_list();
+    public List<Object> _internal_class_list();
 
     public Object[] _internal_data_array();
 
     public ArrayList<Integer> _internal_indices_list();
 
-    public int[] _internal_class_array();
+    public Object[] _internal_class_array();
 
-    public ObjectDataset reorder_class_labels(Map<Integer, Integer> new_order);
+    public ObjectDataset reorder_class_labels(Map<Object, Integer> new_order);
 
-    public Map<Integer, Integer> _get_initial_class_labels();
+    public Map<Object, Integer> _get_initial_class_labels();
 
     public void shuffle();
 

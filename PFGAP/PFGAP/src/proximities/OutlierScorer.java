@@ -9,7 +9,7 @@ public class OutlierScorer {
             boolean useSparse,
             boolean symmetrize,
             boolean parallel,
-            int[] ytrain,
+            Object[] ytrain,
             double[][] denseProximities,
             Map<Integer, Map<Integer, Double>> sparseProximities
     ) {
@@ -49,9 +49,9 @@ public class OutlierScorer {
         return sym;
     }
 
-    private static double[] computeOutlierScoresDense(double[][] P, int[] ytrain, boolean parallel) {
+    private static double[] computeOutlierScoresDense(double[][] P, Object[] ytrain, boolean parallel) {
         int n = ytrain.length;
-        Map<Integer, List<Integer>> labelToIndices = groupByLabel(ytrain);
+        Map<Object, List<Integer>> labelToIndices = groupByLabel(ytrain);
 
         Double[] rawScores = (parallel ? IntStream.range(0, n).parallel() : IntStream.range(0, n))
                 .mapToObj(i -> {
@@ -67,9 +67,9 @@ public class OutlierScorer {
         return normalizeScores(rawScores, ytrain, labelToIndices);
     }
 
-    private static double[] computeOutlierScoresSparse(Map<Integer, Map<Integer, Double>> P, int[] ytrain, boolean parallel) {
+    private static double[] computeOutlierScoresSparse(Map<Integer, Map<Integer, Double>> P, Object[] ytrain, boolean parallel) {
         int n = ytrain.length;
-        Map<Integer, List<Integer>> labelToIndices = groupByLabel(ytrain);
+        Map<Object, List<Integer>> labelToIndices = groupByLabel(ytrain);
 
         Double[] rawScores = (parallel ? IntStream.range(0, n).parallel() : IntStream.range(0, n))
                 .mapToObj(i -> {
@@ -87,13 +87,13 @@ public class OutlierScorer {
         return normalizeScores(rawScores, ytrain, labelToIndices);
     }
 
-    private static double[] normalizeScores(Double[] scores, int[] ytrain, Map<Integer, List<Integer>> labelToIndices) {
+    private static double[] normalizeScores(Double[] scores, Object[] ytrain, Map<Object, List<Integer>> labelToIndices) {
         double[] normalized = new double[scores.length];
-        Map<Integer, Double> medians = new HashMap<>();
-        Map<Integer, Double> mads = new HashMap<>();
+        Map<Object, Double> medians = new HashMap<>();
+        Map<Object, Double> mads = new HashMap<>();
 
-        for (Map.Entry<Integer, List<Integer>> entry : labelToIndices.entrySet()) {
-            int label = entry.getKey();
+        for (Map.Entry<Object, List<Integer>> entry : labelToIndices.entrySet()) {
+            Object label = entry.getKey();
             List<Double> labelScores = entry.getValue().stream().map(i -> scores[i]).collect(Collectors.toList());
 
             double median = computeMedian(labelScores);
@@ -122,8 +122,8 @@ public class OutlierScorer {
         }
     }
 
-    private static Map<Integer, List<Integer>> groupByLabel(int[] ytrain) {
-        Map<Integer, List<Integer>> labelToIndices = new HashMap<>();
+    private static Map<Object, List<Integer>> groupByLabel(Object[] ytrain) {
+        Map<Object, List<Integer>> labelToIndices = new HashMap<>();
         for (int i = 0; i < ytrain.length; i++) {
             labelToIndices.computeIfAbsent(ytrain[i], k -> new ArrayList<>()).add(i);
         }

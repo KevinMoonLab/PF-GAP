@@ -10,6 +10,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 //import distance.elastic.MEASURE;
 import core.contracts.ObjectDataset;
 import distance.MEASURE;
+import imputation.Imputer;
+import imputation.MeanImpute;
 import imputation.MissingIndices;
 
 /**
@@ -50,6 +52,7 @@ public class AppContext {
 	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
+	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
 	public static String entry_separator = "\t"; // the default for univariate time series (tsv).
 	public static String array_separator = ":"; // is there a convention for this??
@@ -60,6 +63,10 @@ public class AppContext {
 	public static boolean target_column_is_first = true;
 	public static boolean eval;
 	public static int length; //firstSeparator
+	public static String purity_measure = "gini";
+	public static boolean isRegression = false;
+	public static String voting = "mean";
+	public static double purity_threshold = 1e-6;
 
 
 	public static int num_repeats = 1;
