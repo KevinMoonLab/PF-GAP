@@ -6,11 +6,16 @@
 
 PF-GAP is a flexible, extensible framework for proximity-based learning on time series and structured data. It builds on the original [Proximity Forest (PF)](https://github.com/fpetitjean/ProximityForest) model and introduces:
 
-- **GAP proximities** for imputation, outlier detection, and visualization
+- **GAP proximities**
+    - Supervised imputation (test and train sets)
+    - Intra-class outlier scores
+    - Returnable for visualization, SVM kernel, etc.
 - **Custom distance functions** (in Python, Maple, or Java)
 - **Support for multivariate and variable-length time series**
 - **Parallel training and proximity computation**
 - **Flexible data formatting and imputation options**
+- **Regression (Extrinsic)**
+- **Customizable node purity measures and aggregation schemes**
 
 ---
 ## 📚 Table of Contents
