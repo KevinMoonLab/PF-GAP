@@ -6,8 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import core.contracts.ObjectDataset;
 import imputation.MissingIndices;
-import purity.Gini;
-import purity.Variance;
+import purity.*;
 import util.ObjectDataUtils; // is this needed here?
 
 public class ListObjectDataset implements ObjectDataset, Serializable {
@@ -237,8 +236,10 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
                 return Gini.compute(this.labels);
             case "variance":
                 return Variance.compute(this.labels);
-            //case "entropy":
-            //    return Entropy.computeEntropy(this.labels); // optional
+            case "entropy":
+                return Entropy.compute(this.labels);
+            case "mad":
+                return MAD.compute(this.labels);
             default:
                 throw new IllegalArgumentException("Unknown purity method: " + method);
         }

@@ -513,35 +513,44 @@ public class ProximityTree implements Serializable {
 
 			//Dataset[] best_splits = splitter.find_best_split(data);
 			ObjectDataset[] best_splits = splitter.find_best_split(data);
-			//Dataset[] oob_splits = new Dataset[best_splits.length];
-			ObjectDataset[] oob_splits = new ObjectDataset[best_splits.length];
-			this.children = new Node[best_splits.length];
-			for (int i = 0; i < children.length; i++) {
-				this.children[i] = new Node(this, i, ++tree.node_counter, tree);
-				this.children[i].setInBagIndices(best_splits[i]._internal_indices_list());
-				oob_splits[i] = new ListObjectDataset();
-			}
-			//Now we need to let the oob indices trickle down (set the oob indices for the children).
-			//System.out.println(oobData.size());
-			for (int i=0; i<oobData.size(); i++){
-				int ind = oobData.get_index(i);
-				//int label = oobData.get_class(i);
-				Object label = oobData.get_class(i);
-				//double[] series = oobData.get_series(i);
-				Object series = oobData.get_series(i);
-				int branch = splitter.find_closest_branch(oobData.get_series(i));
-				//if (this.children[branch] != null){
-				//	this.children[branch].OutOfBagIndices.add(ind);
-				//}
-				this.children[branch].OutOfBagIndices.add(ind);
-				oob_splits[branch].add(label,series,ind);
-			}
 
-			// Now train on the children.
-			for (int i = 0; i < best_splits.length; i++) {
+			// check to see if any would-be child nodes are empty. We don't want that.
+			if (best_splits == null || Arrays.stream(best_splits).anyMatch(split -> split.size() == 0)) {
+				this.is_leaf = true;
+				this.label = computeLeafLabel(data._internal_class_list());
+				this.tree.leaves.add(this);
+			} else {
 
-				//this.children[i].train(best_splits[i]);
-				this.children[i].train(best_splits[i],oob_splits[i]);
+				//Dataset[] oob_splits = new Dataset[best_splits.length];
+				ObjectDataset[] oob_splits = new ObjectDataset[best_splits.length];
+				this.children = new Node[best_splits.length];
+				for (int i = 0; i < children.length; i++) {
+					this.children[i] = new Node(this, i, ++tree.node_counter, tree);
+					this.children[i].setInBagIndices(best_splits[i]._internal_indices_list());
+					oob_splits[i] = new ListObjectDataset();
+				}
+				//Now we need to let the oob indices trickle down (set the oob indices for the children).
+				//System.out.println(oobData.size());
+				for (int i = 0; i < oobData.size(); i++) {
+					int ind = oobData.get_index(i);
+					//int label = oobData.get_class(i);
+					Object label = oobData.get_class(i);
+					//double[] series = oobData.get_series(i);
+					Object series = oobData.get_series(i);
+					int branch = splitter.find_closest_branch(oobData.get_series(i));
+					//if (this.children[branch] != null){
+					//	this.children[branch].OutOfBagIndices.add(ind);
+					//}
+					this.children[branch].OutOfBagIndices.add(ind);
+					oob_splits[branch].add(label, series, ind);
+				}
+
+				// Now train on the children.
+				for (int i = 0; i < best_splits.length; i++) {
+
+					//this.children[i].train(best_splits[i]);
+					this.children[i].train(best_splits[i], oob_splits[i]);
+				}
 			}
 		}
 

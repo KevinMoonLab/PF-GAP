@@ -243,8 +243,9 @@ public class ExperimentRunner {
 					ProximityForestResult result = forest.test(test_data);
 
 					//Now we print the Predictions array to a text file.
-					List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
+
 					if (!AppContext.isRegression) {
+						List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
 						Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
 						List<Object> originalPredictions = predictedLabels.stream()
 								.map(newToOriginal::get)
@@ -254,20 +255,21 @@ public class ExperimentRunner {
 						writer0.print(ArrayUtils.toString(originalPredictions));
 						writer0.close();
 					} else {
+						//int t = forest.getResultSet();
 						PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
-						//writer0.print(ArrayUtils.toString(result.Predictions));
-						writer0.print(ArrayUtils.toString(predictedLabels));
+						writer0.print(ArrayUtils.toString(result.Predictions));
+						//writer0.print(ArrayUtils.toString(predictedLabels));
 						writer0.close();
 					}
 
 
 					//print and export resultS
-					result.printResults(datasetName, i, "");
+					//result.printResults(datasetName, i, "");
 					//AppContext.output_dir = null;
 
-					if (!AppContext.getprox) {
-						test_data = null; // erase the test data information (or after test/train prox)
-					}
+					//if (!AppContext.getprox) {
+					//	test_data = null; // erase the test data information (or after test/train prox)
+					//}
 
 				}
 
@@ -365,9 +367,10 @@ public class ExperimentRunner {
 						//PrintWriter writer4 = new PrintWriter(AppContext.output_dir + "ytest.txt", StandardCharsets.UTF_8);
 						//writer4.print(ArrayUtils.toString(ytest));
 						//writer4.close();
-						test_data = null;
+						//test_data = null;
 					}
 				}
+				test_data = null;
 				////print and export resultS
 				//result.printResults(datasetName, i, "");
 				//AppContext.output_dir = null;
@@ -428,8 +431,9 @@ public class ExperimentRunner {
 				}
 
 				//Now we print the Predictions array of the saved model to a text file.
-				List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
+
 				if (!AppContext.isRegression) {
+					List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
 					Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
 					List<Object> originalPredictions = predictedLabels.stream()
 							.map(newToOriginal::get)
@@ -442,7 +446,7 @@ public class ExperimentRunner {
 					writer0a.close();
 				} else {
 					PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
-					writer0a.print(ArrayUtils.toString(predictedLabels));
+					writer0a.print(ArrayUtils.toString(result1.Predictions));
 					writer0a.close();
 				}
 

@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import os
 
-def train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False, initial_imputer="mean"):
+def train(train_file, test_file=None, train_labels=None, test_labels=None, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_train=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False, initial_imputer="mean", regressor=False, purity="gini", purity_threshold=1e-6, regressor_aggregation="mean"):
     
     TFdict = {True:"true", False:"false"}
     if (data_dimension not in [1,2]):
@@ -44,6 +44,10 @@ def train(train_file, test_file=None, train_labels=None, test_labels=None, retur
     msgList.extend(["-isNumeric=" + TFdict[numeric_data]])
     msgList.extend(["-get_training_outlier_scores=" + TFdict[return_training_outlier_scores]])
     msgList.extend(["-initial_imputer=" + initial_imputer])
+    msgList.extend(["-isRegression=" + TFdict[regressor]])
+    msgList.extend(["-purity_measure=" + purity])
+    msgList.extend(["-purity_threshold=" + str(purity_threshold)])
+    msgList.extend(["-voting=" + regressor_aggregation])
     
     if entry_separator=="\t":
         entry_separator = "\\t"
