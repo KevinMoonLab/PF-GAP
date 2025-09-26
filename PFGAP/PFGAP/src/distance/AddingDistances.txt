@@ -1,5 +1,5 @@
 Add a distance measure:
 0. Create the distance java class file in the appropriate folder.
-1. add to DistanceMeasure.java (class, initialize method, distance method, possibly random parameters.
+1. add to DistanceMeasure.java: class, initialize method, distance method, possibly random parameters.
 2. add to MEASURE enum
 3. Add to PFApplication hashmap.

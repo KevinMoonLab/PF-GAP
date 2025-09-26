@@ -7,30 +7,17 @@ import java.util.List;
 import java.util.Random;
 
 import core.AppContext;
-//import core.contracts.Dataset;
 import core.contracts.ObjectDataset;
+import distance.api.DistanceFunction;
 import distance.elastic.*;
+import distance.interop.JavaDistance;
 import distance.interop.MapleDistance;
 import distance.interop.PythonDistance;
-import distance.multiTS.DTW_D;
-import distance.multiTS.DTW_I;
+import distance.multiTS.*;
 
-//public class DistanceMeasure {
 public class DistanceMeasure implements Serializable {
 	
 	public final MEASURE distance_measure;
-
-	/*private transient Euclidean euc;
-	private transient DTW dtw;
-	private transient DTW dtwcv;	
-	private transient DDTW ddtw;
-	private transient DDTW ddtwcv;	
-	private transient WDTW wdtw;
-	private transient WDDTW wddtw;
-	private transient LCSS lcss;
-	private transient MSM msm;
-	private transient ERP erp;
-	private transient TWE twe;*/
 
 	private Euclidean euc;
 	private DTW dtw;
@@ -46,9 +33,30 @@ public class DistanceMeasure implements Serializable {
 	private MapleDistance maple;
 	private PythonDistance python;
 	private Manhattan manhattan;
+	private DistanceFunction distanceFunction;
 	private ShapeHoG1dDTW shapeHoG1dDTW;
 	private DTW_I dtw_i;
 	private DTW_D dtw_d;
+
+	private DDTW_I ddtw_i;
+	private WDTW_I wdtw_i;
+	private WDDTW_I wddtw_i;
+	private TWE_I twe_i;
+	private ERP_I erp_i;
+	private Euclidean_I euclidean_i;
+	private LCSS_I lcss_i;
+	private MSM_I msm_i;
+	private Manhattan_I manhattan_i;
+	private CID_I cid_i;
+	private SBD_I sbd_i;
+	private ShapeHoGDTW shapeHoGdtw;
+
+	private DDTW_D ddtw_d;
+	private WDTW_D wdtw_d;
+	private WDDTW_D wddtw_d;
+	private ShapeHoGDTW shapeHoGdtw_d;
+	//private Euclidean_D euclidean_d;
+	//private Manhattan_D manhattan_d;
 
 	
 	public int windowSizeDTW =-1,
@@ -63,12 +71,12 @@ public class DistanceMeasure implements Serializable {
 			weightWDTW,
 			weightWDDTW;
 
-	public DistanceMeasure (MEASURE m) throws Exception{
+	public DistanceMeasure (MEASURE m, String... descriptor) throws Exception{
 		this.distance_measure = m;
-		initialize(m);
+		initialize(m, descriptor);
 	}
 	
-	public void initialize (MEASURE m) throws Exception{
+	public void initialize (MEASURE m, String... descriptor) throws Exception{
 		switch (m) {
 			case euclidean:
 			case shifazEUCLIDEAN:
@@ -120,6 +128,9 @@ public class DistanceMeasure implements Serializable {
 			case python:
 				python = new PythonDistance();
 				break;
+			case javadistance:
+				distanceFunction = new JavaDistance(descriptor[0]).getDistanceFunction();
+				break;
 			case manhattan:
 				manhattan = new Manhattan();
 				break;
@@ -132,14 +143,80 @@ public class DistanceMeasure implements Serializable {
 			case dtw_d:
 				dtw_d = new DTW_D();
 				break;
+			case ddtw_i:
+			case shifazDDTW_I:
+				ddtw_i = new DDTW_I();
+				break;
+			case wdtw_i:
+			case shifazWDTW_I:
+				wdtw_i = new WDTW_I();
+				break;
+			case wddtw_i:
+			case shifazWDDTW_I:
+				wddtw_i = new WDDTW_I();
+				break;
+			case twe_i:
+			case shifazTWE_I:
+				twe_i = new TWE_I();
+				break;
+			case erp_i:
+			case shifazERP_I:
+				erp_i = new ERP_I();
+				break;
+			case euclidean_i:
+			case shifazEUCLIDEAN_I:
+				euclidean_i = new Euclidean_I();
+				break;
+			case lcss_i:
+			case shifazLCSS_I:
+				lcss_i = new LCSS_I();
+				break;
+			case msm_i:
+			case shifazMSM_I:
+				msm_i = new MSM_I();
+				break;
+			case manhattan_i:
+			case shifazMANHATTAN_I:
+				manhattan_i = new Manhattan_I();
+				break;
+			case cid_i:
+			case shifazCID_I:
+				cid_i = new CID_I();
+				break;
+			case sbd_i:
+			case shifazSBD_I:
+				sbd_i = new SBD_I();
+				break;
+			case shapeHoGdtw:
+			case shifazShapeHoGDTW:
+				shapeHoGdtw = new ShapeHoGDTW();
+				break;
+
+			case ddtw_d:
+				ddtw_d = new DDTW_D();
+				break;
+			case wdtw_d:
+				wdtw_d = new WDTW_D();
+				break;
+			case wddtw_d:
+				wddtw_d = new WDDTW_D();
+				break;
+			case shapeHoGdtw_d:
+				shapeHoGdtw_d = new ShapeHoGDTW();
+				break;
+			//case euclidean_d:
+			//	euclidean_d = new Euclidean_D();
+			//	break;
+			//case manhattan_d:
+			//	manhattan_d = new Manhattan_D();
+			//	break;
 			default:
 				throw new Exception("Unknown distance measure");
-				//System.out.println("Using Custom Distance...");
 //				break;
 		}
 		
 	}
-	//public void select_random_params(Dataset d, Random r) {
+
 	public void select_random_params(ObjectDataset d, Random r) {
 		switch (this.distance_measure) {
 		case euclidean:
@@ -192,18 +269,47 @@ public class DistanceMeasure implements Serializable {
 		case shifazDDTWCV:
 			this.windowSizeDDTW = ddtwcv.get_random_window(d, r);
 			break;
+			case wdtw_i:
+			case shifazWDTW_I:
+				this.weightWDTW = wdtw_i.get_random_g(d, r);
+				break;
+			case wddtw_i:
+			case shifazWDDTW_I:
+				this.weightWDDTW = wddtw_i.get_random_g(d, r);
+				break;
+			case twe_i:
+			case shifazTWE_I:
+				this.lambdaTWE = twe_i.get_random_lambda(d, r);
+				this.nuTWE = twe_i.get_random_nu(d, r);
+				break;
+			case erp_i:
+			case shifazERP_I:
+				this.gERP = erp_i.get_random_g(d, r);
+				this.windowSizeERP = erp_i.get_random_window(d, r);
+				break;
+			case lcss_i:
+			case shifazLCSS_I:
+				this.epsilonLCSS = lcss_i.get_random_epsilon(d, r);
+				this.windowSizeLCSS = lcss_i.get_random_window(d, r);
+				break;
+			case msm_i:
+			case shifazMSM_I:
+				this.cMSM = msm_i.get_random_cost(d, r);
+				break;
+			case shapeHoGdtw:
+			case shifazShapeHoGDTW:
+				this.windowSizeDDTW = d.length();
+				break;
 		default:
 //			throw new Exception("Unknown distance measure");
 //			break;
 		}
 	}
 
-	//public double distance(double[] s, double[] t) throws IOException, InterruptedException {
 	public double distance(Object s, Object t) throws IOException, InterruptedException {
 		return this.distance(s, t, Double.POSITIVE_INFINITY);
 	}
-	
-	//public double distance(double[] s, double[] t, double bsf) throws IOException, InterruptedException {
+
 	public double distance(Object s, Object t, double bsf) throws IOException, InterruptedException {
 		double distance = Double.POSITIVE_INFINITY;
 		
@@ -262,6 +368,9 @@ public class DistanceMeasure implements Serializable {
 			distance = python.distance(s,t);
 			//distance = PythonDistance.distance(s,t);
 			break;
+		case javadistance:
+			distance = distanceFunction.compute(s,t);
+			break;
 		case manhattan:
 			distance = manhattan.distance(s,t,bsf);
 			break;
@@ -274,7 +383,74 @@ public class DistanceMeasure implements Serializable {
 		case dtw_d:
 			distance = dtw_d.distance(s,t,bsf,((double[][]) s).length);
 			break;
-		default:
+			case ddtw_i:
+			case shifazDDTW_I:
+				distance = ddtw_i.distance(s, t, bsf, ((double[][]) s).length);
+				break;
+			case wdtw_i:
+			case shifazWDTW_I:
+				distance = wdtw_i.distance(s, t, bsf, this.weightWDTW);
+				break;
+			case wddtw_i:
+			case shifazWDDTW_I:
+				distance = wddtw_i.distance(s, t, bsf, this.weightWDDTW);
+				break;
+			case twe_i:
+			case shifazTWE_I:
+				distance = twe_i.distance(s, t, bsf, this.nuTWE, this.lambdaTWE);
+				break;
+			case erp_i:
+			case shifazERP_I:
+				distance = erp_i.distance(s, t, bsf, this.windowSizeERP, this.gERP);
+				break;
+			case euclidean_i:
+			case shifazEUCLIDEAN_I:
+				distance = euclidean_i.distance(s, t, bsf);
+				break;
+			case lcss_i:
+			case shifazLCSS_I:
+				distance = lcss_i.distance(s, t, bsf, this.windowSizeLCSS, this.epsilonLCSS);
+				break;
+			case msm_i:
+			case shifazMSM_I:
+				distance = msm_i.distance(s, t, bsf, this.cMSM);
+				break;
+			case manhattan_i:
+			case shifazMANHATTAN_I:
+				distance = manhattan_i.distance(s, t, bsf);
+				break;
+			case cid_i:
+			case shifazCID_I:
+				distance = cid_i.distance(s, t, bsf);
+				break;
+			case sbd_i:
+			case shifazSBD_I:
+				distance = sbd_i.distance(s, t);
+				break;
+			case shapeHoGdtw:
+			case shifazShapeHoGDTW:
+				distance = shapeHoGdtw.distance(s, t, bsf, ((double[][]) s).length);
+				break;
+
+			case ddtw_d:
+				distance = ddtw_d.distance(s, t, bsf, ((double[][]) s).length);
+				break;
+			case wdtw_d:
+				distance = wdtw_d.distance(s, t, bsf, this.weightWDTW);
+				break;
+			case wddtw_d:
+				distance = wddtw_d.distance(s, t, bsf, this.weightWDDTW);
+				break;
+			case shapeHoGdtw_d:
+				distance = shapeHoGdtw_d.distance(s, t, bsf, ((double[][]) s).length);
+				break;
+			//case euclidean_d:
+			//	distance = euclidean_d.distance(s, t, bsf);
+			//	break;
+			//case manhattan_d:
+			//	distance = manhattan_d.distance(s, t, bsf);
+
+			default:
 //			throw new Exception("Unknown distance measure");
 //			break;
 		}

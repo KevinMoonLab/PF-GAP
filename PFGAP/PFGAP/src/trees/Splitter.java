@@ -120,14 +120,14 @@ public class Splitter implements Serializable {
 		if (node.tree.getChosen_distances().length == 0) {
 			if (AppContext.random_dm_per_node) {
 				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-				dm = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
+				dm = new DistanceMeasure(AppContext.enabled_distance_measures[r], AppContext.Descriptors.get(r));
 			} else {
 				dm = node.tree.tree_distance_measure;
 			}
 		} else {
 			if (AppContext.random_dm_per_node) {
 				int r = AppContext.getRand().nextInt(node.tree.getChosen_distances().length);
-				dm = new DistanceMeasure(node.tree.getChosen_distances()[r]);
+				dm = new DistanceMeasure(node.tree.getChosen_distances()[r], AppContext.Descriptors.get(r));
 			} else {
 				dm = node.tree.tree_distance_measure;
 			}

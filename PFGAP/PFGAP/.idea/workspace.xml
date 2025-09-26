@@ -8,8 +8,14 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/AddingDistances.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/AddingDistances.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/MEASURE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/MEASURE.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,7 +47,7 @@
     <property name="project.structure.last.edited" value="Artifacts" />
     <property name="project.structure.proportion" value="0.28698552" />
     <property name="project.structure.side.proportion" value="0.26373625" />
-    <property name="settings.editor.selected.configurable" value="preferences.lookFeel" />
+    <property name="settings.editor.selected.configurable" value="preferences.pluginManager" />
   </component>
   <component name="RunManager" selected="Application.PFGAPapp">
     <configuration name="PFApplication" type="Application" factoryName="Application">

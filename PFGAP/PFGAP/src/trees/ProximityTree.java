@@ -88,14 +88,14 @@ public class ProximityTree implements Serializable {
 		if (this.chosen_distances.length == 0){
 			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
 				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-				tree_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r]);
+				tree_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r], AppContext.Descriptors.get(r));
 				//params selected per node in the splitter class
 			}
 		}
 		else {
 			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
 				int r = AppContext.getRand().nextInt(this.chosen_distances.length);
-				tree_distance_measure = new DistanceMeasure(this.chosen_distances[r]);
+				tree_distance_measure = new DistanceMeasure(this.chosen_distances[r], AppContext.Descriptors.get(r));
 				//params selected per node in the splitter class
 			}
 		}

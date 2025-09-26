@@ -3,6 +3,7 @@ package application;
 import core.AppContext;
 import core.ExperimentRunner;
 //import distance.elastic.MEASURE;
+import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.LinearImpute;
 import imputation.MeanImpute;
@@ -10,6 +11,8 @@ import imputation.MedianImpute;
 import imputation.ModeImpute;
 import util.GeneralUtilities;
 import util.PrintUtilities;
+
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
@@ -207,9 +210,10 @@ public class PFApplication {
 					int numberofdists = contentsList.size();
 					MEASURE[] toadd = new MEASURE[numberofdists];
 
-					Map<String, MEASURE> measuresByName = new HashMap<>();
+					//Map<String, MEASURE> measuresByName = new HashMap<>();
+					Map<String, MEASURE> measuresByName = DistanceRegistry.getAll();
 
-					// Associate string keys with MEASURE values
+					/*// Associate string keys with MEASURE values
 					measuresByName.put("basicDTW", MEASURE.basicDTW);
 					measuresByName.put("dtwDistance", MEASURE.dtwDistance);
 					measuresByName.put("dtwDistanceEfficient", MEASURE.dtwDistanceEfficient);
@@ -248,7 +252,65 @@ public class PFApplication {
 					measuresByName.put("dtw_i", MEASURE.dtw_i);
 					measuresByName.put("dtw_d", MEASURE.dtw_d);
 
+					// Multivariate Independent (_I)
+					measuresByName.put("ddtw_i", MEASURE.ddtw_i);
+					measuresByName.put("shifazDDTW_I", MEASURE.shifazDDTW_I);
+					measuresByName.put("wdtw_i", MEASURE.wdtw_i);
+					measuresByName.put("shifazWDTW_I", MEASURE.shifazWDTW_I);
+					measuresByName.put("wddtw_i", MEASURE.wddtw_i);
+					measuresByName.put("shifazWDDTW_I", MEASURE.shifazWDDTW_I);
+					measuresByName.put("twe_i", MEASURE.twe_i);
+					measuresByName.put("shifazTWE_I", MEASURE.shifazTWE_I);
+					measuresByName.put("erp_i", MEASURE.erp_i);
+					measuresByName.put("shifazERP_I", MEASURE.shifazERP_I);
+					measuresByName.put("euclidean_i", MEASURE.euclidean_i);
+					measuresByName.put("shifazEUCLIDEAN_I", MEASURE.shifazEUCLIDEAN_I);
+					measuresByName.put("lcss_i", MEASURE.lcss_i);
+					measuresByName.put("shifazLCSS_I", MEASURE.shifazLCSS_I);
+					measuresByName.put("msm_i", MEASURE.msm_i);
+					measuresByName.put("shifazMSM_I", MEASURE.shifazMSM_I);
+					measuresByName.put("manhattan_i", MEASURE.manhattan_i);
+					measuresByName.put("shifazMANHATTAN_I", MEASURE.shifazMANHATTAN_I);
+					measuresByName.put("cid_i", MEASURE.cid_i);
+					measuresByName.put("shifazCID_I", MEASURE.shifazCID_I);
+					measuresByName.put("sbd_i", MEASURE.sbd_i);
+					measuresByName.put("shifazSBD_I", MEASURE.shifazSBD_I);
+
+// Multivariate Dependent (_D)
+					measuresByName.put("ddtw_d", MEASURE.ddtw_d);
+					measuresByName.put("wdtw_d", MEASURE.wdtw_d);
+					measuresByName.put("wddtw_d", MEASURE.wddtw_d);
+					measuresByName.put("shapeHoGdtw_d", MEASURE.shapeHoGdtw_d);
+					//measuresByName.put("euclidean_d", MEASURE.euclidean_d);
+					//measuresByName.put("manhattan_d", MEASURE.manhattan_d);
+
+// Shape-based multivariate DTW
+					measuresByName.put("shapeHoGdtw", MEASURE.shapeHoGdtw);
+					measuresByName.put("shifazShapeHoGDTW", MEASURE.shifazShapeHoGDTW);*/
+
 					for (int j=0; j < numberofdists; j++){
+						String distanceString = contentsList.get(j);
+						if (distanceString.startsWith("javadistance:")) {
+							// check the format
+							String[] parts = distanceString.split(":");
+							if (parts.length < 2) {
+								throw new IllegalArgumentException("Invalid descriptor format. Use javadistance:path/to/file[:ClassName]");
+							}
+							// check that it's a real file.
+							String path = parts[1];
+							File file = new File(path);
+							if (!file.exists()) {
+								throw new IllegalArgumentException("File not found: " + path);
+							}
+
+							// Save to AppContext so that it can be invoked when initialized.
+							String[] descriptor = new String[]{distanceString};
+							AppContext.Descriptors.add(descriptor);
+						} else {
+							// we'll just add an empty string list (to keep track of indices).
+							String[] descriptor = new String[]{""};
+							AppContext.Descriptors.add(descriptor);
+						}
 						MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
 						toadd[j] = convertedEntry;
 					}
