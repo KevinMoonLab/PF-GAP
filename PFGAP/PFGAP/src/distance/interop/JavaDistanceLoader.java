@@ -8,7 +8,7 @@ import java.net.URLClassLoader;
 
 public class JavaDistanceLoader {
 
-    public static DistanceFunction load(String descriptor) throws Exception {
+    static DistanceFunction load(String descriptor) throws Exception {
         String[] parts = descriptor.split(":");
         if (parts.length < 2) {
             throw new IllegalArgumentException("Invalid descriptor format. Use javadistance:path/to/file[:ClassName]");
@@ -22,7 +22,27 @@ public class JavaDistanceLoader {
             throw new IllegalArgumentException("File not found: " + path);
         }
 
-        URL[] urls = { file.getParentFile().toURI().toURL() };
+        /*File parent = file.getParentFile();
+        if (parent == null) {
+            // Fallback to current working directory
+            parent = new File(".").getAbsoluteFile();
+        }
+
+        URL[] urls = { parent.toURI().toURL() };*/
+
+        URL[] urls;
+        if (path.endsWith(".jar")) {
+            // ✅ Load directly from the .jar file
+            urls = new URL[]{ file.toURI().toURL() };
+        } else {
+            // ✅ Load from the parent directory of the .class file
+            File parent = file.getParentFile();
+            if (parent == null) {
+                parent = new File(".").getAbsoluteFile();
+            }
+            urls = new URL[]{ parent.toURI().toURL() };
+        }
+
         try (URLClassLoader loader = new URLClassLoader(urls, DistanceFunction.class.getClassLoader())) {
             Class<?> clazz = loader.loadClass(className);
 

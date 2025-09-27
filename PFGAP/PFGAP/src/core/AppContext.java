@@ -1,9 +1,6 @@
 package core;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 //import core.contracts.Dataset;
@@ -101,7 +98,7 @@ public class AppContext {
 	public static boolean get_training_outlier_scores;
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
-	public static List<String[]> Descriptors; //this is specifically to store file names for custom java distances.
+	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;
 	public static int max_depth; //initializes to 0.

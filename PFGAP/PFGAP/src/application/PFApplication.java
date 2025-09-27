@@ -289,6 +289,7 @@ public class PFApplication {
 					measuresByName.put("shifazShapeHoGDTW", MEASURE.shifazShapeHoGDTW);*/
 
 					for (int j=0; j < numberofdists; j++){
+						MEASURE convertedEntry;
 						String distanceString = contentsList.get(j);
 						if (distanceString.startsWith("javadistance:")) {
 							// check the format
@@ -306,12 +307,14 @@ public class PFApplication {
 							// Save to AppContext so that it can be invoked when initialized.
 							String[] descriptor = new String[]{distanceString};
 							AppContext.Descriptors.add(descriptor);
+							convertedEntry = measuresByName.get("javadistance");
 						} else {
 							// we'll just add an empty string list (to keep track of indices).
 							String[] descriptor = new String[]{""};
 							AppContext.Descriptors.add(descriptor);
+							convertedEntry = measuresByName.get(contentsList.get(j));
 						}
-						MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
+						//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
 						toadd[j] = convertedEntry;
 					}
 

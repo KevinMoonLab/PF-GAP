@@ -1,5 +1,3 @@
-package userdistances;
-
 import distance.api.DistanceFunction;
 
 public class MyEuclideanDistance implements DistanceFunction {
