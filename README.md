@@ -41,7 +41,7 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 ### Requirements
 
 - **Java 17+**
-- **Python 3.8+** (tested with Python 3.13)
+- Recommended: **Python 3.8+** (tested with Python 3.13)
 - Python packages (for running the demo files):
 
 ```bash
@@ -53,27 +53,25 @@ PF-GAP is a flexible, extensible framework for proximity-based learning on time 
 
 ```bash
 PF-GAP/
-├── PFGAP/
-│   └── PFGAP/              # Java source code
+├── PFGAP/                  # Java source code
+├── docs/                   # Project feature and useage documentation
+│   ├── custom_distances/   # Documentation and examples for custom Java distances
+│   ├── demo/               # Demo scripts (converted from notebooks), toy data, example Maple/Python
+│   └── *.md                # Markdown files for feature documentation
 ├── Application/
 │   ├── PFGAP.jar           # Compiled Java executable
-│   ├── PF_wrapper.py       # Python interface to PFGAP.jar
-│   ├── demo_*.py           # Demo scripts (converted from notebooks)
-│   ├── Data/               # Sample datasets
-│   ├── PythonDistance.py   # Example Python distance
-│   └── MapleDistance.mpl   # Example Maple distance
+│   └── PF_wrapper.py       # Python interface to PFGAP.jar
 └── README.md
 ```
 
 
 ## ⚡ Quickstart
 
-```bash
-# From the Application directory
-python demo_gunpoint.py
-```
+Simply download the PFGAP.jar file. For convenience, download the PR_wrapper.py file to call using python.
 
 # 🚀 Usage
+
+For more detailed descriptions, please refer to the documentation.
 
 # Training
 Use PF_wrapper.train() to train a proximity forest:
@@ -124,10 +122,22 @@ PF.train(
 Custom Distances
 You can define your own distance function in:
 
+- *Java:* compile a .class or .jar file, or multiple. See **docs/custom_distances** for more information.
 - *Python:* PythonDistance.py with a function Distance(list1, list2)
 - *Maple:* MapleDistance.mpl with a function Distance(list1, list2)
 
-Specify the distance source using:
+Specify the custom distance source using:
+
+```python
+distances=["javadistance:customdistance.class"]
+```
+or
+
+```python
+distances=["javadistance:userdistances.jar:customdistance"]
+```
+
+or
 
 ```python
 distances=["python"]  # or ["maple"]
@@ -145,7 +155,7 @@ distances=["python"]  # or ["maple"]
 
 ### Example MDS Visualization
 
-![Demo MDS GunPoint Train](PFGAP/Application/Demo_MDS_GunPointTrain.pdf)
+![Demo MDS GunPoint Train](docs/demo/Demo_MDS_GunPointTrain.pdf)
 
 ---
 
