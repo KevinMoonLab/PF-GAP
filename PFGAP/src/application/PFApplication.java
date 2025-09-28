@@ -2,7 +2,6 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
-//import distance.elastic.MEASURE;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.LinearImpute;
@@ -83,8 +82,16 @@ public class PFApplication {
 						AppContext.testing_labels = null;
 					} else {
 						AppContext.testing_labels = options[1];
+						AppContext.exists_testlabels = true;
 					}
 					break;
+				case "-exists_testlabels":
+					if (AppContext.exists_testlabels) {
+						break;
+					} else {
+						AppContext.exists_testlabels = Boolean.parseBoolean(options[1]);
+						break;
+					}
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);
 					break;
@@ -169,6 +176,9 @@ public class PFApplication {
 				case "-getprox":
 					AppContext.getprox = Boolean.parseBoolean(options[1]);
 					break;
+				case "-get_predictions":
+					AppContext.get_predictions = Boolean.parseBoolean(options[1]);
+					break;
 				case "-modelname":
 					AppContext.modelname = options[1];
 					break;
@@ -180,6 +190,9 @@ public class PFApplication {
 					break;
 				case "-parallelProx":
 					AppContext.parallelProx = Boolean.parseBoolean(options[1]);
+					break;
+				case "-parallelPredict":
+					AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
 					break;
 				case "-initial_imputer":
 					String inputString = options[1];
@@ -212,81 +225,6 @@ public class PFApplication {
 
 					//Map<String, MEASURE> measuresByName = new HashMap<>();
 					Map<String, MEASURE> measuresByName = DistanceRegistry.getAll();
-
-					/*// Associate string keys with MEASURE values
-					measuresByName.put("basicDTW", MEASURE.basicDTW);
-					measuresByName.put("dtwDistance", MEASURE.dtwDistance);
-					measuresByName.put("dtwDistanceEfficient", MEASURE.dtwDistanceEfficient);
-					measuresByName.put("erp", MEASURE.erp);
-					measuresByName.put("lcss", MEASURE.lcss);
-					measuresByName.put("msm", MEASURE.msm);
-					measuresByName.put("pdtw", MEASURE.pdtw);
-					measuresByName.put("scdtw", MEASURE.scdtw);
-					measuresByName.put("twe", MEASURE.twe);
-					measuresByName.put("wdtw", MEASURE.wdtw);
-					measuresByName.put("francoisDTW", MEASURE.francoisDTW);
-					measuresByName.put("smoothDTW", MEASURE.smoothDTW);
-					measuresByName.put("dtw", MEASURE.dtw);
-					measuresByName.put("dca_dtw", MEASURE.dca_dtw);
-					measuresByName.put("euclidean", MEASURE.euclidean);
-					measuresByName.put("equality", MEASURE.equality);
-					measuresByName.put("dtwcv", MEASURE.dtwcv);
-					measuresByName.put("ddtwcv", MEASURE.ddtwcv);
-					measuresByName.put("wddtw", MEASURE.wddtw);
-					measuresByName.put("ddtw", MEASURE.ddtw);
-					measuresByName.put("shifazDTW", MEASURE.shifazDTW);
-					measuresByName.put("shifazDTWCV", MEASURE.shifazDTWCV);
-					measuresByName.put("shifazDDTW", MEASURE.shifazDDTW);
-					measuresByName.put("shifazDDTWCV", MEASURE.shifazDDTWCV);
-					measuresByName.put("shifazWDTW", MEASURE.shifazWDTW);
-					measuresByName.put("shifazWDDTW", MEASURE.shifazWDDTW);
-					measuresByName.put("shifazEUCLIDEAN", MEASURE.shifazEUCLIDEAN);
-					measuresByName.put("shifazERP", MEASURE.shifazERP);
-					measuresByName.put("shifazMSM", MEASURE.shifazMSM);
-					measuresByName.put("shifazLCSS", MEASURE.shifazLCSS);
-					measuresByName.put("shifazTWE", MEASURE.shifazTWE);
-					measuresByName.put("maple", MEASURE.maple);
-					measuresByName.put("python", MEASURE.python);
-					measuresByName.put("manhattan", MEASURE.manhattan);
-					measuresByName.put("shapeHoG1dDTW", MEASURE.shapeHoG1dDTW);
-					measuresByName.put("dtw_i", MEASURE.dtw_i);
-					measuresByName.put("dtw_d", MEASURE.dtw_d);
-
-					// Multivariate Independent (_I)
-					measuresByName.put("ddtw_i", MEASURE.ddtw_i);
-					measuresByName.put("shifazDDTW_I", MEASURE.shifazDDTW_I);
-					measuresByName.put("wdtw_i", MEASURE.wdtw_i);
-					measuresByName.put("shifazWDTW_I", MEASURE.shifazWDTW_I);
-					measuresByName.put("wddtw_i", MEASURE.wddtw_i);
-					measuresByName.put("shifazWDDTW_I", MEASURE.shifazWDDTW_I);
-					measuresByName.put("twe_i", MEASURE.twe_i);
-					measuresByName.put("shifazTWE_I", MEASURE.shifazTWE_I);
-					measuresByName.put("erp_i", MEASURE.erp_i);
-					measuresByName.put("shifazERP_I", MEASURE.shifazERP_I);
-					measuresByName.put("euclidean_i", MEASURE.euclidean_i);
-					measuresByName.put("shifazEUCLIDEAN_I", MEASURE.shifazEUCLIDEAN_I);
-					measuresByName.put("lcss_i", MEASURE.lcss_i);
-					measuresByName.put("shifazLCSS_I", MEASURE.shifazLCSS_I);
-					measuresByName.put("msm_i", MEASURE.msm_i);
-					measuresByName.put("shifazMSM_I", MEASURE.shifazMSM_I);
-					measuresByName.put("manhattan_i", MEASURE.manhattan_i);
-					measuresByName.put("shifazMANHATTAN_I", MEASURE.shifazMANHATTAN_I);
-					measuresByName.put("cid_i", MEASURE.cid_i);
-					measuresByName.put("shifazCID_I", MEASURE.shifazCID_I);
-					measuresByName.put("sbd_i", MEASURE.sbd_i);
-					measuresByName.put("shifazSBD_I", MEASURE.shifazSBD_I);
-
-// Multivariate Dependent (_D)
-					measuresByName.put("ddtw_d", MEASURE.ddtw_d);
-					measuresByName.put("wdtw_d", MEASURE.wdtw_d);
-					measuresByName.put("wddtw_d", MEASURE.wddtw_d);
-					measuresByName.put("shapeHoGdtw_d", MEASURE.shapeHoGdtw_d);
-					//measuresByName.put("euclidean_d", MEASURE.euclidean_d);
-					//measuresByName.put("manhattan_d", MEASURE.manhattan_d);
-
-// Shape-based multivariate DTW
-					measuresByName.put("shapeHoGdtw", MEASURE.shapeHoGdtw);
-					measuresByName.put("shifazShapeHoGDTW", MEASURE.shifazShapeHoGDTW);*/
 
 					for (int j=0; j < numberofdists; j++){
 						MEASURE convertedEntry;

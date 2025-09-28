@@ -42,7 +42,7 @@ public class ProximityForestResult implements Serializable {
 	public long elapsedTimeTest = 0;	
 			
 	public int errors = 0, correct = 0;	
-	public double accuracy = 0, error_rate = 0;	
+	public double score = 0, error_rate = 0;
 	
 	
 	//FILLED BY STAT COLLECTOR CLASS
@@ -155,7 +155,7 @@ public class ProximityForestResult implements Serializable {
 	
 	        
 	        System.out.format("%sCorrect(TP+TN): %d vs Incorrect(FP+FN): %d\n",prefix,  correct, errors);
-	        System.out.println(prefix+"Accuracy: " + accuracy);
+	        System.out.println(prefix+"Score: " + score);
 	        System.out.println(prefix+"Error Rate: "+ error_rate);			
 		}
 
@@ -169,7 +169,7 @@ public class ProximityForestResult implements Serializable {
         
         String pre = "REPEAT:" + (experiment_id+1) +" ,";
 		System.out.print(pre + datasetName);        
-		System.out.print(", " + accuracy);
+		System.out.print(", " + score);
 		System.out.print(", " + elapsedTimeTrain /1e6);
 		System.out.print(", " + elapsedTimeTest /1e6);
 		System.out.print(", " + mean_depth_per_tree);
