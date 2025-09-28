@@ -7,7 +7,27 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$FileInfoExtractor.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$FileInfoExtractor.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$ParsedDoubleRow.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$ParsedDoubleRow.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$ProgressLogger.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$ProgressLogger.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$RowParser.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$RowParser.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ProximityForestResult.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ProximityForestResult.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/pfgap.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/trees/ProximityForest.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/trees/ProximityForest.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/DelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/DelimitedFileReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ProximityForestResult.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ProximityForestResult.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pfgap.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,7 +61,7 @@
     <property name="project.structure.side.proportion" value="0.26373625" />
     <property name="settings.editor.selected.configurable" value="project.propVCSSupport.Mappings" />
   </component>
-  <component name="RunManager" selected="Application.PFGAPapp">
+  <component name="RunManager">
     <configuration name="PFApplication" type="Application" factoryName="Application">
       <option name="ALTERNATIVE_JRE_PATH" value="17" />
       <option name="MAIN_CLASS_NAME" value="application.PFApplication" />
@@ -50,27 +70,6 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="PFApplicationEval" type="Application" factoryName="Application">
-      <option name="ALTERNATIVE_JRE_PATH" value="17" />
-      <option name="MAIN_CLASS_NAME" value="application.PFApplicationEval" />
-      <module name="PFGAP" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="PFGAPapp" type="Application" factoryName="Application">
-      <option name="ALTERNATIVE_JRE_PATH" value="17" />
-      <option name="MAIN_CLASS_NAME" value="pfgap" />
-      <module name="PFGAP" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <list>
-      <item itemvalue="Application.PFApplication" />
-      <item itemvalue="Application.PFGAPapp" />
-      <item itemvalue="Application.PFApplicationEval" />
-    </list>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
@@ -94,5 +93,10 @@
       </map>
     </option>
     <option name="oldMeFiltersMigrated" value="true" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <ignored-roots>
+      <path value="$PROJECT_DIR$/../.." />
+    </ignored-roots>
   </component>
 </project>

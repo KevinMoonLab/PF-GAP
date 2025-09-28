@@ -46,31 +46,36 @@ public class ExperimentRunner {
 		//read data files
 		//we assume no header in the csv files, and that class label is in the first column, modify if necessary
 		//ListDataset train_data_original;
-		ListObjectDataset train_data_original;
-		//ListDataset test_data_original = null; //we will overwrite this.
-		ListObjectDataset test_data_original = null; //we will overwrite this.
-		if(AppContext.testing_file != null){
+
+		if(!eval) {
+
+			ListObjectDataset train_data_original;
+			//ListDataset test_data_original = null; //we will overwrite this.
+			ListObjectDataset test_data_original = null; //we will overwrite this.
+			if (AppContext.testing_file != null) {
 			/*test_data_original =
 					CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
 							AppContext.target_column_is_first, csvSeparatpr);*/
-			//TODO: make testing_labels optional.
-			test_data_original =
-					DelimitedFileReader.readToListObjectDataset(
-							AppContext.testing_file,
-							AppContext.testing_labels,
-							AppContext.entry_separator,
-							AppContext.array_separator,
-							AppContext.csv_has_header,
-							AppContext.is2D,
-							AppContext.isNumeric,
-							AppContext.hasMissingValues,
-							AppContext.target_column_is_first,
-							AppContext.isRegression);
-		}
-		//ListDataset test_data_original =
-		//		CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
-		//				AppContext.target_column_is_first, csvSeparatpr);
-		if(!eval) {
+				//TODO: make testing_labels optional.
+				test_data_original =
+						DelimitedFileReader.readToListObjectDataset(
+								AppContext.testing_file,
+								AppContext.testing_labels,
+								AppContext.entry_separator,
+								AppContext.array_separator,
+								AppContext.csv_has_header,
+								AppContext.is2D,
+								AppContext.isNumeric,
+								AppContext.hasMissingValues,
+								AppContext.target_column_is_first,
+								true,
+								AppContext.isRegression);
+			}
+			//ListDataset test_data_original =
+			//		CSVReader.readCSVToListDataset(AppContext.testing_file, AppContext.csv_has_header,
+			//AppContext.target_column_is_first, csvSeparatpr);
+
+
 			/*train_data_original =
 					CSVReader.readCSVToListDataset(AppContext.training_file, AppContext.csv_has_header,
 							AppContext.target_column_is_first, csvSeparatpr);*/
@@ -85,86 +90,101 @@ public class ExperimentRunner {
 							AppContext.isNumeric,
 							AppContext.hasMissingValues,
 							AppContext.target_column_is_first,
+							false,
 							AppContext.isRegression);
-		}
-		else{
-			train_data_original = test_data_original;
-		}
+			//}
+			//else{
+			//	train_data_original = test_data_original;
+			//}
 
 
-
-		/**
-		 * We do some reordering of class labels in this implementation,
-		 * this is not necessary if HashMaps are used in some places in the algorithm,
-		 * but since we used an array in cases where we need HashMaps to store class distributions maps,
-		 * I had to to keep class labels contiguous.
-		 *
-		 * I intend to change this later, and use a library like Trove, Colt or FastUtil which implements primitive HashMaps
-		 * After thats done, we will not be reordering class here.
-		 *
-		 */
-		if (!AppContext.isRegression) {
-			train_data = train_data_original.reorder_class_labels(null);
-		} else {
-			train_data = train_data_original; //do we need to make a deep copy?
-		}
-		//train_data.setLength(train_data_original.length());
-		if (AppContext.hasMissingValues){
-			train_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(train_data.getData()));
-		}
-
-		if(AppContext.testing_file != null) {
+			/**
+			 * We do some reordering of class labels in this implementation,
+			 * this is not necessary if HashMaps are used in some places in the algorithm,
+			 * but since we used an array in cases where we need HashMaps to store class distributions maps,
+			 * I had to to keep class labels contiguous.
+			 *
+			 * I intend to change this later, and use a library like Trove, Colt or FastUtil which implements primitive HashMaps
+			 * After thats done, we will not be reordering class here.
+			 *
+			 */
+			//if (!eval) {
 			if (!AppContext.isRegression) {
-				test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+				train_data = train_data_original.reorder_class_labels(null);
+			} else {
+				train_data = train_data_original; //do we need to make a deep copy?
+			}
+			//train_data.setLength(train_data_original.length());
+			if (AppContext.hasMissingValues) {
+				train_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(train_data.getData()));
+			}
+
+			if (AppContext.testing_file != null) {
+				if (!AppContext.isRegression) {
+					test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+				} else {
+					test_data = test_data_original; // again do we need to make a copy?
+				}
+				//test_data.setLength(test_data_original.length());
+				if (AppContext.hasMissingValues) {
+					test_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(test_data.getData()));
+				}
+			}
+		/*} else {
+			ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream(AppContext.modelname+ ".ser"));
+			ProximityForest forest1 = (ProximityForest) objectInputStream.readObject(); //AppContext.userdistances
+			Map<Object, Integer> labelMap = (Map<Object, Integer>) objectInputStream.readObject();
+			if (!AppContext.isRegression) {
+				test_data = test_data_original.reorder_class_labels(labelMap);
 			} else {
 				test_data = test_data_original; // again do we need to make a copy?
 			}
 			//test_data.setLength(test_data_original.length());
-			if (AppContext.hasMissingValues){
+			if (AppContext.hasMissingValues) {
 				test_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(test_data.getData()));
 			}
-		}
+		}*/
 
 
-		AppContext.setTraining_data(train_data);
-		AppContext.setTesting_data(test_data);
+			AppContext.setTraining_data(train_data);
+			AppContext.setTesting_data(test_data);
 
-		//allow garbage collector to reclaim this memory, since we have made copies with reordered class labels
-		train_data_original = null;
-		test_data_original = null;
-		System.gc();
+			//allow garbage collector to reclaim this memory, since we have made copies with reordered class labels
+			train_data_original = null;
+			test_data_original = null;
+			System.gc();
 
-		//setup environment
-		File training_file = new File(AppContext.training_file);
-		String datasetName = training_file.getName().replaceAll("_TRAIN.txt", "");	//this is just some quick fix for UCR datasets
-		AppContext.setDatasetName(datasetName);
+			//setup environment
+			File training_file = new File(AppContext.training_file);
+			String datasetName = training_file.getName().replaceAll("_TRAIN.txt", "");    //this is just some quick fix for UCR datasets
+			AppContext.setDatasetName(datasetName);
 
-		//Is this really important?
-		//if(!eval) {
-		//	PrintUtilities.printConfiguration();
-		//}
+			//Is this really important?
+			//if(!eval) {
+			//	PrintUtilities.printConfiguration();
+			//}
 
-		System.out.println();
+			System.out.println();
 
-		//if we need to shuffle
-		if (AppContext.shuffle_dataset) {
-			System.out.println("Shuffling the training set...");
-			train_data.shuffle();
-		}
+			//if we need to shuffle
+			if (AppContext.shuffle_dataset) {
+				System.out.println("Shuffling the training set...");
+				train_data.shuffle();
+			}
 
 
-		for (int i = 0; i < AppContext.num_repeats; i++) {
+			for (int i = 0; i < AppContext.num_repeats; i++) {
 
-			// This is training the model.
-			if(!eval) {
+				// This is training the model.
+				//if(!eval) {
 				if (AppContext.verbosity > 0) {
 					System.out.println("-----------------Repetition No: " + (i + 1) + " (" + datasetName + ") " + "  -----------------");
 					PrintUtilities.printMemoryUsage();
-				}else if (AppContext.verbosity == 0 && i == 0) {
-					System.out.println("Repetition, Dataset, Accuracy, TrainingTime(ms), TestingTime(ms), MeanDepthPerTree");
+				} else if (AppContext.verbosity == 0 && i == 0) {
+					System.out.println("Repetition, Dataset, Score, TrainingTime(ms), TestingTime(ms), MeanDepthPerTree");
 				}
 
-			//if(!eval) {
+				//if(!eval) {
 				//create model
 				//ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
 
@@ -172,9 +192,9 @@ public class ExperimentRunner {
 					System.out.println("Imputing the training set...");
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
 					AppContext.initial_imputer.Impute(train_data);
-					for (int j = 0; j < AppContext.numImputes; j++){
+					for (int j = 0; j < AppContext.numImputes; j++) {
 						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
-						ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
+						ProximityForest forest = new ProximityForest(i, AppContext.userdistances);
 						forest.train(train_data);
 						computeTrainProximities(forest, train_data);
 						PFImpute.trainNumericImpute(train_data);
@@ -185,16 +205,20 @@ public class ExperimentRunner {
 				}
 
 				//train model
-				ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
+				ProximityForest forest = new ProximityForest(i, AppContext.userdistances);
 				forest.train(train_data);
 
-				if(AppContext.savemodel) {
+				if (AppContext.savemodel) {
 					// save the trained model
 					try {
-						FileOutputStream fileOutputStream = new FileOutputStream(AppContext.output_dir + AppContext.modelname + ".ser");
+						/*FileOutputStream fileOutputStream = new FileOutputStream(AppContext.output_dir + AppContext.modelname + ".ser");
 						ObjectOutputStream objectOutputStream = new ObjectOutputStream(fileOutputStream);
 						objectOutputStream.writeObject(forest);
-						objectOutputStream.close();
+						objectOutputStream.writeObject(train_data);
+						//objectOutputStream.writeObject(train_data._get_initial_class_labels());
+						objectOutputStream.close();*/
+						AppContextSnapshot snapshot = AppContextUtils.captureSnapshot();
+						ModelIO.saveModel(AppContext.output_dir + AppContext.modelname + ".ser", forest, train_data, snapshot);
 					} catch (IOException e) {
 						//	e.printStackTrace
 					}
@@ -210,16 +234,15 @@ public class ExperimentRunner {
 				}
 
 
-
 				//test model if needed
-				if(AppContext.testing_file != null) {
+				if (AppContext.testing_file != null) {
 
 
 					//Perform imputation, if needed.
 					if (AppContext.hasMissingValues) {
 						System.out.println("Imputing the test dataset...");
 						AppContext.initial_imputer.Impute(test_data);
-						for (int j = 0; j < AppContext.numImputes; j++){
+						for (int j = 0; j < AppContext.numImputes; j++) {
 							//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 							//ProximityForestResult result = forest.test(test_data);
 							forest.test(test_data);
@@ -243,29 +266,32 @@ public class ExperimentRunner {
 					ProximityForestResult result = forest.test(test_data);
 
 					//Now we print the Predictions array to a text file.
-
-					if (!AppContext.isRegression) {
-						//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
-						List<Object> predictedLabels = result.Predictions;
-						Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
-						List<Object> originalPredictions = predictedLabels.stream()
-								.map(newToOriginal::get)
-								.collect(Collectors.toList());
-						PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
-						//writer0.print(ArrayUtils.toString(result.Predictions));
-						writer0.print(ArrayUtils.toString(originalPredictions));
-						writer0.close();
-					} else {
-						//int t = forest.getResultSet();
-						PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
-						writer0.print(ArrayUtils.toString(result.Predictions));
-						//writer0.print(ArrayUtils.toString(predictedLabels));
-						writer0.close();
+					if (AppContext.get_predictions) {
+						if (!AppContext.isRegression) {
+							//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels for classification
+							List<Object> predictedLabels = result.Predictions;
+							Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+							List<Object> originalPredictions = predictedLabels.stream()
+									.map(newToOriginal::get)
+									.collect(Collectors.toList());
+							PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
+							//writer0.print(ArrayUtils.toString(result.Predictions));
+							writer0.print(ArrayUtils.toString(originalPredictions));
+							writer0.close();
+						} else {
+							//int t = forest.getResultSet();
+							PrintWriter writer0 = new PrintWriter(AppContext.output_dir + "Validation_Predictions.txt", StandardCharsets.UTF_8);
+							writer0.print(ArrayUtils.toString(result.Predictions));
+							//writer0.print(ArrayUtils.toString(predictedLabels));
+							writer0.close();
+						}
 					}
 
-
 					//print and export resultS
-					//result.printResults(datasetName, i, "");
+					//TODO: fix the buggy results for imputation.
+					if (!AppContext.hasMissingValues) {
+						result.printResults(datasetName, i, "");
+					}
 					//AppContext.output_dir = null;
 
 					//if (!AppContext.getprox) {
@@ -275,7 +301,7 @@ public class ExperimentRunner {
 				}
 
 				// what if they want outlier scores? must be a classification problem.
-				if(AppContext.get_training_outlier_scores && AppContext.getprox && !AppContext.isRegression) {
+				if (AppContext.get_training_outlier_scores && AppContext.getprox && !AppContext.isRegression) {
 					// in this case, we use a dense representation of the proximities.
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Training Proximities...");
@@ -296,7 +322,7 @@ public class ExperimentRunner {
 
 				}
 
-				if(AppContext.get_training_outlier_scores && !AppContext.getprox && !AppContext.isRegression) {
+				if (AppContext.get_training_outlier_scores && !AppContext.getprox && !AppContext.isRegression) {
 					// In this case we can use a sparse representation, since we won't need to return the proximities.
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Training Proximities...");
@@ -318,7 +344,7 @@ public class ExperimentRunner {
 
 				}
 
-				if(AppContext.getprox) {
+				if (AppContext.getprox) {
 					//Calculate array of forest proximities.
 					if (!AppContext.get_training_outlier_scores) {
 						// if a user already wants the scores, the proximities have already been computed.
@@ -381,15 +407,67 @@ public class ExperimentRunner {
 					result.exportJSON(datasetName, i);
 				}*/
 			}
-			else{
+			if (AppContext.garbage_collect_after_each_repetition) {
+				System.gc();
+			}
+		} else{
 				//evaluate saved model??
-				ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream(AppContext.modelname+ ".ser"));
-				ProximityForest forest1 = (ProximityForest) objectInputStream.readObject(); //AppContext.userdistances
+				//ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream(AppContext.modelname+ ".ser"));
+				//ProximityForest forest1 = (ProximityForest) objectInputStream.readObject(); //AppContext.userdistances
+				//Map<Object, Integer> labelMap = (Map<Object, Integer>) objectInputStream.readObject();
 				//forest1.predict(test_data);
 			/*ArrayList<Integer> Predictions_saved = new ArrayList<>();
 			for (int k=0; k < test_data.size(); k++){
 				Predictions_saved.add(forest1.predict(test_data.get_series(k)));
 			}*/
+
+			/*ObjectInputStream objectInputStream = new ObjectInputStream(new FileInputStream(AppContext.modelname+ ".ser"));
+			ProximityForest forest1 = (ProximityForest) objectInputStream.readObject(); //AppContext.userdistances
+			ListObjectDataset train_data1 = (ListObjectDataset) objectInputStream.readObject();*/
+			//Map<Object, Integer> labelMap = (Map<Object, Integer>) objectInputStream.readObject();
+			ModelIO.LoadedModel loaded = ModelIO.loadModel(AppContext.modelname + ".ser");
+			ModelIO.applySnapshot(loaded.snapshot);
+			ProximityForest forest1 = loaded.forest;
+			ListObjectDataset train_data = loaded.trainData;
+
+			ListObjectDataset test_data_original;
+			test_data_original =
+				DelimitedFileReader.readToListObjectDataset(
+						AppContext.testing_file,
+						AppContext.testing_labels,
+						AppContext.entry_separator,
+						AppContext.array_separator,
+						AppContext.csv_has_header,
+						AppContext.is2D,
+						AppContext.isNumeric,
+						AppContext.hasMissingValues,
+						AppContext.target_column_is_first,
+						true,
+						AppContext.isRegression);
+
+			if (!AppContext.isRegression) {
+				//test_data = test_data_original.reorder_class_labels(labelMap);
+				test_data = test_data_original.reorder_class_labels(train_data._get_initial_class_labels());
+			} else {
+				test_data = test_data_original; // again do we need to make a copy?
+			}
+			//test_data.setLength(test_data_original.length());
+			if (AppContext.hasMissingValues) {
+				test_data.setMissingIndices(MissingIndicesBuilder.buildFromDataset(test_data.getData()));
+			}
+
+			AppContext.setTesting_data(test_data);
+
+			//allow garbage collector to reclaim this memory, since we have made copies with reordered class labels
+			test_data_original = null;
+			System.gc();
+
+			//setup environment
+			File training_file = new File(AppContext.training_file);
+			String datasetName = training_file.getName().replaceAll("_TRAIN.txt", "");    //this is just some quick fix for UCR datasets
+			AppContext.setDatasetName(datasetName);
+
+			for (int i = 0; i < AppContext.num_repeats; i++) {
 
 				//Perform imputation, if needed.
 				if (AppContext.hasMissingValues && AppContext.isNumeric) {
@@ -405,6 +483,10 @@ public class ExperimentRunner {
 				}
 
 				ProximityForestResult result1 = forest1.test(test_data);
+				//TODO: fix the buggy scores for imputation.
+				if (!AppContext.hasMissingValues) {
+					result1.printResults(datasetName, i, "");
+				}
 
 				if (AppContext.getprox) {
 					AppContext.useSparseProximities = false;
@@ -432,24 +514,27 @@ public class ExperimentRunner {
 				}
 
 				//Now we print the Predictions array of the saved model to a text file.
-
-				if (!AppContext.isRegression) {
-					//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
-					List<Object> predictedLabels = result1.Predictions;
-					Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
-					List<Object> originalPredictions = predictedLabels.stream()
-							.map(newToOriginal::get)
-							.collect(Collectors.toList());
-					PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
-					//writer0a.print(ArrayUtils.toString(Predictions_saved));
-					//TODO: output the predictions in terms of the original classes.
-					//writer0a.print(ArrayUtils.toString(result1.Predictions));
-					writer0a.print(ArrayUtils.toString(originalPredictions));
-					writer0a.close();
-				} else {
-					PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
-					writer0a.print(ArrayUtils.toString(result1.Predictions));
-					writer0a.close();
+				if (AppContext.get_predictions) {
+					if (!AppContext.isRegression) {
+						//List<Object> predictedLabels = test_data._internal_class_list(); // reordered labels
+						List<Object> predictedLabels = result1.Predictions;
+						Map<Integer, Object> newToOriginal = test_data.invertLabelMap(test_data._get_initial_class_labels());
+						List<Object> originalPredictions = predictedLabels.stream()
+								.map(newToOriginal::get)
+								.collect(Collectors.toList());
+						PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
+						//writer0a.print(ArrayUtils.toString(Predictions_saved));
+						//TODO: output the predictions in terms of the original classes.
+						//writer0a.print(ArrayUtils.toString(result1.Predictions));
+						writer0a.print(ArrayUtils.toString(originalPredictions));
+						writer0a.close();
+					} else {
+						//System.out.println("Printing results...");
+						//System.out.println(result1.Predictions);
+						PrintWriter writer0a = new PrintWriter(AppContext.output_dir + "Predictions_saved.txt", StandardCharsets.UTF_8);
+						writer0a.print(ArrayUtils.toString(result1.Predictions));
+						writer0a.close();
+					}
 				}
 
 				test_data = null; // erase test data.

@@ -7,8 +7,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import core.AppContext;
 import core.ProximityForestResult;
@@ -175,7 +178,7 @@ public class ProximityForest implements Serializable{
 	//This is the previous test() method code before parallelization.
 	//ASSUMES CLASS labels HAVE BEEN reordered to start from 0 and contiguous
 	//public ProximityForestResult test(Dataset test_data) throws Exception {
-	public ProximityForestResult test(ListObjectDataset test_data) throws Exception {
+	/*public ProximityForestResult test(ListObjectDataset test_data) throws Exception {
 		result.startTimeTest = System.nanoTime();
 		result.Predictions = new ArrayList<>();
 
@@ -207,45 +210,52 @@ public class ProximityForest implements Serializable{
 
 		assert test_data.size() == result.errors + result.correct;
 
-		result.accuracy = ((double) result.correct) / test_data.size();
-		result.error_rate = 1 - result.accuracy;
+		result.score = ((double) result.correct) / test_data.size();
+		result.error_rate = 1 - result.score;
 
 		return result;
-	}
+	}*/
 
-	//This is the work-in-progress parallel test method.
-	/*public ProximityForestResult test(Dataset test_data) throws Exception {
+	public ProximityForestResult test(ListObjectDataset test_data) throws Exception {
 		result.startTimeTest = System.nanoTime();
+		result.Predictions = new ArrayList<>();
+
 		int size = test_data.size();
+		AtomicInteger correct = new AtomicInteger(0);
+		AtomicInteger errors = new AtomicInteger(0);
 
-		ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-		List<Future<Integer>> futures = new ArrayList<>();
+		List<Object> actualLabels = Collections.synchronizedList(new ArrayList<>());
+		List<Object> predictedLabels = Collections.synchronizedList(new ArrayList<>());
 
-		for (int i = 0; i < size; i++) {
-			final int index = i;
-			futures.add(executor.submit(() -> {
-				double[] query = test_data.get_series(index);
-				return predict(query);
-			}));
-		}
+		boolean allowParallel = AppContext.parallelPredict && !AppContext.parallelTrees;
+		IntStream stream = allowParallel ? IntStream.range(0, size).parallel() : IntStream.range(0, size);
 
-		for (int i = 0; i < size; i++) {
-			int predicted_class = futures.get(i).get();
-			int actual_class = test_data.get_class(i);
+		stream.forEach(i -> {
+			try {
+				Object actual_label = test_data.get_class(i);
+				Object predicted_label = predict(test_data.get_series(i), i);
+				synchronized (result.Predictions) {
+					result.Predictions.add(predicted_label);
+				}
 
-			result.Predictions.add(predicted_class);
-			if (actual_class != predicted_class) {
-				result.errors++;
-			} else {
-				result.correct++;
+				predictedLabels.add(predicted_label);
+				actualLabels.add(actual_label);
+
+				if (actual_label != null) {
+					if (!Objects.equals(actual_label, predicted_label)) {
+						errors.incrementAndGet();
+					} else {
+						correct.incrementAndGet();
+					}
+				}
+
+				if (AppContext.verbosity > 0 && i % AppContext.print_test_progress_for_each_instances == 0) {
+					System.out.print("*");
+				}
+			} catch (Exception e) {
+				throw new RuntimeException(e);
 			}
-
-			if (AppContext.verbosity > 0 && i % AppContext.print_test_progress_for_each_instances == 0) {
-				System.out.print("*");
-			}
-		}
-
-		executor.shutdown();
+		});
 
 		result.endTimeTest = System.nanoTime();
 		result.elapsedTimeTest = result.endTimeTest - result.startTimeTest;
@@ -254,12 +264,41 @@ public class ProximityForest implements Serializable{
 			System.out.println();
 		}
 
-		assert test_data.size() == result.errors + result.correct;
-		result.accuracy = ((double) result.correct) / test_data.size();
-		result.error_rate = 1 - result.accuracy;
+		result.correct = correct.get();
+		result.errors = errors.get();
+
+		int validLabelCount = (int) actualLabels.stream().filter(Objects::nonNull).count();
+		assert validLabelCount == result.correct + result.errors;
+
+		if (validLabelCount > 0 && AppContext.exists_testlabels) {
+			if (AppContext.isRegression) {
+				List<Double> yTrue = actualLabels.stream()
+						.filter(Objects::nonNull)
+						.map(val -> (Double) val)
+						.collect(Collectors.toList());
+
+				List<Double> yPred = predictedLabels.stream()
+						.filter(Objects::nonNull)
+						.map(val -> (Double) val)
+						.collect(Collectors.toList());
+
+				double mean = yTrue.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+				double ssTot = yTrue.stream().mapToDouble(y -> Math.pow(y - mean, 2)).sum();
+				double ssRes = IntStream.range(0, yTrue.size())
+						.mapToDouble(i -> Math.pow(yTrue.get(i) - yPred.get(i), 2)).sum();
+
+				result.score = 1 - (ssRes / ssTot);
+			} else {
+				result.score = ((double) result.correct) / validLabelCount;
+			}
+			result.error_rate = 1 - result.score;
+		} else {
+			result.score = Double.NaN;
+			result.error_rate = Double.NaN;
+		}
 
 		return result;
-	}*/
+	}
 
 
 

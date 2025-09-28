@@ -1,5 +1,6 @@
 package core;
 
+import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -96,11 +97,14 @@ public class AppContext {
     public static boolean savemodel;
 	public static boolean getprox;
 	public static boolean get_training_outlier_scores;
+	public static boolean get_predictions = false;
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
 	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;
+	public static boolean parallelPredict = false; // if parallelTrees=true, predictions will be made in parallel across trees.
+	// parallelPredict refers to parallelization across data instances (will not happen if parallelTrees=true).
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;
@@ -116,6 +120,7 @@ public class AppContext {
 	//private static transient Dataset test_data;
 	private static transient  ObjectDataset test_data;
 	private static String datasetName;
+	public static boolean exists_testlabels = false;
 	public static transient double[][] training_proximities;
 	public static transient double[][] testing_training_proximities;
 	public static boolean useSparseProximities = true; //should be dense if returned??

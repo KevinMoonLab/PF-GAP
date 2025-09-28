@@ -1,8 +1,6 @@
 package core;
 
-//import datasets.ListDataset;
 import datasets.ListObjectDataset;
-import imputation.MissingIndicesBuilder;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import util.PrintUtilities;
 
@@ -12,7 +10,6 @@ import java.util.stream.Collectors;
 
 public class DelimitedFileReader {
 
-    // this is the more generic reader.
     public static ListObjectDataset readToListObjectDataset(
             String dataFileName,
             String labelFileName,
@@ -23,6 +20,7 @@ public class DelimitedFileReader {
             boolean isNumeric,
             boolean hasMissingValues,
             boolean targetColumnIsFirst,
+            boolean isTest,
             boolean isRegression
     ) {
         ListObjectDataset dataset = new ListObjectDataset();
@@ -32,13 +30,15 @@ public class DelimitedFileReader {
 
         try {
             //List<Integer> labels = readLabels(labelFileName, hasHeader);
-            List<Object> labels = readGenericLabels(labelFileName, hasHeader, isRegression);
+            List<Object> labels = new ArrayList<>();
+            if (labelFileName!=null) {
+                labels = readGenericLabels(labelFileName, hasHeader, isRegression);
+            }
             BufferedReader br = new BufferedReader(new FileReader(dataFileName));
             if (hasHeader) br.readLine(); // skip header
 
             String line = "";
             while ((line = br.readLine()) != null) {
-                //Object data;
 
                 if (isNumeric){ //either double or Double
                     if (hasMissingValues){ //must be Double since there's missing data
@@ -46,7 +46,12 @@ public class DelimitedFileReader {
                             // numeric, has missing values, 2D: Double[][]
                             Double[][] data = RowParser.parseBoxedDoubleMatrix(line, array_separator, entry_separator);
                             //Integer label = labels.get(i);
-                            Object label = labels.get(i);
+                            Object label;// = labels.get(i);
+                            if (labelFileName!=null) {
+                                label = labels.get(i);
+                            } else {
+                                label = null;
+                            }
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
                             AppContext.length = data[0].length;
@@ -54,7 +59,12 @@ public class DelimitedFileReader {
                             // numeric, missing values, 1D: Double[]
                             Double[] data = RowParser.parseBoxedDoubleArray(line, entry_separator);
                             //Integer label = labels.get(i);
-                            Object label = labels.get(i);
+                            Object label;// = labels.get(i);
+                            if (labelFileName!=null) {
+                                label = labels.get(i);
+                            } else {
+                                label = null;
+                            }
                             dataset.add(label, data, i);
                             AppContext.length = data.length;
                         }
@@ -64,19 +74,42 @@ public class DelimitedFileReader {
                             // numeric, no missing values, 2D: double[][]
                             double[][] data = RowParser.parseDoubleMatrix(line, array_separator, entry_separator);
                             //Integer label = labels.get(i);
-                            Object label = labels.get(i);
+                            Object label;// = labels.get(i);
+                            if (labelFileName!=null) {
+                                label = labels.get(i);
+                            } else {
+                                label = null;
+                            }
                             dataset.add(label, data, i);
                             //dataset.setLength(data[0].length); // just the first one: risky.
                             AppContext.length = data[0].length;
                         } else {
                             // numeric, no missing values, 1D: double[].
-                            if (labelFileName == null){
-                                // this is the original case
+                            if (labelFileName == null && !isTest){
+                                // this is the original case: the labels can't be missing.
                                 String[] lineArray = line.split(entry_separator);
                                 ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst, isRegression);
                                 dataset.add(parsed.label, parsed.features, i);
                                 //dataset.setLength(parsed.features.length);
                                 AppContext.length = parsed.features.length;
+                            } else if (labelFileName == null && isTest) {
+                                // we need to know if we're looking for testlabels.
+                                if (AppContext.exists_testlabels) {
+                                    // if there are test labels and no test label file was given, they must be in the test file.
+                                    String[] lineArray = line.split(entry_separator);
+                                    ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst, isRegression);
+                                    dataset.add(parsed.label, parsed.features, i);
+                                    //dataset.setLength(parsed.features.length);
+                                    AppContext.length = parsed.features.length;
+                                } else {
+                                    // if there are no test labels, we're setting them to null.
+                                    double[] data = RowParser.parseDoubleArray(line, entry_separator);
+                                    //Integer label = labels.get(i);
+                                    Object label = null; //labels.get(i);
+                                    dataset.add(label, data, i);
+                                    //dataset.setLength(data.length);
+                                    AppContext.length = data.length;
+                                }
                             } else {
                                 // this is like the original case, except when labels are provided separately.
                                 double[] data = RowParser.parseDoubleArray(line, entry_separator);
@@ -94,14 +127,24 @@ public class DelimitedFileReader {
                     if (is2D) {
                         Object[][] data = RowParser.parse2DRow(line, array_separator, entry_separator);
                         //Integer label = labels.get(i);
-                        Object label = labels.get(i);
+                        Object label;// = labels.get(i);
+                        if (labelFileName!=null) {
+                            label = labels.get(i);
+                        } else {
+                            label = null;
+                        }
                         dataset.add(label, data, i);
                         //dataset.setLength(data[0].length); //just the first one: risky.
                         AppContext.length = data[0].length;
                     } else {
                         Object[] data = RowParser.parse1DRow(line, entry_separator);
                         //Integer label = labels.get(i);
-                        Object label = labels.get(i);
+                        Object label;// = labels.get(i);
+                        if (labelFileName!=null) {
+                            label = labels.get(i);
+                        } else {
+                            label = null;
+                        }
                         dataset.add(label, data, i);
                         //dataset.setLength(data.length);
                         AppContext.length = data.length;
