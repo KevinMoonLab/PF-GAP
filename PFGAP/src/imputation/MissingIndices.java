@@ -1,8 +1,9 @@
 package imputation;
 
+import java.io.Serializable;
 import java.util.List;
 
-public class MissingIndices {
+public class MissingIndices implements Serializable {
     public List<List<Integer>> indices1D;
     public List<List<List<Integer>>> indices2D;
 

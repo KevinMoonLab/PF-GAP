@@ -35,5 +35,7 @@ PF.train("Data/differentlengths.txt", test_file="Data/differentlengths_test.txt"
 # In[5]:
 
 
-# Note: there is currently a bug with the accuracy printout when imputing.
+PF.predict(dir1 + "/PF", "Data/differentlengths_test.txt", output_directory="test_output",
+           return_predictions=True, return_proximities=True, impute_testing_data=True,
+           return_imputed_testing=True, initial_imputer="linear")
 

@@ -488,6 +488,15 @@ public class ExperimentRunner {
 					result1.printResults(datasetName, i, "");
 				}
 
+				if (AppContext.impute_test) {
+					GeneralUtilities.writeDelimitedData(
+							test_data.getData(),
+							AppContext.output_dir + AppContext.testing_file,
+							AppContext.array_separator,
+							AppContext.entry_separator
+					);
+				}
+
 				if (AppContext.getprox) {
 					AppContext.useSparseProximities = false;
 					System.out.println("Computing Test/Train Proximities...");
