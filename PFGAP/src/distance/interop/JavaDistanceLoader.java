@@ -43,7 +43,7 @@ public class JavaDistanceLoader {
             urls = new URL[]{ parent.toURI().toURL() };
         }
 
-        try (URLClassLoader loader = new URLClassLoader(urls, DistanceFunction.class.getClassLoader())) {
+        /*try (URLClassLoader loader = new URLClassLoader(urls, DistanceFunction.class.getClassLoader())) {
             Class<?> clazz = loader.loadClass(className);
 
             if (!DistanceFunction.class.isAssignableFrom(clazz)) {
@@ -51,7 +51,16 @@ public class JavaDistanceLoader {
             }
 
             return (DistanceFunction) clazz.getDeclaredConstructor().newInstance();
+        }*/
+        URLClassLoader loader = new URLClassLoader(urls, DistanceFunction.class.getClassLoader());
+        Class<?> clazz = loader.loadClass(className);
+
+        if (!DistanceFunction.class.isAssignableFrom(clazz)) {
+            throw new IllegalArgumentException("Class does not implement DistanceFunction");
         }
+
+        return (DistanceFunction) clazz.getDeclaredConstructor().newInstance();
+
     }
 
     private static String inferClassName(String path) {
