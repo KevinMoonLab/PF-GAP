@@ -62,16 +62,16 @@ public class GeneralUtilities {
 					}
 				} else if (obj instanceof Object[]) {
 					writer.write(join((Object[]) obj, secondSeparator));
-					writer.write(firstSeparator);
+					//writer.write(firstSeparator);
 				} else if (obj instanceof double[]) {
 					writer.write(join((double[]) obj, secondSeparator));
-					writer.write(firstSeparator);
+					//writer.write(firstSeparator);
 				} else if (obj instanceof Double[]) {
 					writer.write(join((Double[]) obj, secondSeparator));
-					writer.write(firstSeparator);
+					//writer.write(firstSeparator);
 				} else {
 					writer.write(obj.toString());
-					writer.write(firstSeparator);
+					//writer.write(firstSeparator);
 				}
 				writer.newLine();
 			}

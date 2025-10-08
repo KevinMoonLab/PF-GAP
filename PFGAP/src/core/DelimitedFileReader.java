@@ -358,7 +358,7 @@ public class DelimitedFileReader {
         }
 
         public static Double[] parseBoxedDoubleArray(String row, String separator) {
-            String[] tokens = row.split(separator);
+            String[] tokens = row.split(separator, -1);
             Double[] parsed = new Double[tokens.length];
             for (int i = 0; i < tokens.length; i++) {
                 //parsed[i] = Double.valueOf(tokens[i]);
@@ -379,7 +379,7 @@ public class DelimitedFileReader {
 
         // for Object[]
         public static Object[] parse1DRow(String row, String separator) {
-            String[] tokens = row.split(separator);
+            String[] tokens = row.split(separator,-1);
             Object[] parsed = new Object[tokens.length];
             for (int i = 0; i < tokens.length; i++) {
                 parsed[i] = parseValue(tokens[i]);
