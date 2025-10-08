@@ -27,4 +27,21 @@ public class Euclidean implements Serializable {
 //		return Math.sqrt(total);
 		return total;
 	}
+
+	public synchronized double distance(Object S, Object T){ //for knn imputation
+
+		Double[] s = (Double[]) T;
+		Double[] t = (Double[]) S;
+
+		int i = 0;
+		double total = 0;
+
+		//assume s.length == t.length for this implementation
+		for (i = 0; i < s.length; i++){
+			total += (s[i] - t[i]) * (s[i] - t[i]);
+		}
+
+
+		return Math.sqrt(total);
+	}
 }

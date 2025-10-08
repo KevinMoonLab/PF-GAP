@@ -1,5 +1,7 @@
 package distance;
 
+import imputation.MaskedDistance;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -100,4 +102,18 @@ public class DistanceRegistry {
     public static Map<String, MEASURE> getAll() {
         return registry;
     }
+
+
+    public static MaskedDistance getMaskedDistance(MEASURE measure, String... descriptors) {
+        try {
+            DistanceMeasure dm = new DistanceMeasure(measure, descriptors);
+            //dm.initialize(measure); // optionally pass descriptors if needed
+            Object distanceInstance = dm.getDistanceInstance(measure);
+            return new MaskedDistance(distanceInstance);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize distance for measure: " + measure, e);
+        }
+    }
+
+
 }

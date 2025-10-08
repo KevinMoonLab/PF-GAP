@@ -4,10 +4,7 @@ import core.AppContext;
 import core.ExperimentRunner;
 import distance.DistanceRegistry;
 import distance.MEASURE;
-import imputation.LinearImpute;
-import imputation.MeanImpute;
-import imputation.MedianImpute;
-import imputation.ModeImpute;
+import imputation.*;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -53,6 +50,7 @@ public class PFApplication {
 			//Integer testint = Integer.parseInt("2 3 3.444"[0]);
 			//some default settings are specified in the AppContext class but here we
 			//override the default settings using the provided command line arguments
+			String imputerType = null;
 			for (int i = 0; i < args.length; i++) {
 				String[] options = args[i].trim().split("=");
 				
@@ -194,12 +192,51 @@ public class PFApplication {
 				case "-parallelPredict":
 					AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
 					break;
-				case "-initial_imputer":
-					String inputString = options[1];
+				case "-knn_distances":
+					//String[] distanceNames = options[1].split(",");
+					/*MEASURE[] measures = Arrays.stream(distanceNames)
+							.map(String::trim)
+							.map(name -> {
+								if (!DistanceRegistry.contains(name)) {
+									throw new IllegalArgumentException("Unknown distance: " + name);
+								}
+								return DistanceRegistry.get(name);
+							})
+							.toArray(MEASURE[]::new);
+					AppContext.KNNdistances = measures;*/
+					String ktemp = options[1];
+					String ktemp_rm = ktemp.substring(1, ktemp.length() - 1); // Removes '[' and ']'
+					String[] kcontents = ktemp_rm.split(","); // Splits by ","
+					List<String> kcontentsList = Arrays.asList(kcontents);
+					int knumberofdists = kcontentsList.size();
+					MEASURE[] ktoadd = new MEASURE[knumberofdists];
 
-					switch (inputString.toLowerCase()) {
+					//Map<String, MEASURE> measuresByName = new HashMap<>();
+					Map<String, MEASURE> kmeasuresByName = DistanceRegistry.getAll();
+
+					for (int j=0; j < knumberofdists; j++){
+						MEASURE convertedEntry;
+						convertedEntry = kmeasuresByName.get(kcontentsList.get(j));
+						//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
+						ktoadd[j] = convertedEntry;
+					}
+
+					if (Objects.equals(kcontentsList.get(0), "")){
+						AppContext.KNNdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
+					} else {
+						AppContext.KNNdistances = ktoadd;
+					}
+					break;
+				case "-initial_imputer":
+					//String inputString = options[1];
+					imputerType = options[1];
+
+					/*switch (inputString.toLowerCase()) {
 						case "mean":
 							AppContext.initial_imputer = new MeanImpute();
+							break;
+						case "global_mean":
+							AppContext.initial_imputer = new GlobalMeanImpute();
 							break;
 						case "linear":
 							AppContext.initial_imputer = new LinearImpute();
@@ -207,12 +244,24 @@ public class PFApplication {
 						case "median":
 							AppContext.initial_imputer = new MedianImpute();
 							break;
+						case "global_median":
+							AppContext.initial_imputer = new GlobalMedianImpute();
+							break;
 						case "mode":
 							AppContext.initial_imputer = new ModeImpute();
 							break;
+						case "global_mode":
+							AppContext.initial_imputer = new GlobalModeImpute();
+							break;
+						case "knn":
+							if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0) {
+								throw new IllegalArgumentException("KNN distances must be specified using -knn_distances");
+							}
+							AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
+							break;
 						default:
 							throw new IllegalArgumentException("Unknown imputer: " + options[1]);
-					}
+					}*/
 					break;
 
 				case "-distances":
@@ -267,6 +316,35 @@ public class PFApplication {
 				default:
 					throw new Exception("Invalid Commandline Arguments");
 				}
+			}
+
+			switch (imputerType) {
+				case "knn":
+					if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0)
+						throw new IllegalArgumentException("Missing -knn_distances for KNN imputer.");
+					AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
+					break;
+				case "mean":
+					AppContext.initial_imputer = new MeanImpute();
+					break;
+				case "global_mean":
+					AppContext.initial_imputer = new GlobalMeanImpute();
+					break;
+				case "linear":
+					AppContext.initial_imputer = new LinearImpute();
+					break;
+				case "median":
+					AppContext.initial_imputer = new MedianImpute();
+					break;
+				case "global_median":
+					AppContext.initial_imputer = new GlobalMedianImpute();
+					break;
+				case "mode":
+					AppContext.initial_imputer = new ModeImpute();
+					break;
+				case "global_mode":
+					AppContext.initial_imputer = new GlobalModeImpute();
+					break;
 			}
 
 			if (AppContext.warmup_java) {

@@ -100,6 +100,7 @@ public class AppContext {
 	public static boolean get_predictions = false;
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
+	public static MEASURE[] KNNdistances; //only used in KNN initial imputation.
 	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;

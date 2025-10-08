@@ -217,6 +217,104 @@ public class DistanceMeasure implements Serializable {
 		
 	}
 
+	public Object getDistanceInstance(MEASURE measure) {
+		switch (measure) {
+			case euclidean:
+			case shifazEUCLIDEAN:
+				return euc;
+			case erp:
+			case shifazERP:
+				return erp;
+			case lcss:
+			case shifazLCSS:
+				return lcss;
+			case msm:
+			case shifazMSM:
+				return msm;
+			case twe:
+			case shifazTWE:
+				return twe;
+			case wdtw:
+			case shifazWDTW:
+				return wdtw;
+			case wddtw:
+			case shifazWDDTW:
+				return wddtw;
+			case dtw:
+			case shifazDTW:
+				return dtw;
+			case dtwcv:
+			case shifazDTWCV:
+				return dtwcv;
+			case ddtw:
+			case shifazDDTW:
+				return ddtw;
+			case ddtwcv:
+			case shifazDDTWCV:
+				return ddtwcv;
+			case maple:
+				return maple;
+			case python:
+				return python;
+			case javadistance:
+				return distanceFunction;
+			case manhattan:
+				return manhattan;
+			case shapeHoG1dDTW:
+				return shapeHoG1dDTW;
+			case dtw_i:
+				return dtw_i;
+			case dtw_d:
+				return dtw_d;
+			case ddtw_i:
+			case shifazDDTW_I:
+				return ddtw_i;
+			case wdtw_i:
+			case shifazWDTW_I:
+				return wdtw_i;
+			case wddtw_i:
+			case shifazWDDTW_I:
+				return wddtw_i;
+			case twe_i:
+			case shifazTWE_I:
+				return twe_i;
+			case erp_i:
+			case shifazERP_I:
+				return erp_i;
+			case euclidean_i:
+			case shifazEUCLIDEAN_I:
+				return euclidean_i;
+			case lcss_i:
+			case shifazLCSS_I:
+				return lcss_i;
+			case msm_i:
+			case shifazMSM_I:
+				return msm_i;
+			case manhattan_i:
+			case shifazMANHATTAN_I:
+				return manhattan_i;
+			case cid_i:
+			case shifazCID_I:
+				return cid_i;
+			case sbd_i:
+			case shifazSBD_I:
+				return sbd_i;
+			case shapeHoGdtw:
+			case shifazShapeHoGDTW:
+				return shapeHoGdtw;
+			case ddtw_d:
+				return ddtw_d;
+			case wdtw_d:
+				return wdtw_d;
+			case wddtw_d:
+				return wddtw_d;
+			case shapeHoGdtw_d:
+				return shapeHoGdtw_d;
+			default:
+				throw new IllegalArgumentException("Unsupported measure: " + measure);
+		}
+	}
+
 	public void select_random_params(ObjectDataset d, Random r) {
 		switch (this.distance_measure) {
 		case euclidean:
