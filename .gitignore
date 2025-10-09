@@ -22,3 +22,33 @@ data/user_distances_with_dependencies/target
 **/*_comprehensive_results.json
 **/*_error_results.json
 
+# Large data files that exceed GitHub's 100MB limit
+data/user_distances_with_dependencies/Data/molhiv_data_train.txt
+data/user_distances_with_dependencies/Data/molhiv_data_val.txt
+data/user_distances_with_dependencies/Data/molhiv_data_test.txt
+data/user_distances_with_dependencies/Data/molhiv_labels_train.txt
+data/user_distances_with_dependencies/Data/molhiv_labels_val.txt
+data/user_distances_with_dependencies/Data/molhiv_labels_test.txt
+data/user_distances_with_dependencies/Data/proteins_train_data.txt
+data/user_distances_with_dependencies/Data/proteins_train_labels.txt
+data/user_distances_with_dependencies/Data/proteins_val_data.txt
+data/user_distances_with_dependencies/Data/proteins_val_labels.txt
+data/user_distances_with_dependencies/Data/proteins_test_data.txt
+data/user_distances_with_dependencies/Data/proteins_test_labels.txt
+
+# Maven build artifacts and dependencies
+data/user_distances_with_dependencies/apache-maven-3.9.9/
+data/user_distances_with_dependencies/pom.xml
+data/user_distances_with_dependencies/build_and_install.sh
+data/user_distances_with_dependencies/build_and_install.bat
+
+# Java build artifacts
+**/out/
+**/target/
+**/*.iml
+**/MANIFEST.MF
+**/META-INF/MANIFEST.MF
+
+# Temporary files
+**/*~
+**/README.txt~
