@@ -4,3 +4,21 @@ results/
 PF_*.ser
 ForestProximities.txt
 graph_data/
+
+# MolHIV pipeline results and temporary files
+data/user_distances_with_dependencies/molhiv_results/
+data/user_distances_with_dependencies/molhiv_results_approx/
+data/user_distances_with_dependencies/molhiv_results_approx_no_prox/
+data/user_distances_with_dependencies/src
+data/user_distances_with_dependencies/target
+
+**/temp/
+**/Test_*.txt
+**/Validation_*.txt
+**/*_train_data.txt
+**/*_test_data.txt
+**/*_train_labels.txt
+**/*_test_labels.txt
+**/*_comprehensive_results.json
+**/*_error_results.json
+
