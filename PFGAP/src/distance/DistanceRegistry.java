@@ -89,6 +89,21 @@ public class DistanceRegistry {
         // Shape-based multivariate DTW
         registry.put("shapeHoGdtw", MEASURE.shapeHoGdtw);
         registry.put("shifazShapeHoGDTW", MEASURE.shifazShapeHoGDTW);
+
+        // Graph-based distances
+        registry.put("ApproximateGraphEditDistance", MEASURE.approximateGraphEditDistance);
+        registry.put("GraphEditDistance", MEASURE.graphEditDistance);
+        registry.put("GraphletDistance", MEASURE.graphletDistance);
+        registry.put("HammingDistance", MEASURE.hammingDistance);
+        registry.put("ShortestPathDistance", MEASURE.shortestPathDistance);
+        registry.put("WLDistance", MEASURE.wlDistance);
+        registry.put("WLDistance2", MEASURE.wlDistance2);
+
+        // meta distances
+        registry.put("meta_classmatch", MEASURE.meta_classmatch);
+        registry.put("meta_file_classmatch", MEASURE.meta_file_classmatch);
+        registry.put("meta_regression", MEASURE.meta_regression);
+        registry.put("meta_file_regression", MEASURE.meta_file_regression);
     }
 
     public static MEASURE get(String name) {

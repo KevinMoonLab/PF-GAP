@@ -1,6 +1,10 @@
 package distance.multiTS;
 
+import util.Pair;
+
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DTW_D implements Serializable {
 
@@ -67,4 +71,66 @@ public class DTW_D implements Serializable {
         }
         return sum;
     }
+
+    public List<Pair<Integer, Integer>> getAlignmentPath(double[][] series1, double[][] series2, int windowSize) {
+        int len1 = series1[0].length;
+        int len2 = series2[0].length;
+
+        if (windowSize == -1) {
+            windowSize = Math.max(len1, len2);
+        }
+
+        double[][] cost = new double[len1][len2];
+        int[][][] backtrack = new int[len1][len2][2];
+
+        for (int i = 0; i < len1; i++) {
+            int jStart = Math.max(0, i - windowSize);
+            int jStop = Math.min(len2 - 1, i + windowSize);
+
+            for (int j = jStart; j <= jStop; j++) {
+                double dist = squaredDistanceAt(series1, series2, i, j);
+
+                if (i == 0 && j == 0) {
+                    cost[i][j] = dist;
+                    backtrack[i][j][0] = -1;
+                    backtrack[i][j][1] = -1;
+                } else {
+                    double minPrev = Double.POSITIVE_INFINITY;
+                    int pi = -1, pj = -1;
+
+                    if (i > 0 && j > 0 && cost[i - 1][j - 1] < minPrev) {
+                        minPrev = cost[i - 1][j - 1];
+                        pi = i - 1; pj = j - 1;
+                    }
+                    if (i > 0 && cost[i - 1][j] < minPrev) {
+                        minPrev = cost[i - 1][j];
+                        pi = i - 1; pj = j;
+                    }
+                    if (j > 0 && cost[i][j - 1] < minPrev) {
+                        minPrev = cost[i][j - 1];
+                        pi = i; pj = j - 1;
+                    }
+
+                    cost[i][j] = dist + minPrev;
+                    backtrack[i][j][0] = pi;
+                    backtrack[i][j][1] = pj;
+                }
+            }
+        }
+
+        // Backtrack to extract path
+        List<Pair<Integer, Integer>> path = new ArrayList<>();
+        int i = len1 - 1, j = len2 - 1;
+        while (i >= 0 && j >= 0) {
+            path.add(0, new Pair<>(i, j));
+            int ni = backtrack[i][j][0];
+            int nj = backtrack[i][j][1];
+            if (ni == -1 || nj == -1) break;
+            i = ni;
+            j = nj;
+        }
+
+        return path;
+    }
+
 }

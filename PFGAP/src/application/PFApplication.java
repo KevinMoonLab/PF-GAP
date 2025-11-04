@@ -264,6 +264,9 @@ public class PFApplication {
 					}*/
 					break;
 
+				case "-DTWImpute":
+					AppContext.DTWImpute = Boolean.parseBoolean(options[1]);
+					break;
 				case "-distances":
 					String temp = options[1];
 					String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
@@ -295,6 +298,40 @@ public class PFApplication {
 							String[] descriptor = new String[]{distanceString};
 							AppContext.Descriptors.add(descriptor);
 							convertedEntry = measuresByName.get("javadistance");
+						} else if (distanceString.startsWith("python:")) {
+							// check the format
+							String[] parts = distanceString.split(":");
+							if (parts.length < 2) {
+								throw new IllegalArgumentException("Invalid descriptor format. Use python:path/to/file[:FunctionName]");
+							}
+							// check that it's a real file.
+							String path = parts[1];
+							File file = new File(path);
+							if (!file.exists()) {
+								throw new IllegalArgumentException("File not found: " + path);
+							}
+
+							// Save to AppContext so that it can be invoked when initialized.
+							String[] descriptor = new String[]{distanceString};
+							AppContext.Descriptors.add(descriptor);
+							convertedEntry = measuresByName.get("python");
+						} else if (distanceString.startsWith("maple:")) {
+							// check the format
+							String[] parts = distanceString.split(":");
+							if (parts.length < 2) {
+								throw new IllegalArgumentException("Invalid descriptor format. Use maple:path/to/file[:FunctionName]");
+							}
+							// check that it's a real file.
+							String path = parts[1];
+							File file = new File(path);
+							if (!file.exists()) {
+								throw new IllegalArgumentException("File not found: " + path);
+							}
+
+							// Save to AppContext so that it can be invoked when initialized.
+							String[] descriptor = new String[]{distanceString};
+							AppContext.Descriptors.add(descriptor);
+							convertedEntry = measuresByName.get("maple");
 						} else {
 							// we'll just add an empty string list (to keep track of indices).
 							String[] descriptor = new String[]{""};

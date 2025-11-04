@@ -4,6 +4,11 @@ import datasets.ListObjectDataset;
 import trees.ProximityForest;
 
 import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.HashSet;
+import java.util.Set;
 
 public class ModelIO {
 
@@ -15,14 +20,62 @@ public class ModelIO {
         }
     }
 
-    public static LoadedModel loadModel(String path) throws IOException, ClassNotFoundException {
+    /*public static LoadedModel loadModel(String path) throws IOException, ClassNotFoundException {
         try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(path))) {
             ProximityForest forest = (ProximityForest) in.readObject();
             ListObjectDataset trainData = (ListObjectDataset) in.readObject();
             AppContextSnapshot snapshot = (AppContextSnapshot) in.readObject();
             return new LoadedModel(forest, trainData, snapshot);
         }
+    }*/
+
+    public static LoadedModel loadModel(String path) throws IOException, ClassNotFoundException {
+        // Collect JARs from descriptors
+        Set<File> interopJars = new HashSet<>();
+        if (AppContext.Descriptors != null) {
+            for (String[] desc : AppContext.Descriptors) {
+                if (desc.length > 0 && desc[0] != null && !desc[0].isEmpty()) {
+                    String[] parts = desc[0].split(":");
+                    if (parts.length >= 2 && parts[0].equals("javadistance")) {
+                        File jarFile = new File(parts[1]);
+                        if (jarFile.exists()) {
+                            interopJars.add(jarFile);
+                        } else {
+                            System.err.println("Warning: JAR file not found: " + jarFile.getAbsolutePath());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create a custom class loader
+        URL[] urls = interopJars.stream().map(f -> {
+            try {
+                return f.toURI().toURL();
+            } catch (MalformedURLException e) {
+                throw new RuntimeException("Invalid JAR path: " + f.getAbsolutePath(), e);
+            }
+        }).toArray(URL[]::new);
+
+        ClassLoader interopLoader = new URLClassLoader(urls, ClassLoader.getSystemClassLoader());
+
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(path)) {
+            @Override
+            protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+                try {
+                    return Class.forName(desc.getName(), false, interopLoader);
+                } catch (ClassNotFoundException e) {
+                    return super.resolveClass(desc);
+                }
+            }
+        }) {
+            ProximityForest forest = (ProximityForest) in.readObject();
+            ListObjectDataset trainData = (ListObjectDataset) in.readObject();
+            AppContextSnapshot snapshot = (AppContextSnapshot) in.readObject();
+            return new LoadedModel(forest, trainData, snapshot);
+        }
     }
+
 
     public static void applySnapshot(AppContextSnapshot snapshot) {
         AppContext.config_majority_vote_tie_break_randomly = snapshot.config_majority_vote_tie_break_randomly;

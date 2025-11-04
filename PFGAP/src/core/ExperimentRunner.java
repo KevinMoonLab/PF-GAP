@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import datasets.ListObjectDataset;
 import imputation.MissingIndicesBuilder;
 import org.apache.commons.lang3.ArrayUtils;
+import proximities.DTWPFImpute;
 import proximities.OutlierScorer;
 import proximities.PFImpute;
 import trees.ProximityForest;
@@ -188,7 +189,7 @@ public class ExperimentRunner {
 				//create model
 				//ProximityForest forest = new ProximityForest(i,AppContext.userdistances);
 
-				if (AppContext.hasMissingValues && AppContext.isNumeric) {
+				if (AppContext.hasMissingValues && AppContext.isNumeric && !AppContext.DTWImpute) {
 					System.out.println("Imputing the training set...");
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
 					AppContext.initial_imputer.Impute(train_data);
@@ -198,6 +199,23 @@ public class ExperimentRunner {
 						forest.train(train_data);
 						computeTrainProximities(forest, train_data);
 						PFImpute.trainNumericImpute(train_data);
+						//forest = null;
+						//System.gc();
+					}
+					System.out.println("Done imputing the training set.");
+				}
+
+				if (AppContext.hasMissingValues && AppContext.isNumeric && AppContext.DTWImpute) {
+					System.out.println("Imputing the training set...");
+					//first, do the mean impute. Later, we'll let users select which imputer to use.
+					AppContext.initial_imputer.Impute(train_data);
+					for (int j = 0; j < AppContext.numImputes; j++) {
+						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
+						ProximityForest forest = new ProximityForest(i, AppContext.userdistances);
+						forest.train(train_data);
+						computeTrainProximities(forest, train_data);
+						DTWPFImpute.buildAlignmentPathCache(train_data, train_data, AppContext.training_proximities, AppContext.is2D, -1);
+						DTWPFImpute.trainNumericImpute(train_data);
 						//forest = null;
 						//System.gc();
 					}
@@ -470,7 +488,7 @@ public class ExperimentRunner {
 			for (int i = 0; i < AppContext.num_repeats; i++) {
 
 				//Perform imputation, if needed.
-				if (AppContext.hasMissingValues && AppContext.isNumeric) {
+				if (AppContext.hasMissingValues && AppContext.isNumeric && !AppContext.DTWImpute) {
 					//first, do the mean impute. Later, we'll let users select which imputer to use.
 					System.out.println("Performing initial imputation...");
 					AppContext.initial_imputer.Impute(test_data);
@@ -479,6 +497,21 @@ public class ExperimentRunner {
 						System.out.println("Updating missing values...");
 						computeTestTrainProximities(forest1, test_data, train_data); //what is train_data??
 						PFImpute.testNumericImpute(test_data, train_data); //again, is train_data defined??
+					}
+				}
+
+				// new DTW-based imputer
+				if (AppContext.hasMissingValues && AppContext.isNumeric && AppContext.DTWImpute) {
+					//first, do the mean impute. Later, we'll let users select which imputer to use.
+					System.out.println("Performing initial imputation...");
+					AppContext.initial_imputer.Impute(test_data);
+					for (int j = 0; j < AppContext.numImputes; j++){
+						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
+						System.out.println("Updating missing values...");
+						computeTestTrainProximities(forest1, test_data, train_data); //what is train_data??
+						DTWPFImpute.buildAlignmentPathCache(test_data, train_data, AppContext.testing_training_proximities, AppContext.is2D, -1);
+						DTWPFImpute.testNumericImpute(test_data, train_data);
+
 					}
 				}
 

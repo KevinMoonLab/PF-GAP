@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import os
 
-def train(train_file, test_file=None, train_labels=None, test_labels=None, exists_testlabels=False, return_predictions=False, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_trees=False, parallel_predict=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, knn_distances=None, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False, initial_imputer="mean", regressor=False, purity="gini", purity_threshold=1e-6, regressor_aggregation="mean"):
+def train(train_file, test_file=None, train_labels=None, test_labels=None, exists_testlabels=False, return_predictions=False, return_proximities=False, save_model=True, model_name="PF", output_directory="", repeats=1, num_trees=11, r=5, on_tree=True, max_depth=0, shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", distances=None, memory='1g', parallel_trees=False, parallel_predict=False, parallel_prox=False, impute_training_data=False, impute_testing_data=False, impute_iterations=5, return_imputed_training=False, return_imputed_testing=False, knn_distances=None, data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", return_training_outlier_scores=False, initial_imputer="mean", regressor=False, purity="gini", purity_threshold=1e-6, regressor_aggregation="mean", DTWImpute=False):
     
     TFdict = {True:"true", False:"false"}
     if (data_dimension not in [1,2]):
@@ -51,6 +51,7 @@ def train(train_file, test_file=None, train_labels=None, test_labels=None, exist
     msgList.extend(["-purity_measure=" + purity])
     msgList.extend(["-purity_threshold=" + str(purity_threshold)])
     msgList.extend(["-voting=" + regressor_aggregation])
+    msgList.extend(["-DTWImpute=" + TFdict[DTWImpute]])
     
     if knn_distances==None:
         knn_distances="[]"
@@ -85,7 +86,7 @@ def train(train_file, test_file=None, train_labels=None, test_labels=None, exist
     return
 
 
-def predict(model_name, testfile, test_labels=None, exists_testlabels=False, return_predictions=False, return_proximities=False, output_directory="", shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", parallel_trees=False, parallel_prox=False, parallel_predict=False, memory='1g', data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", impute_testing_data=False, impute_iterations=5, return_imputed_testing=False, initial_imputer="mean", knn_distances=None):
+def predict(model_name, testfile, test_labels=None, exists_testlabels=False, return_predictions=False, return_proximities=False, output_directory="", shuffle=False, export=1, verbosity=1, file_has_header=False, target_column="first", parallel_trees=False, parallel_prox=False, parallel_predict=False, memory='1g', data_dimension=1, numeric_data=True, entry_separator=",", array_separator=":", impute_testing_data=False, impute_iterations=5, return_imputed_testing=False, initial_imputer="mean", DTWImpute=False, knn_distances=None, distances=None):
     
     TFdict = {True:"true", False:"false"}
     if (data_dimension not in [1,2]):
@@ -129,6 +130,15 @@ def predict(model_name, testfile, test_labels=None, exists_testlabels=False, ret
     msgList.extend(["-hasMissingValues=" + TFdict[impute_testing_data]])
     msgList.extend(["-numImputes=" + str(impute_iterations)])
     msgList.extend(["-impute_test=" + TFdict[return_imputed_testing]])
+    msgList.extend(["-DTWImpute=" + TFdict[DTWImpute]])
+    #msgList.extend(["-allow_distance_mismatch=" + TFdict[allow_distance_mismatch]])
+    
+    if distances==None:
+        distances="[]"
+    else:
+        distances = "[" + ",".join(distances) + "]"
+        
+    msgList.extend(["-distances=" + distances])
     
     if knn_distances==None:
         knn_distances="[]"

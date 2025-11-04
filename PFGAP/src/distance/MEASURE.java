@@ -1,6 +1,8 @@
 //package distance.elastic;
 package distance;
 
+import distance.graph.*;
+
 public enum MEASURE {
 	basicDTW, 
 	dtwDistance, 
@@ -39,4 +41,19 @@ public enum MEASURE {
 
 // Shape-based multivariate DTW
 	shapeHoGdtw, shifazShapeHoGDTW,
+
+	// graph-based distances
+	approximateGraphEditDistance,
+	graphletDistance,
+	graphEditDistance,
+	hammingDistance,
+	shortestPathDistance,
+	wlDistance,
+	wlDistance2,
+
+	// meta distances - pretrained models
+	meta_classmatch,
+	meta_file_classmatch,
+	meta_regression,
+	meta_file_regression,
 }
