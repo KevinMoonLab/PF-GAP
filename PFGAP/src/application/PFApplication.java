@@ -267,6 +267,12 @@ public class PFApplication {
 				case "-DTWImpute":
 					AppContext.DTWImpute = Boolean.parseBoolean(options[1]);
 					break;
+				case "-MissingStrings":
+					String temp_strings = options[1];
+					String temp_strings_rm = temp_strings.substring(1, temp_strings.length() - 1); // Removes '[' and ']'
+					String[] contents_strings = temp_strings_rm.split(","); // Splits by ","
+					AppContext.MissingStrings = new HashSet<>(Arrays.asList(contents_strings));
+					break;
 				case "-distances":
 					String temp = options[1];
 					String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'

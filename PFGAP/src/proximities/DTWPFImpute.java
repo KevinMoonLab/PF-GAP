@@ -205,7 +205,7 @@ public class DTWPFImpute {
         return alignmentPaths.getOrDefault(i, Collections.emptyMap()).getOrDefault(j, Collections.emptyList());
     }
 
-    public static void buildAlignmentPathCache(
+    /*public static void buildAlignmentPathCache(
             ListObjectDataset dataA,
             ListObjectDataset dataB,
             double[][] proximities,
@@ -224,6 +224,49 @@ public class DTWPFImpute {
             for (int j = 0; j < sizeB; j++) {
                 if (i == j && dataA == dataB) continue;
                 if (proximities[i][j] <= EPSILON) continue;
+
+                Object s1 = dataA.get_series(i);
+                Object s2 = dataB.get_series(j);
+
+                List<Pair<Integer, Integer>> path;
+                if (is2D) {
+                    path = dtw2D.getAlignmentPath((double[][]) s1, (double[][]) s2, windowSize);
+                } else {
+                    path = dtw1D.getAlignmentPath((double[]) s1, (double[]) s2, windowSize);
+                }
+
+                alignmentPaths
+                        .computeIfAbsent(i, k -> new HashMap<>())
+                        .put(j, path);
+            }
+        }
+    }*/
+
+    public static void buildAlignmentPathCache(
+            ListObjectDataset dataA,
+            ListObjectDataset dataB,
+            Map<Integer, Map<Integer, Double>> sparseProximities,
+            boolean is2D,
+            int windowSize
+    ) {
+        int sizeA = dataA.size();
+        int sizeB = dataB.size();
+
+        DTWWithPath dtw1D = new DTWWithPath();
+        DTW_D dtw2D = new DTW_D();
+
+        alignmentPaths = new HashMap<>();
+
+        for (int i = 0; i < sizeA; i++) {
+            Map<Integer, Double> row = sparseProximities.get(i);
+            if (row == null) continue;
+
+            for (Map.Entry<Integer, Double> entry : row.entrySet()) {
+                int j = entry.getKey();
+                double proximity = entry.getValue();
+
+                if (i == j && dataA == dataB) continue;
+                if (proximity <= EPSILON) continue;
 
                 Object s1 = dataA.get_series(i);
                 Object s2 = dataB.get_series(j);
