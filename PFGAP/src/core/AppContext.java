@@ -109,6 +109,7 @@ public class AppContext {
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;
+	public static boolean DTWImpute = false;
 	// the missing indices are now part of the ListObjectDataset.
 	/*//public static ArrayList<Integer> missing_train_indices;
 	//public static List<Object> missing_train_indices = Collections.synchronizedList(new ArrayList<>());

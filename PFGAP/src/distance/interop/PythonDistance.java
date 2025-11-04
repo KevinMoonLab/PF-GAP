@@ -10,6 +10,93 @@ public class PythonDistance implements Serializable {
     private static final Object pythonLock = new Object();
     private static boolean initialized = false;
 
+    private final String scriptPath;
+    private final String functionName;
+
+
+    public PythonDistance(String descriptor) throws IOException {
+        String[] parts = descriptor.split(":");
+        if (parts.length < 2) {
+            throw new IllegalArgumentException("Invalid python descriptor format. Use python:path/to/file[:FunctionName]");
+        }
+
+        this.scriptPath = parts[1].trim();
+        this.functionName = (parts.length >= 3) ? parts[2].trim() : "Distance";
+
+        initialize();
+    }
+
+    private void initialize() throws IOException {
+        if (initialized) return;
+
+        ProcessBuilder pb = new ProcessBuilder("python3", "-i");
+        pythonProcess = pb.redirectErrorStream(true).start();
+        pythonInput = new BufferedWriter(new OutputStreamWriter(pythonProcess.getOutputStream()));
+        pythonOutput = new BufferedReader(new InputStreamReader(pythonProcess.getInputStream()));
+
+        pythonInput.write("import sys; sys.ps1=''; sys.ps2=''\n");
+        pythonInput.flush();
+
+        pythonInput.write("exec(open('" + scriptPath + "').read())\n");
+        pythonInput.flush();
+
+        initialized = true;
+    }
+
+    public double distance(Object T1, Object T2) throws IOException {
+        double[] t1 = (double[]) T1;
+        double[] t2 = (double[]) T2;
+
+        synchronized (pythonLock) {
+            if (!initialized) {
+                initialize();
+            }
+
+            String pyT1 = Arrays.toString(t1);
+            String pyT2 = Arrays.toString(t2);
+            String marker = "RESULT:";
+
+            pythonInput.write("print('" + marker + "', " + functionName + "(" + pyT1 + ", " + pyT2 + ")); sys.stdout.flush()\n");
+            pythonInput.flush();
+
+            String line;
+            while ((line = pythonOutput.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.equals(">>>") || line.equals("...")) continue;
+                if (line.contains(marker)) {
+                    //String result = line.substring(marker.length()).trim();
+                    //return Double.parseDouble(result);
+                    int markerIndex = line.indexOf(marker);
+                    if (markerIndex >= 0) {
+                        String result = line.substring(markerIndex + marker.length()).trim();
+                        return Double.parseDouble(result);
+                    }
+                }
+            }
+
+            throw new IOException("Failed to get result from Python.");
+        }
+    }
+
+    public static void close() throws IOException {
+        if (pythonInput != null) {
+            pythonInput.write("exit()\n");
+            pythonInput.flush();
+        }
+        if (pythonProcess != null) {
+            pythonProcess.destroy();
+        }
+    }
+}
+
+/*
+public class PythonDistance implements Serializable {
+    private static Process pythonProcess;
+    private static BufferedWriter pythonInput;
+    private static BufferedReader pythonOutput;
+    private static final Object pythonLock = new Object();
+    private static boolean initialized = false;
+
     public PythonDistance() throws IOException {
         initialize();
     }
@@ -91,4 +178,4 @@ public class PythonDistance implements Serializable {
             pythonProcess.destroy();
         }
     }
-}
+}*/

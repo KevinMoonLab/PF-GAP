@@ -14,7 +14,7 @@ import pandas as pd
 
 
 dir1 = "training_output"
-dir2 = "training_predictions"
+dir2 = "testing_output"
 
 
 # In[3]:

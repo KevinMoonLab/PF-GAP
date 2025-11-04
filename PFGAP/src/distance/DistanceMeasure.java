@@ -10,9 +10,9 @@ import core.AppContext;
 import core.contracts.ObjectDataset;
 import distance.api.DistanceFunction;
 import distance.elastic.*;
-import distance.interop.JavaDistance;
-import distance.interop.MapleDistance;
-import distance.interop.PythonDistance;
+import distance.graph.*;
+import distance.interop.*;
+import distance.meta.*;
 import distance.multiTS.*;
 
 public class DistanceMeasure implements Serializable {
@@ -57,6 +57,21 @@ public class DistanceMeasure implements Serializable {
 	private ShapeHoGDTW shapeHoGdtw_d;
 	//private Euclidean_D euclidean_d;
 	//private Manhattan_D manhattan_d;
+
+	//graph-based distances
+	private ApproximateGraphEditDistance approximateGraphEditDistance;
+	private GraphletDistance graphletDistance;
+	private GraphEditDistance graphEditDistance;
+	private HammingDistance hammingDistance;
+	private ShortestPathDistance shortestPathDistance;
+	private WLDistance wlDistance;
+	private WLDistance2 wlDistance2;
+
+	//meta-based distances
+	private MetaClassMatchDistance meta_classmatch;
+	private MetaFileClassMatchDistance meta_file_classmatch;
+	private MetaRegressionDistance meta_regression;
+	private MetaFileRegressionDistance meta_file_regression;
 
 	
 	public int windowSizeDTW =-1,
@@ -123,13 +138,25 @@ public class DistanceMeasure implements Serializable {
 				ddtwcv = new DDTW();
 				break;
 			case maple:
-				maple = new MapleDistance();
+				maple = new MapleDistance(descriptor[0]);
 				break;
 			case python:
-				python = new PythonDistance();
+				python = new PythonDistance(descriptor[0]); //PythonDistance();
 				break;
 			case javadistance:
 				distanceFunction = new JavaDistance(descriptor[0]).getDistanceFunction();
+				break;
+			case meta_classmatch:
+				meta_classmatch = new MetaClassMatchDistance(descriptor[0]);
+				break;
+			case meta_file_classmatch:
+				meta_file_classmatch = new MetaFileClassMatchDistance(descriptor[0]);
+				break;
+			case meta_regression:
+				meta_regression = new MetaRegressionDistance(descriptor[0]);
+				break;
+			case meta_file_regression:
+				meta_file_regression = new MetaFileRegressionDistance(descriptor[0]);
 				break;
 			case manhattan:
 				manhattan = new Manhattan();
@@ -210,6 +237,27 @@ public class DistanceMeasure implements Serializable {
 			//case manhattan_d:
 			//	manhattan_d = new Manhattan_D();
 			//	break;
+			case approximateGraphEditDistance:
+				approximateGraphEditDistance = new ApproximateGraphEditDistance();
+				break;
+			case graphEditDistance:
+				graphEditDistance = new GraphEditDistance();
+				break;
+			case graphletDistance:
+				graphletDistance = new GraphletDistance();
+				break;
+			case hammingDistance:
+				hammingDistance = new HammingDistance();
+				break;
+			case shortestPathDistance:
+				shortestPathDistance = new ShortestPathDistance();
+				break;
+			case wlDistance:
+				wlDistance = new WLDistance();
+				break;
+			case wlDistance2:
+				wlDistance2 = new WLDistance2();
+				break;
 			default:
 				throw new Exception("Unknown distance measure");
 //				break;
@@ -310,6 +358,28 @@ public class DistanceMeasure implements Serializable {
 				return wddtw_d;
 			case shapeHoGdtw_d:
 				return shapeHoGdtw_d;
+			case approximateGraphEditDistance:
+				return approximateGraphEditDistance;
+			case graphEditDistance:
+				return graphEditDistance;
+			case graphletDistance:
+				return graphletDistance;
+			case hammingDistance:
+				return hammingDistance;
+			case shortestPathDistance:
+				return shortestPathDistance;
+			case wlDistance:
+				return wlDistance;
+			case wlDistance2:
+				return wlDistance2;
+			case meta_classmatch:
+				return meta_classmatch;
+			case meta_file_classmatch:
+				return meta_file_classmatch;
+			case meta_regression:
+				return meta_regression;
+			case meta_file_regression:
+				return meta_file_regression;
 			default:
 				throw new IllegalArgumentException("Unsupported measure: " + measure);
 		}
@@ -547,6 +617,39 @@ public class DistanceMeasure implements Serializable {
 			//	break;
 			//case manhattan_d:
 			//	distance = manhattan_d.distance(s, t, bsf);
+			case approximateGraphEditDistance:
+				distance = approximateGraphEditDistance.compute(s,t);
+				break;
+			case graphEditDistance:
+				distance = approximateGraphEditDistance.compute(s,t);
+				break;
+			case graphletDistance:
+				distance = graphletDistance.compute(s,t);
+				break;
+			case hammingDistance:
+				distance = hammingDistance.compute(s,t);
+				break;
+			case shortestPathDistance:
+				distance = shortestPathDistance.compute(s,t);
+				break;
+			case wlDistance:
+				distance = wlDistance.compute(s,t);
+				break;
+			case wlDistance2:
+				distance = wlDistance2.compute(s,t);
+				break;
+			case meta_classmatch:
+				distance = meta_classmatch.distance(s,t);
+				break;
+			case meta_file_classmatch:
+				distance = meta_file_classmatch.distance(s,t);
+				break;
+			case meta_regression:
+				distance = meta_regression.distance(s,t);
+				break;
+			case meta_file_regression:
+				distance = meta_file_regression.distance(s,t);
+				break;
 
 			default:
 //			throw new Exception("Unknown distance measure");
