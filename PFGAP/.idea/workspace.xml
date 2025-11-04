@@ -11,25 +11,16 @@
       <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO$LoadedModel.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO$LoadedModel.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/AddingDistances.txt" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/AddingDistances.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceMeasure$1.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceMeasure$1.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceMeasure.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceMeasure.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceRegistry.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/DistanceRegistry.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/MEASURE.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/MEASURE.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$RowParser.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/DelimitedFileReader$RowParser.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/proximities/DTWPFImpute.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/proximities/DTWPFImpute.class" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/DelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/DelimitedFileReader.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ModelIO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ModelIO.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/AddingDistances.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/AddingDistances.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/MEASURE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/MEASURE.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DTW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DTW_D.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/demo/demo_custom_javadistance.py" beforeDir="false" afterPath="$PROJECT_DIR$/../docs/demo/demo_custom_javadistance.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/DTWPFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximities/DTWPFImpute.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

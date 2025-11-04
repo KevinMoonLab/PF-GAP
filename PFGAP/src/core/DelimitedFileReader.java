@@ -277,7 +277,8 @@ public class DelimitedFileReader {
 
         //usage: RowParser.setMissingIndicators(Set.of("", "NA", "N/A", "null", "?"));
 
-        private static Set<String> missingIndicators = Set.of("", "NA", "N/A", "null");
+        //private static Set<String> missingIndicators = Set.of("", "NA", "N/A", "null");
+        private static Set<String> missingIndicators = AppContext.MissingStrings;
 
         public static void setMissingIndicators(Set<String> indicators) {
             missingIndicators = indicators.stream()

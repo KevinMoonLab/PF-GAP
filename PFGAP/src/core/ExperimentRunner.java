@@ -214,7 +214,7 @@ public class ExperimentRunner {
 						ProximityForest forest = new ProximityForest(i, AppContext.userdistances);
 						forest.train(train_data);
 						computeTrainProximities(forest, train_data);
-						DTWPFImpute.buildAlignmentPathCache(train_data, train_data, AppContext.training_proximities, AppContext.is2D, -1);
+						DTWPFImpute.buildAlignmentPathCache(train_data, train_data, AppContext.training_proximities_sparse, AppContext.is2D, -1);
 						DTWPFImpute.trainNumericImpute(train_data);
 						//forest = null;
 						//System.gc();
@@ -256,18 +256,31 @@ public class ExperimentRunner {
 				if (AppContext.testing_file != null) {
 
 
-					//Perform imputation, if needed.
-					if (AppContext.hasMissingValues) {
-						System.out.println("Imputing the test dataset...");
+					// impute the test set, if needed.
+					if (AppContext.hasMissingValues && AppContext.isNumeric && !AppContext.DTWImpute) {
+						//first, do the mean impute. Later, we'll let users select which imputer to use.
+						System.out.println("Performing initial imputation...");
 						AppContext.initial_imputer.Impute(test_data);
-						for (int j = 0; j < AppContext.numImputes; j++) {
+						for (int j = 0; j < AppContext.numImputes; j++){
 							//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
-							//ProximityForestResult result = forest.test(test_data);
-							forest.test(test_data);
+							System.out.println("Updating missing values...");
 							computeTestTrainProximities(forest, test_data, train_data); //what is train_data??
 							PFImpute.testNumericImpute(test_data, train_data); //again, is train_data defined??
 						}
-						System.out.println("Done imputing the test dataset.");
+					}
+
+					// new DTW-based imputer
+					if (AppContext.hasMissingValues && AppContext.isNumeric && AppContext.DTWImpute) {
+						//first, do the mean impute. Later, we'll let users select which imputer to use.
+						System.out.println("Imputing the test set...");
+						AppContext.initial_imputer.Impute(test_data);
+						for (int j = 0; j < AppContext.numImputes; j++){
+							//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
+							computeTestTrainProximities(forest, test_data, train_data); //what is train_data??
+							DTWPFImpute.buildAlignmentPathCache(test_data, train_data, AppContext.testing_training_proximities_sparse, AppContext.is2D, -1);
+							DTWPFImpute.testNumericImpute(test_data, train_data);
+
+						}
 					}
 
 					// Might this be too soon?
@@ -509,7 +522,7 @@ public class ExperimentRunner {
 						//do the PF update (PFImpute is NOT an actual imputer, but an updater.)
 						System.out.println("Updating missing values...");
 						computeTestTrainProximities(forest1, test_data, train_data); //what is train_data??
-						DTWPFImpute.buildAlignmentPathCache(test_data, train_data, AppContext.testing_training_proximities, AppContext.is2D, -1);
+						DTWPFImpute.buildAlignmentPathCache(test_data, train_data, AppContext.testing_training_proximities_sparse, AppContext.is2D, -1);
 						DTWPFImpute.testNumericImpute(test_data, train_data);
 
 					}
