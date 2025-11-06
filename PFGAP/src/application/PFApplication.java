@@ -338,6 +338,26 @@ public class PFApplication {
 							String[] descriptor = new String[]{distanceString};
 							AppContext.Descriptors.add(descriptor);
 							convertedEntry = measuresByName.get("maple");
+						} else if (distanceString.startsWith("meta_")) {
+							// check the format
+							String[] parts = distanceString.split(":");
+							if (parts.length < 2) {
+								throw new IllegalArgumentException("Invalid descriptor format. Use meta_type:path/to/file[:method]");
+							}
+							// check that it's a real file.
+							String path = parts[1];
+							File file = new File(path);
+							if (!file.exists()) {
+								throw new IllegalArgumentException("File not found: " + path);
+							}
+
+							// Save to AppContext so that it can be invoked when initialized.
+							String[] descriptor = new String[]{distanceString};
+							AppContext.Descriptors.add(descriptor);
+
+							// Use the prefix (e.g., "meta_file_classmatch") to get the correct MEASURE
+							String key = distanceString.split(":")[0];
+							convertedEntry = measuresByName.get(key);
 						} else {
 							// we'll just add an empty string list (to keep track of indices).
 							String[] descriptor = new String[]{""};

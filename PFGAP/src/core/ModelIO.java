@@ -123,6 +123,8 @@ public class ModelIO {
         //AppContext.modelname = snapshot.modelname;
         AppContext.userdistances = snapshot.userdistances;
         AppContext.Descriptors = snapshot.Descriptors;
+        AppContext.meta_predictions = snapshot.meta_predictions;
+        AppContext.MissingStrings = snapshot.MissingStrings;
         //AppContext.parallelTrees = snapshot.parallelTrees;
         //AppContext.parallelProx = snapshot.parallelProx;
         //AppContext.parallelPredict = snapshot.parallelPredict;

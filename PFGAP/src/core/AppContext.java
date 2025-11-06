@@ -111,6 +111,7 @@ public class AppContext {
 	public static boolean impute_test = false;
 	public static boolean DTWImpute = false;
 	public static HashSet<String> MissingStrings;
+	public static Map<Integer, Object> meta_predictions;
 	// the missing indices are now part of the ListObjectDataset.
 	/*//public static ArrayList<Integer> missing_train_indices;
 	//public static List<Object> missing_train_indices = Collections.synchronizedList(new ArrayList<>());

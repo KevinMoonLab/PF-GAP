@@ -355,7 +355,7 @@ public class ExperimentRunner {
 
 				if (AppContext.get_training_outlier_scores && !AppContext.getprox && !AppContext.isRegression) {
 					// In this case we can use a sparse representation, since we won't need to return the proximities.
-					AppContext.useSparseProximities = false;
+					AppContext.useSparseProximities = true; //false;
 					System.out.println("Computing Training Proximities...");
 					computeTrainProximities(forest, train_data);
 					// and now the outlier scores
