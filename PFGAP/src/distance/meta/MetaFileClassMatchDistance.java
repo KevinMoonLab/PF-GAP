@@ -1,12 +1,14 @@
 package distance.meta;
 
+import core.AppContext;
+
 import java.io.*;
 import java.util.*;
 
 public class MetaFileClassMatchDistance implements Serializable {
     private final String filePath;
     private final String method; // "class" or "prob"
-    private final Map<Integer, Object> predictions = new HashMap<>();
+    //private final Map<Integer, Object> predictions = new HashMap<>();
 
     public MetaFileClassMatchDistance(String descriptor) throws IOException {
         String[] parts = descriptor.split(":");
@@ -17,7 +19,10 @@ public class MetaFileClassMatchDistance implements Serializable {
         this.filePath = parts[1].trim();
         this.method = (parts.length >= 3) ? parts[2].trim().toLowerCase() : "class";
 
-        loadPredictions();
+        if (AppContext.meta_predictions == null) {
+            AppContext.meta_predictions = new HashMap<>();
+            loadPredictions();
+        }
     }
 
     private void loadPredictions() throws IOException {
@@ -27,25 +32,27 @@ public class MetaFileClassMatchDistance implements Serializable {
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
                 if (method.equals("class")) {
-                    predictions.put(index++, line);
+                    AppContext.meta_predictions.put(index++, line);
                 } else {
                     String[] tokens = line.replace("[", "").replace("]", "").split(",");
                     double[] probs = new double[tokens.length];
                     for (int i = 0; i < tokens.length; i++) {
                         probs[i] = Double.parseDouble(tokens[i].trim());
                     }
-                    predictions.put(index++, probs);
+                    AppContext.meta_predictions.put(index++, probs);
                 }
             }
         }
     }
 
     public double distance(Object T1, Object T2) {
-        int i1 = (Integer) T1;
-        int i2 = (Integer) T2;
+        //int i1 = (Integer) T1;
+        //int i2 = (Integer) T2;
+        int i1 = (int) ((double[]) T1)[0];
+        int i2 = (int) ((double[]) T2)[0];
 
-        Object pred1 = predictions.get(i1);
-        Object pred2 = predictions.get(i2);
+        Object pred1 = AppContext.meta_predictions.get(i1);
+        Object pred2 = AppContext.meta_predictions.get(i2);
 
         if (pred1 == null || pred2 == null) {
             throw new IllegalArgumentException("Missing prediction for index " + i1 + " or " + i2);

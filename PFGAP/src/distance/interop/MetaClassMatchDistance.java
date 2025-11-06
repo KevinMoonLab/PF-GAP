@@ -16,7 +16,7 @@ public class MetaClassMatchDistance implements Serializable {
 
     public MetaClassMatchDistance(String descriptor) throws IOException {
         String[] parts = descriptor.split(":");
-        if (parts.length < 2) throw new IllegalArgumentException("Use metaclassmatch:path/to/model.py[:FunctionName][:Method]");
+        if (parts.length < 2) throw new IllegalArgumentException("Use meta_classmatch:path/to/model.py[:FunctionName][:Method]");
 
         this.scriptPath = parts[1].trim();
         this.functionName = (parts.length >= 3) ? parts[2].trim() : "predict";
@@ -40,6 +40,12 @@ public class MetaClassMatchDistance implements Serializable {
         pythonInput.flush();
 
         initialized = true;
+    }
+
+    public void reinitializeIfNeeded() throws IOException {
+        if (!initialized || pythonInput == null || pythonOutput == null || pythonProcess == null) {
+            initialize();
+        }
     }
 
     //@Override
@@ -66,6 +72,7 @@ public class MetaClassMatchDistance implements Serializable {
         String pyX = Arrays.toString(x);
         String marker = "RESULT:";
 
+        reinitializeIfNeeded();
         pythonInput.write("print('" + marker + "', " + functionName + "(" + pyX + ")); sys.stdout.flush()\n");
         pythonInput.flush();
 

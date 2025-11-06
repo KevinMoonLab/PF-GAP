@@ -3,6 +3,9 @@ package core;
 import core.contracts.ObjectDataset;
 import datasets.ListObjectDataset;
 
+import java.util.HashSet;
+import java.util.Map;
+
 public class AppContextUtils {
 
     public static AppContextSnapshot captureSnapshot() {
@@ -53,6 +56,8 @@ public class AppContextUtils {
         //snapshot.modelname = AppContext.modelname;
         snapshot.userdistances = AppContext.userdistances;
         snapshot.Descriptors = AppContext.Descriptors;
+        snapshot.MissingStrings = AppContext.MissingStrings;
+        snapshot.meta_predictions = AppContext.meta_predictions;
         //snapshot.parallelTrees = AppContext.parallelTrees;
         //snapshot.parallelProx = AppContext.parallelProx;
         //snapshot.parallelPredict = AppContext.parallelPredict;

@@ -53,6 +53,8 @@ public class AppContextSnapshot implements Serializable {
     //public String modelname;
     public MEASURE[] userdistances;
     public List<String[]> Descriptors;
+    public HashSet<String> MissingStrings;
+    public Map<Integer, Object> meta_predictions;
     //public boolean parallelTrees;
     //public boolean parallelProx;
     //public boolean parallelPredict;
