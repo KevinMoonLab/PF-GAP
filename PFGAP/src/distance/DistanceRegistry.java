@@ -50,6 +50,7 @@ public class DistanceRegistry {
         // Designed for tabular numeric (also for time series)
         registry.put("euclidean", MEASURE.euclidean);
         registry.put("manhattan", MEASURE.manhattan);
+        registry.put("cosine", MEASURE.cosine);
         registry.put("shifazEUCLIDEAN", MEASURE.shifazEUCLIDEAN);
 
         // Multivariate Independent (_I)
