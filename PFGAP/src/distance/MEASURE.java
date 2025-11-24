@@ -11,7 +11,8 @@ public enum MEASURE {
 	,shifazDTW, shifazDTWCV, shifazDDTW, shifazDDTWCV, shifazWDTW, shifazWDDTW
 	,shifazEUCLIDEAN, shifazERP, shifazMSM, shifazLCSS, shifazTWE
 	,manhattan
-	,shapeHoG1dDTW,
+	,shapeHoG1dDTW
+	,cosine,
 
 	// interop distance
 	python, maple, javadistance,

@@ -33,6 +33,7 @@ public class DistanceMeasure implements Serializable {
 	private MapleDistance maple;
 	private PythonDistance python;
 	private Manhattan manhattan;
+	private Cosine cosine;
 	private DistanceFunction distanceFunction;
 	private ShapeHoG1dDTW shapeHoG1dDTW;
 	private DTW_I dtw_i;
@@ -160,6 +161,9 @@ public class DistanceMeasure implements Serializable {
 				break;
 			case manhattan:
 				manhattan = new Manhattan();
+				break;
+			case cosine:
+				cosine = new Cosine();
 				break;
 			case shapeHoG1dDTW:
 				shapeHoG1dDTW = new ShapeHoG1dDTW();
@@ -308,6 +312,8 @@ public class DistanceMeasure implements Serializable {
 				return distanceFunction;
 			case manhattan:
 				return manhattan;
+			case cosine:
+				return cosine;
 			case shapeHoG1dDTW:
 				return shapeHoG1dDTW;
 			case dtw_i:
@@ -541,6 +547,9 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case manhattan:
 			distance = manhattan.distance(s,t,bsf);
+			break;
+		case cosine:
+			distance = cosine.distance(s,t,bsf);
 			break;
 		case shapeHoG1dDTW:
 			distance = shapeHoG1dDTW.distance(s,t,bsf,((double[]) s).length);

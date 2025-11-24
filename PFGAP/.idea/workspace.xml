@@ -7,26 +7,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/out/artifacts/PFGAP_jar/PFGAP.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/application/PFApplication.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/AppContext.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/AppContextSnapshot.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/AppContextSnapshot.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/AppContextUtils.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/AppContextUtils.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ExperimentRunner.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO$LoadedModel.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO$LoadedModel.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/core/ModelIO.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/interop/MetaClassMatchDistance.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/interop/MetaClassMatchDistance.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/PFGAP/distance/meta/MetaFileClassMatchDistance.class" beforeDir="false" afterPath="$PROJECT_DIR$/out/production/PFGAP/distance/meta/MetaFileClassMatchDistance.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContextSnapshot.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContextSnapshot.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContextUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContextUtils.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ModelIO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ModelIO.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/interop/MetaClassMatchDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MetaClassMatchDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/meta/MetaFileClassMatchDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/meta/MetaFileClassMatchDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/MEASURE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/MEASURE.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
