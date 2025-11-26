@@ -244,6 +244,10 @@ pt = PF_wrapper.getArray(str(output_directory) + "TestTrainProximities.txt")
 
 If you use PF-GAP in your work, please cite the appropriate paper(s) from the following list:
 
-> Ben Shaw, Jake Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon.
+> Ben Shaw, Jake S. Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon.
 > **Forest Proximities for Time Series**, IntelliSys 2025  
 > [arXiv preprint](https://arxiv.org/abs/2410.03098)
+
+> Ben Shaw, Adam Rustad, Sofia Pelagalli Maia, Jake S. Rhodes, and Kevin R. Moon.
+> **The Generalized Proximity Forest**, ACDSA 2026  
+> [arXiv preprint](https://arxiv.org/abs/2511.19487)
