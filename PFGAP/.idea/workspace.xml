@@ -8,10 +8,6 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceRegistry.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/MEASURE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/MEASURE.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
