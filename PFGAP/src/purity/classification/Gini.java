@@ -1,4 +1,4 @@
-package purity;
+package purity.classification;
 
 import java.util.HashMap;
 import java.util.List;

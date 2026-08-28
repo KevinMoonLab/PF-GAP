@@ -1,6 +1,9 @@
 package core;
 
+import datasets.readers.lazy.LazySeriesReaderSpec;
 import distance.MEASURE;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.Serializable;
 import java.util.*;
@@ -12,7 +15,7 @@ public class AppContextSnapshot implements Serializable {
     public boolean config_skip_distance_when_exemplar_matches_query;
     public boolean config_use_random_choice_when_min_distance_is_equal;
 
-    public long rand_seed;
+    public Long rand_seed;
     public int verbosity;
     public int export_level;
 
@@ -20,6 +23,11 @@ public class AppContextSnapshot implements Serializable {
     //public String testing_file;
     public String training_labels;
     //public String testing_labels;
+
+    public Map<String, LazySeriesReaderSpec>
+            lazySeriesReaderSpecs =
+            new LinkedHashMap<>();
+
     public boolean is2D;
     public boolean isNumeric;
     //public boolean hasMissingValues;
@@ -35,6 +43,7 @@ public class AppContextSnapshot implements Serializable {
     public boolean isRegression;
     public String voting;
     public double purity_threshold;
+    public String forest_mode;
 
     //public int num_repeats;
     public int num_trees;
@@ -53,13 +62,13 @@ public class AppContextSnapshot implements Serializable {
     //public String modelname;
     public MEASURE[] userdistances;
     public List<String[]> Descriptors;
-    public HashSet<String> MissingStrings;
+    public HashSet<String> MissingStrings; // this might change on a test set
     public Map<Integer, Object> meta_predictions;
     //public boolean parallelTrees;
     //public boolean parallelProx;
     //public boolean parallelPredict;
     public int max_depth;
-    public boolean impute_train;
+    // public boolean impute_train; // is this really needed?
     //public boolean impute_test;
     //public boolean exists_testlabels;
     public boolean useSparseProximities;
@@ -67,4 +76,8 @@ public class AppContextSnapshot implements Serializable {
 
     // Optional: if needed for label restoration
     public Map<Object, Integer> initialClassLabels;
+
+    public StandardizationConfig standardizationConfig = StandardizationConfig.disabled();
+
+    public StandardizationStats standardizationStats = null;
 }

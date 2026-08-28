@@ -23,6 +23,13 @@ public class AppContextUtils {
         //snapshot.testing_file = AppContext.testing_file;
         snapshot.training_labels = AppContext.training_labels;
         //snapshot.testing_labels = AppContext.testing_labels;
+
+        //snapshot.lazySeriesReaderSpecs =
+        //        AppContext.getLazySeriesReaderSpecsSnapshot();
+
+        snapshot.lazySeriesReaderSpecs =
+                AppContext.getModelLazySeriesReaderSpecsSnapshot();
+
         snapshot.is2D = AppContext.is2D;
         snapshot.isNumeric = AppContext.isNumeric;
         //snapshot.hasMissingValues = AppContext.hasMissingValues;
@@ -38,6 +45,7 @@ public class AppContextUtils {
         snapshot.isRegression = AppContext.isRegression;
         snapshot.voting = AppContext.voting;
         snapshot.purity_threshold = AppContext.purity_threshold;
+        snapshot.forest_mode = AppContext.forest_mode;
 
         //snapshot.num_repeats = AppContext.num_repeats;
         snapshot.num_trees = AppContext.num_trees;
@@ -62,7 +70,7 @@ public class AppContextUtils {
         //snapshot.parallelProx = AppContext.parallelProx;
         //snapshot.parallelPredict = AppContext.parallelPredict;
         snapshot.max_depth = AppContext.max_depth;
-        snapshot.impute_train = AppContext.impute_train;
+        //snapshot.impute_train = AppContext.impute_train;
         //snapshot.impute_test = AppContext.impute_test;
         //snapshot.exists_testlabels = AppContext.exists_testlabels;
         snapshot.useSparseProximities = AppContext.useSparseProximities;
@@ -73,6 +81,10 @@ public class AppContextUtils {
         if (trainData instanceof ListObjectDataset) {
             snapshot.initialClassLabels = ((ListObjectDataset) trainData)._get_initial_class_labels();
         }
+
+        snapshot.standardizationConfig = AppContext.standardizationConfig;
+
+        snapshot.standardizationStats = AppContext.standardizationStats;
 
         return snapshot;
     }

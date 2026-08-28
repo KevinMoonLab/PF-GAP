@@ -5,8 +5,12 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import core.contracts.ObjectDataset;
+import datasets.readers.lazy.LazySeriesRef;
 import imputation.util.MissingIndices;
-import purity.*;
+import purity.classification.Entropy;
+import purity.classification.Gini;
+import purity.regression.MAD;
+import purity.regression.Variance;
 
 public class ListObjectDataset implements ObjectDataset, Serializable {
 
@@ -35,7 +39,7 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
         this.data = new ArrayList<>(expectedSize);
         this.labels = new ArrayList<>(expectedSize);
         this.classMap = new LinkedHashMap<>();
-        this.indices = new ArrayList<>();
+        this.indices = new ArrayList<>(expectedSize);
     }
 
     /*public ListObjectDataset(int expectedSize, int length) {
@@ -360,12 +364,16 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
 
     @Override
     public ListObjectDataset deep_clone() {
-        ListObjectDataset clone = new ListObjectDataset(this.size()); //ListObjectDataset(this.size(), this.length());
+        ListObjectDataset clone = new ListObjectDataset(this.size());
+
         for (int i = 0; i < this.size(); i++) {
             Object original = this.data.get(i);
-            //Object copy = Arrays.copyOf(original, original.length);
             Object copy;
-            if (is2D) {
+
+            if (original instanceof LazySeriesRef) {
+                // Lazy references are immutable, so sharing the reference is safe.
+                copy = original;
+            } else if (is2D) {
                 Object[][] originalArray = (Object[][]) original;
                 copy = Arrays.copyOf(originalArray, originalArray.length);
             } else {
@@ -375,6 +383,9 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
 
             clone.add(this.labels.get(i), copy, this.indices.get(i));
         }
+
+        clone.setLength(this.length);
+        clone.setMissingIndices(this.missingIndices);
         return clone;
     }
 

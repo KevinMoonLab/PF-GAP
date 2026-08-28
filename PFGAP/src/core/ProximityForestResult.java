@@ -140,6 +140,29 @@ public class ProximityForestResult implements Serializable {
 		
 		results_collated = true;
 	}
+
+	private void updateDerivedMetrics() {
+
+		/*
+		 * For classification, score should be accuracy and error_rate should be
+		 * the fraction of incorrect predictions.
+		 *
+		 * We compute these from correct/errors because those are the quantities
+		 * actually populated during testing.
+		 */
+		if (AppContext.isClassificationMode()) {
+
+			int total = correct + errors;
+
+			if (total > 0) {
+				score = (double) correct / total;
+				error_rate = (double) errors / total;
+			} else {
+				score = Double.NaN;
+				error_rate = Double.NaN;
+			}
+		}
+	}
 	
 	public void printResults(String datasetName, int experiment_id, String prefix) {
 		
@@ -147,6 +170,8 @@ public class ProximityForestResult implements Serializable {
 //				+ experiment_id + " (" +datasetName+ "), Forest No: " 
 //				+ (this.forest_id) +"  -----------------");
 		
+		updateDerivedMetrics();
+
 		if (AppContext.verbosity > 0) {
 			String time_duration = DurationFormatUtils.formatDuration((long) (elapsedTimeTrain/1e6), "H:m:s.SSS");
 	        System.out.format("%sTraining Time: %fms (%s)\n",prefix, elapsedTimeTrain/1e6, time_duration);

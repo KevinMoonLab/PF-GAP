@@ -2,9 +2,15 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
+import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationMethod;
+import preprocessing.standardization.StandardizationScope;
+import preprocessing.standardization.VarianceConvention;
+import proximities.ProximityType;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -110,6 +116,85 @@ public class PFApplication {
 				|| measure == MEASURE.dtwarow_d;
 	}
 
+	private static ReaderType parseReaderType(String raw) {
+
+		if (raw == null || raw.trim().isEmpty()) {
+			return null;
+		}
+
+		try {
+			return ReaderType.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException(
+					"Invalid reader_type: "
+							+ raw
+							+ ". Valid options are: "
+							+ Arrays.toString(ReaderType.values())
+			);
+		}
+	}
+
+	private static List<String> parseStringList(String raw) {
+
+		List<String> values = new ArrayList<>();
+
+		if (raw == null) {
+			return values;
+		}
+
+		String trimmed = raw.trim();
+
+		if (trimmed.isEmpty()
+				|| trimmed.equalsIgnoreCase("None")
+				|| trimmed.equals("[]")) {
+			return values;
+		}
+
+		/*
+		 * Accept both:
+		 *
+		 *    temp,pressure,humidity
+		 *
+		 * and:
+		 *
+		 *    [temp,pressure,humidity]
+		 */
+		if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+			trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+		}
+
+		if (trimmed.isEmpty()) {
+			return values;
+		}
+
+		String[] parts = trimmed.split(",");
+
+		for (String part : parts) {
+			String value = part.trim();
+
+			if (!value.isEmpty()) {
+				values.add(value);
+			}
+		}
+
+		return values;
+	}
+
+	private static String parseNullableString(String raw) {
+
+		if (raw == null) {
+			return null;
+		}
+
+		String trimmed = raw.trim();
+
+		if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")) {
+			return null;
+		}
+
+		return trimmed;
+	}
+
 	public static void main(String[] args) throws IOException {
 		//Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir testdir0"});
 		try {
@@ -118,11 +203,46 @@ public class PFApplication {
 			//Integer testint = Integer.parseInt("2 3 3.444"[0]);
 			//some default settings are specified in the AppContext class but here we
 			//override the default settings using the provided command line arguments
+
+			// set some before the switch case:
 			String imputerType = null;
+			StandardizationMethod standardizationMethod =
+					StandardizationMethod.NONE;
+
+			StandardizationScope standardizationScope =
+					StandardizationScope.PER_DIMENSION;
+
+			VarianceConvention standardizationVariance =
+					VarianceConvention.POPULATION;
+
+			String standardizationStatsPath =
+					null;
+
+			boolean saveStandardizationStats =
+					false;
+
+			String standardizationStatsOutput =
+					null;
+
 			for (int i = 0; i < args.length; i++) {
-				String[] options = args[i].trim().split("=");
+				//String[] options = args[i].trim().split("=");
+				String[] options = args[i].trim().split("=", 2);
+
+				if (options.length != 2) {
+					throw new IllegalArgumentException(
+							"Invalid command-line argument: "
+									+ args[i]
+									+ ". Expected -name=value."
+					);
+				}
 				
 				switch(options[0]) {
+				case "-seed":
+					AppContext.setRandomSeed(Long.parseLong(options[1]));
+					break;
+				case "-bootstrap_trees":
+					AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
+					break;
 				case "-eval":
 					AppContext.eval = Boolean.parseBoolean(options[1]);
 					break;
@@ -158,8 +278,121 @@ public class PFApplication {
 						AppContext.exists_testlabels = Boolean.parseBoolean(options[1]);
 						break;
 					}
+				case "-reader_type":
+					AppContext.readerType = parseReaderType(options[1]);
+					break;
+				case "-file_pattern":
+					AppContext.file_pattern = parseNullableString(options[1]);
+					break;
+				case "-train_reader_type":
+					AppContext.trainingReaderType =
+							parseReaderType(options[1]);
+					break;
+
+				case "-test_reader_type":
+					AppContext.testingReaderType =
+							parseReaderType(options[1]);
+					break;
+
+				case "-train_file_pattern":
+					AppContext.trainingFilePattern =
+							parseNullableString(options[1]);
+					break;
+
+				case "-test_file_pattern":
+					AppContext.testingFilePattern =
+							parseNullableString(options[1]);
+					break;
+				case "-id_column":
+					AppContext.id_column = parseNullableString(options[1]);
+					break;
+
+				case "-time_column":
+					AppContext.time_column = parseNullableString(options[1]);
+					break;
+
+				case "-feature_columns":
+					AppContext.feature_columns = parseStringList(options[1]);
+					break;
+
+				case "-label_columns":
+					AppContext.label_columns = parseStringList(options[1]);
+					break;
+				case "-hdf5_dataset_path":
+					AppContext.hdf5_dataset_path = parseNullableString(options[1]);
+					break;
+				case "-hdf5_label_dataset_path":
+					AppContext.hdf5_label_dataset_path = parseNullableString(options[1]);
+					break;
+				case "-standardization":
+					standardizationMethod =
+							StandardizationMethod.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_scope":
+					standardizationScope =
+							StandardizationScope.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_variance":
+					standardizationVariance =
+							VarianceConvention.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_stats":
+					standardizationStatsPath =
+							parseNullableString(
+									options[1]
+							);
+					break;
+
+				case "-save_standardization_stats":
+					saveStandardizationStats =
+							Boolean.parseBoolean(
+									options[1]
+							);
+					break;
+
+					case "-standardization_stats_output":
+						standardizationStatsOutput =
+								parseNullableString(
+										options[1]
+								);
+						break;
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);
+					break;
+				case "-forest_mode":
+					AppContext.forest_mode = options[1].trim().toLowerCase();
+
+					if (AppContext.forest_mode.equals("regression")) {
+						AppContext.isRegression = true;
+					} else if (AppContext.forest_mode.equals("classification")
+							|| AppContext.forest_mode.equals("isolation")) {
+						AppContext.isRegression = false;
+					} else {
+						throw new IllegalArgumentException(
+								"Invalid forest_mode: " + options[1]
+						);
+					}
+
+					break;
+				case "-isolation_num_branches":
+					AppContext.isolation_num_branches = Integer.parseInt(options[1]);
+					break;
+
+				case "-regression_num_branches":
+					AppContext.regression_num_branches = Integer.parseInt(options[1]);
+					break;
+
+				case "-isolation_min_leaf_size":
+					AppContext.isolation_min_leaf_size = Integer.parseInt(options[1]);
 					break;
 				case "-purity_measure":
 					AppContext.purity_measure = options[1];
@@ -268,6 +501,12 @@ public class PFApplication {
 				case "-parallelPredict":
 					AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
 					break;
+				case "-parallelSplit":
+					AppContext.parallel_split_assignments = Boolean.parseBoolean(options[1]);
+					break;
+				case "-parallelSplitThreshold":
+					AppContext.parallel_split_assignment_threshold = Integer.parseInt(options[1]);
+					break;
 				case "-knn_distances":
 					//String[] distanceNames = options[1].split(",");
 					/*MEASURE[] measures = Arrays.stream(distanceNames)
@@ -364,7 +603,21 @@ public class PFApplication {
 
 					AppContext.imputation_initialization_strategy = initStrategy;
 					break;
-
+				case "-proximity_type":
+					try {
+						AppContext.proximityType =
+								ProximityType.valueOf(
+										options[1].trim().toUpperCase(Locale.ROOT)
+								);
+					} catch (IllegalArgumentException e) {
+						throw new Exception(
+								"Invalid proximity_type: "
+										+ options[1]
+										+ ". Valid options are: "
+										+ Arrays.toString(ProximityType.values())
+						);
+					}
+					break;
 				case "-gap_update":
 					String gapUpdate = options[1].trim().toLowerCase();
 
@@ -503,34 +756,60 @@ public class PFApplication {
 				}
 			}
 
-			switch (imputerType) {
-				case "knn":
-					if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0)
-						throw new IllegalArgumentException("Missing -knn_distances for KNN imputer.");
-					AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
-					break;
-				case "mean":
-					AppContext.initial_imputer = new MeanImpute();
-					break;
-				case "global_mean":
-					AppContext.initial_imputer = new GlobalMeanImpute();
-					break;
-				case "linear":
-					AppContext.initial_imputer = new LinearImpute();
-					break;
-				case "median":
-					AppContext.initial_imputer = new MedianImpute();
-					break;
-				case "global_median":
-					AppContext.initial_imputer = new GlobalMedianImpute();
-					break;
-				case "mode":
-					AppContext.initial_imputer = new ModeImpute();
-					break;
-				case "global_mode":
-					AppContext.initial_imputer = new GlobalModeImpute();
-					break;
+			if (imputerType !=null) {
+				switch (imputerType) {
+					case "knn":
+						if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0)
+							throw new IllegalArgumentException("Missing -knn_distances for KNN imputer.");
+						AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
+						break;
+					case "mean":
+						AppContext.initial_imputer = new MeanImpute();
+						break;
+					case "global_mean":
+						AppContext.initial_imputer = new GlobalMeanImpute();
+						break;
+					case "linear":
+						AppContext.initial_imputer = new LinearImpute();
+						break;
+					case "median":
+						AppContext.initial_imputer = new MedianImpute();
+						break;
+					case "global_median":
+						AppContext.initial_imputer = new GlobalMedianImpute();
+						break;
+					case "mode":
+						AppContext.initial_imputer = new ModeImpute();
+						break;
+					case "global_mode":
+						AppContext.initial_imputer = new GlobalModeImpute();
+						break;
+				}
 			}
+
+			AppContext.standardizationConfig =
+					StandardizationConfig.builder()
+							.setMethod(
+									standardizationMethod
+							)
+							.setScope(
+									standardizationScope
+							)
+							.setVarianceConvention(
+									standardizationVariance
+							)
+							.setStatisticsPath(
+									standardizationStatsPath
+							)
+							.setSaveFittedStatistics(
+									saveStandardizationStats
+							)
+							.setStatisticsOutputPath(
+									standardizationStatsOutput
+							)
+							.build();
+
+			AppContext.standardizationConfig.requireImplemented();
 
 			if (AppContext.warmup_java) {
 				GeneralUtilities.warmUpJavaRuntime();

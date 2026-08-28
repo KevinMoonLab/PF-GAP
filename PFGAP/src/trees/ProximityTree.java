@@ -1,565 +1,1454 @@
 package trees;
 
-import java.io.Serializable;
-import java.lang.reflect.Array;
-import java.util.*;
-
 import core.AppContext;
 import core.TreeStatCollector;
-//import core.contracts.Dataset;
 import core.contracts.ObjectDataset;
-//import datasets.ListDataset;
 import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
 import distance.MEASURE;
-import org.apache.commons.lang3.ArrayUtils;
 
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
-import java.util.stream.IntStream;
+import java.util.Set;
 
 /**
- * 
- * @author shifaz
- * @email ahmed.shifaz@monash.edu
+ * One tree in a proximity forest.
  *
+ * <p>Each tree owns an independent deterministic random-number generator.
+ * The original training dataset is treated as read-only. Bootstrap and
+ * out-of-bag subsets preserve the original stored series representations,
+ * including LazySeriesRef values.</p>
  */
+public class ProximityTree
+		implements Serializable {
 
-//public class Proximity Tree {
-public class ProximityTree implements Serializable {
-	protected int forest_id;	
+	@Serial
+	private static final long serialVersionUID =
+			1L;
+
+	protected int forest_id;
+
 	private int tree_id;
-	protected Node root;
-	protected int node_counter = 0;
-	
-	protected transient Random rand;
-	public TreeStatCollector stats;
-	protected ArrayList<Node> leaves;
-	private MEASURE[] chosen_distances;
-	private String[] distance_file;
-	
-	protected DistanceMeasure tree_distance_measure; //only used if AppContext.random_dm_per_node == false
 
-	public ProximityTree(int tree_id, ProximityForest forest, MEASURE... chosen_distances) {
-		this.forest_id = forest.forest_id;
-		this.tree_id = tree_id;
-		this.rand = AppContext.getRand();
-		stats = new TreeStatCollector(forest_id, tree_id);
-		this.leaves = new ArrayList<Node>();
-		//this.distance_file = distance_file;
-		//if (distance_file[0].contains(".mpl")){
-			//System.out.println("Ah, so you're a Maple user, eh?");
-		//	this.chosen_distances = new MEASURE[]{MEASURE.maple};
-		//}
-		//if (distance_file[0].contains(".py")){
-			//System.out.println("Ah, so you're a Python user, eh?");
-		//	this.chosen_distances = new MEASURE[]{MEASURE.python};
-		//}
-		this.chosen_distances = chosen_distances;
-		if (chosen_distances.length > 0){
-			if (Arrays.toString(chosen_distances).contains("maple")){
-				this.distance_file = new String[]{"MapleDistance.mpl"};
-			}
-			if (Arrays.toString(chosen_distances).contains("python")){
-				this.distance_file = new String[]{"PythonDistance.py"};
-			}
-		} else {
-			this.distance_file = new String[]{""};
+	protected Node root;
+
+	protected int node_counter =
+			0;
+
+	/**
+	 * Reconstructed from treeSeed when training begins.
+	 */
+	protected transient Random rand;
+
+	/**
+	 * Stable seed assigned when the tree is constructed.
+	 *
+	 * <p>This avoids sharing one mutable Random among concurrently trained
+	 * trees.</p>
+	 */
+	private final long treeSeed;
+
+	public TreeStatCollector stats;
+
+	protected ArrayList<Node> leaves;
+
+	private final MEASURE[] chosen_distances;
+
+	private String[] distance_file;
+
+	/**
+	 * Used when random_dm_per_node is false.
+	 */
+	protected DistanceMeasure tree_distance_measure;
+
+	public ProximityTree(
+			int treeId,
+			ProximityForest forest,
+			MEASURE... chosenDistances
+	) {
+		if (forest == null) {
+			throw new IllegalArgumentException(
+					"ProximityTree requires a non-null forest."
+			);
 		}
 
+		this.forest_id =
+				forest.forest_id;
+
+		this.tree_id =
+				treeId;
+
+		/*
+		 * Trees are constructed sequentially by ProximityForest, so each tree
+		 * receives one deterministic seed before parallel training begins.
+		 */
+		this.treeSeed =
+				AppContext.getRand()
+						.nextLong();
+
+		this.rand =
+				new Random(
+						treeSeed
+				);
+
+		this.stats =
+				new TreeStatCollector(
+						forest_id,
+						tree_id
+				);
+
+		this.leaves =
+				new ArrayList<>();
+
+		this.chosen_distances =
+				chosenDistances == null
+						? new MEASURE[0]
+						: chosenDistances.clone();
+
+		initializeDistanceFile();
+	}
+
+	private void initializeDistanceFile() {
+		distance_file =
+				new String[]{""};
+
+		for (MEASURE measure : chosen_distances) {
+			if (measure == MEASURE.maple) {
+				distance_file =
+						new String[]{
+								"MapleDistance.mpl"
+						};
+			} else if (measure == MEASURE.python) {
+				distance_file =
+						new String[]{
+								"PythonDistance.py"
+						};
+			}
+		}
 	}
 
 	public Node getRootNode() {
-		return this.root;
+		return root;
 	}
 
-	public MEASURE[] getChosen_distances(){
-		return this.chosen_distances;
+	public MEASURE[] getChosen_distances() {
+		return chosen_distances.clone();
 	}
 
-	public String[] getDistance_file(){
-		return this.distance_file;
+	public String[] getDistance_file() {
+		return distance_file == null
+				? new String[]{""}
+				: distance_file.clone();
 	}
 
-	public ArrayList<Node> getLeaves() {return this.leaves;}
-	
-	//public void train(Dataset data) throws Exception {
-	public void train(ListObjectDataset data) throws Exception {
-		//System.out.println("Training a tree");
-		if (this.chosen_distances.length == 0){
-			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
-				int r = AppContext.getRand().nextInt(AppContext.enabled_distance_measures.length);
-				tree_distance_measure = new DistanceMeasure(AppContext.enabled_distance_measures[r], AppContext.Descriptors.get(r));
-				//params selected per node in the splitter class
-			}
-		}
-		else {
-			if (AppContext.random_dm_per_node ==  false) {	//DM is selected once per tree
-				int r = AppContext.getRand().nextInt(this.chosen_distances.length);
-				tree_distance_measure = new DistanceMeasure(this.chosen_distances[r], AppContext.Descriptors.get(r));
-				//params selected per node in the splitter class
-			}
-		}
-		
-		this.root = new Node(null, null, ++node_counter, this);
-		//Try putting the in- and out-of-bag stuff here.
-		ObjectDataset inbagData = new ListObjectDataset(); //ListDataset();
-		ObjectDataset oobData = new ListObjectDataset(); //ListDataset();
-
-		//First we get the in-bag indices.
-		int dummySize = data.size();
-		int[]  randomIntsArray = IntStream.generate(() -> new Random().nextInt(dummySize)).limit(data.size()).toArray();
-		//InBagIndices = new ArrayList<Integer>();
-		for(int i=0; i<randomIntsArray.length; i++){
-			this.getRootNode().InBagIndices.add(randomIntsArray[i]);
-		}
-		//int[] num = IntStream.range(0, data.size()).toArray();
-		int[] distinctInBag = Arrays.stream(randomIntsArray).distinct().toArray();
-		//setInBagIndices(distinctInBag);
-		//setInBagIndices(randomIntsArray);
-
-		this.getRootNode().multiplicities = new HashMap<Integer,Integer>();
-		//now we compute the multiplicities (number of times the indices occur in the in-bag sample)
-		for (int i=0; i<this.getRootNode().InBagIndices.size(); i++){
-			if (this.getRootNode().multiplicities.containsKey((this.getRootNode().InBagIndices.get(i)))){
-				this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),this.getRootNode().multiplicities.get(this.getRootNode().InBagIndices.get(i))+1);
-			}
-			else{
-				this.getRootNode().multiplicities.put(this.getRootNode().InBagIndices.get(i),1);
-			}
-		}
-
-		//now we need to get the out-of-bag indices.
-		ArrayList<Integer> result = new ArrayList<Integer>(); //out-of-bag
-		//ArrayList<Integer> resultA = (ArrayList<Integer>) InBagIndices; //new ArrayList<Integer>(); //for converting inbag
-		for (int i = 0; i < randomIntsArray.length; i++){
-			Boolean isInBag = ArrayUtils.contains(distinctInBag, i);
-			if (!isInBag){result.add(i);}
-			//else{resultA.add(i);}
-		}
-		int[] result2 = result.stream().mapToInt(i -> i).toArray();
-		//OutOfBagIndices = new ArrayList<Integer>();
-		for(int i=0; i<result2.length; i++){
-			this.getRootNode().OutOfBagIndices.add(result2[i]);
-		}
-		//setOutOfBagIndices(result2);
-		data.set_indices(this.getRootNode().InBagIndices);
-
-		// Now we need to get the sub sample corresponding to the in-bag indices.
-		ObjectDataset data2 = new ListObjectDataset(); //ListDataset(); //data;
-		for (int index : this.getRootNode().InBagIndices){
-			//System.out.println(Arrays.toString(data.get_series(index)));
-			//System.out.println(data.get_index(index));
-			data2.add(data.get_class(index), data.get_series(index), index);
-
-		}
-		//data = data2; //we're only training on in-bag samples.
-		inbagData = data2;
-		// Now we need to get the sub sample corresponding to the out-of-bag indices.
-		ObjectDataset data3 = new ListObjectDataset(); //new ListDataset();
-		for (int index : this.getRootNode().OutOfBagIndices){
-			//System.out.println(Arrays.toString(data.get_series(index)));
-			//System.out.println(data.get_index(index));
-			data3.add(data.get_class(index), data.get_series(index), index);
-
-		}
-		oobData = data3;
-		//System.out.println(Arrays.toString(data.get_series(0)));
-		//System.out.println(data.get_index(0));
-
-
-		//Integer[] result = s1.toArray(new Integer[s1.size()]);
-
-
-
-		this.root.train(inbagData, oobData);
+	public ArrayList<Node> getLeaves() {
+		return leaves;
 	}
-	
-	//public Integer predict(double[] query) throws Exception {
-	public Object predict(Object query, int index) throws Exception {
-		Node node = this.root;
 
-		while(!node.is_leaf()) {
-			node = node.children[node.splitter.find_closest_branch(query)];
+	/**
+	 * Trains this tree.
+	 *
+	 * <p>The supplied dataset is treated as read-only. In particular, this
+	 * method does not replace the source dataset's internal index list.</p>
+	 */
+	public void train(
+			ListObjectDataset data
+	) throws Exception {
+
+		if (data == null || data.size() == 0) {
+			throw new IllegalArgumentException(
+					"Cannot train ProximityTree on empty data."
+			);
 		}
-		node.TestIndices.add(index);
-		return node.label();
-	}	
 
-	
+		resetTrainingState();
+
+		initializeTreeDistanceMeasure();
+
+		root =
+				new Node(
+						null,
+						null,
+						++node_counter,
+						this
+				);
+
+		BootstrapSample bootstrapSample =
+				createBootstrapSample(
+						data.size()
+				);
+
+		populateRootBootstrapMetadata(
+				bootstrapSample
+		);
+
+		ListObjectDataset inBagData =
+				createDatasetFromPositions(
+						data,
+						bootstrapSample.sampledPositions
+				);
+
+		ListObjectDataset outOfBagData =
+				createDatasetFromPositions(
+						data,
+						bootstrapSample.outOfBagPositions
+				);
+
+		root.train(
+				inBagData,
+				outOfBagData
+		);
+	}
+
+	private void resetTrainingState() {
+		rand =
+				new Random(
+						treeSeed
+				);
+
+		node_counter =
+				0;
+
+		root =
+				null;
+
+		tree_distance_measure =
+				null;
+
+		leaves =
+				new ArrayList<>();
+	}
+
+	/**
+	 * Selects the distance used by this tree when distance selection occurs
+	 * once per tree.
+	 *
+	 * <p>Distance parameters are still selected per node by Splitter.</p>
+	 */
+	private void initializeTreeDistanceMeasure()
+			throws Exception {
+
+		if (AppContext.random_dm_per_node) {
+			return;
+		}
+
+		if (chosen_distances.length == 0) {
+			if (AppContext.enabled_distance_measures == null
+					|| AppContext.enabled_distance_measures.length == 0) {
+
+				throw new IllegalStateException(
+						"No enabled distance measures are available."
+				);
+			}
+
+			int selectedIndex =
+					rand.nextInt(
+							AppContext
+									.enabled_distance_measures
+									.length
+					);
+
+			tree_distance_measure =
+					new DistanceMeasure(
+							AppContext.enabled_distance_measures[
+									selectedIndex
+									],
+							descriptorAt(
+									selectedIndex
+							)
+					);
+
+			return;
+		}
+
+		int selectedIndex =
+				rand.nextInt(
+						chosen_distances.length
+				);
+
+		tree_distance_measure =
+				new DistanceMeasure(
+						chosen_distances[selectedIndex],
+						descriptorAt(
+								selectedIndex
+						)
+				);
+	}
+
+	private String[] descriptorAt(
+			int index
+	) {
+		if (AppContext.Descriptors == null
+				|| index < 0
+				|| index >= AppContext.Descriptors.size()) {
+
+			return new String[0];
+		}
+
+		String[] descriptors =
+				AppContext.Descriptors.get(
+						index
+				);
+
+		return descriptors == null
+				? new String[0]
+				: descriptors.clone();
+	}
+
+	/**
+	 * Creates the bootstrap draw, multiplicities, and OOB positions in linear
+	 * time.
+	 */
+	private BootstrapSample createBootstrapSample(
+			int size
+	) {
+		int[] sampledPositions =
+				new int[size];
+
+		int[] multiplicities =
+				new int[size];
+
+		if (AppContext.bootstrap_trees) {
+			for (int draw = 0;
+				 draw < size;
+				 draw++) {
+
+				int position =
+						rand.nextInt(
+								size
+						);
+
+				sampledPositions[draw] =
+						position;
+
+				multiplicities[position]++;
+			}
+		} else {
+			for (int position = 0;
+				 position < size;
+				 position++) {
+
+				sampledPositions[position] =
+						position;
+
+				multiplicities[position] =
+						1;
+			}
+		}
+
+		int outOfBagCount =
+				0;
+
+		for (int position = 0;
+			 position < size;
+			 position++) {
+
+			if (multiplicities[position] == 0) {
+				outOfBagCount++;
+			}
+		}
+
+		int[] outOfBagPositions =
+				new int[outOfBagCount];
+
+		int outputIndex =
+				0;
+
+		for (int position = 0;
+			 position < size;
+			 position++) {
+
+			if (multiplicities[position] == 0) {
+				outOfBagPositions[outputIndex++] =
+						position;
+			}
+		}
+
+		return new BootstrapSample(
+				sampledPositions,
+				multiplicities,
+				outOfBagPositions
+		);
+	}
+
+	/**
+	 * Preserves the current root-node metadata representation for
+	 * compatibility with existing proximity and OOB code.
+	 */
+	private void populateRootBootstrapMetadata(
+			BootstrapSample bootstrapSample
+	) {
+		root.InBagIndices.ensureCapacity(
+				bootstrapSample.sampledPositions.length
+		);
+
+		for (int position
+				: bootstrapSample.sampledPositions) {
+
+			root.InBagIndices.add(
+					position
+			);
+		}
+
+		root.OutOfBagIndices.ensureCapacity(
+				bootstrapSample.outOfBagPositions.length
+		);
+
+		for (int position
+				: bootstrapSample.outOfBagPositions) {
+
+			root.OutOfBagIndices.add(
+					position
+			);
+		}
+
+		root.multiplicities =
+				new HashMap<>();
+
+		for (int position = 0;
+			 position < bootstrapSample.multiplicities.length;
+			 position++) {
+
+			int count =
+					bootstrapSample.multiplicities[position];
+
+			if (count > 0) {
+				root.multiplicities.put(
+						position,
+						count
+				);
+			}
+		}
+	}
+
+	/**
+	 * Builds a dataset subset from source-list positions.
+	 *
+	 * <p>The source series object is copied by reference. LazySeriesRef
+	 * instances therefore remain lazy. The subset's internal index is the
+	 * original dataset index, not merely the source-list position.</p>
+	 */
+	private ListObjectDataset createDatasetFromPositions(
+			ObjectDataset source,
+			int[] positions
+	) {
+		ListObjectDataset subset =
+				new ListObjectDataset(
+						positions.length
+				);
+
+		subset.setLength(
+				source.getLength()
+		);
+
+		for (int position : positions) {
+			subset.add(
+					source.get_class(
+							position
+					),
+					source.get_series(
+							position
+					),
+					source.get_index(
+							position
+					)
+			);
+		}
+
+		return subset;
+	}
+
+	/**
+	 * Legacy helper retained for compatibility with callers that may still
+	 * use it indirectly.
+	 */
+	private int[] sampleTrainingIndices(
+			int size
+	) {
+		return createBootstrapSample(
+				size
+		).sampledPositions;
+	}
+
+	/**
+	 * Predicts one query using its stored or eager representation.
+	 *
+	 * <p>This compatibility path may resolve a lazy query at each traversed
+	 * node. Evaluation will later be refactored to resolve the query once and
+	 * call predictResolved().</p>
+	 */
+	public Object predict(
+			Object query,
+			int index
+	) throws Exception {
+
+		Node leaf =
+				findLeaf(
+						query
+				);
+
+		leaf.TestIndices.add(
+				index
+		);
+
+		return leaf.label();
+	}
+
+	/**
+	 * Finds the leaf reached by a stored or eager query.
+	 */
+	public Node findLeaf(
+			Object query
+	) throws Exception {
+
+		if (root == null) {
+			throw new IllegalStateException(
+					"Cannot predict with an untrained tree."
+			);
+		}
+
+		Node current =
+				root;
+
+		while (!current.is_leaf()) {
+			int branch =
+					current.splitter
+							.find_closest_branch(
+									query
+							);
+
+			current =
+					current.children[branch];
+		}
+
+		return current;
+	}
+
+	/**
+	 * Traverses the tree using an already materialized query.
+	 *
+	 * <p>Node exemplars are resolved temporarily by Splitter. The query is
+	 * not reread at every node.</p>
+	 */
+	public Object predictResolved(
+			Object resolvedQuery,
+			int index,
+			Random predictionRandom
+	) throws Exception {
+
+		Node leaf =
+				findLeafResolved(
+						resolvedQuery,
+						predictionRandom
+				);
+
+		leaf.TestIndices.add(
+				index
+		);
+
+		return leaf.label();
+	}
+
+	/**
+	 * Pure traversal helper for an already materialized query.
+	 *
+	 * <p>This method does not itself update TestIndices. The overload above
+	 * retains existing behavior, while a later forest refactor can use this
+	 * method and record test membership outside the traversal hot path.</p>
+	 */
+	public Node findLeafResolved(
+			Object resolvedQuery,
+			Random predictionRandom
+	) throws Exception {
+
+		if (root == null) {
+			throw new IllegalStateException(
+					"Cannot predict with an untrained tree."
+			);
+		}
+
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException(
+					"Resolved prediction query cannot be null."
+			);
+		}
+
+		if (predictionRandom == null) {
+			throw new IllegalArgumentException(
+					"Prediction Random cannot be null."
+			);
+		}
+
+		Node current =
+				root;
+
+		while (!current.is_leaf()) {
+			int branch =
+					current.splitter
+							.findClosestBranchResolved(
+									resolvedQuery,
+									predictionRandom
+							);
+
+			current =
+					current.children[branch];
+		}
+
+		return current;
+	}
+
 	public int getTreeID() {
 		return tree_id;
 	}
 
-	
-	//************************************** START stats -- development/debug code
-	public TreeStatCollector getTreeStatCollection() {
-		
-		stats.collateResults(this);
-		
-		return stats;
-	}	
-	
-	public int get_num_nodes() {
-		if (node_counter != get_num_nodes(root)) {
-			System.out.println("Error: error in node counter!");
-			return -1;
-		}else {
-			return node_counter;
-		}
-	}	
+	long deriveSeed(
+			int nodeId,
+			int purpose
+	) {
+		long seed =
+				treeSeed;
 
-	public int get_num_nodes(Node n) {
-		int count = 0 ;
-		
-		if (n.children == null) {
-			return 1;
-		}
-		
-		for (int i = 0; i < n.children.length; i++) {
-			count+= get_num_nodes(n.children[i]);
-		}
-		
-		return count+1;
+		seed =
+				mixSeed(
+						seed,
+						nodeId
+				);
+
+		return mixSeed(
+				seed,
+				purpose
+		);
 	}
-	
-	public int get_num_leaves() {
-		return get_num_leaves(root);
-	}	
-	
-	public int get_num_leaves(Node n) {
-		int count = 0 ;
-		
-		if (n.children == null) {
+
+	public TreeStatCollector getTreeStatCollection() {
+		stats.collateResults(
+				this
+		);
+
+		return stats;
+	}
+
+	public int get_num_nodes() {
+		int actualCount =
+				get_num_nodes(
+						root
+				);
+
+		if (node_counter != actualCount) {
+			System.out.println(
+					"Error: node counter is "
+							+ node_counter
+							+ " but recursive count is "
+							+ actualCount
+							+ "."
+			);
+
+			return -1;
+		}
+
+		return node_counter;
+	}
+
+	public int get_num_nodes(
+			Node node
+	) {
+		if (node == null) {
+			return 0;
+		}
+
+		if (node.children == null) {
 			return 1;
 		}
-		
-		for (int i = 0; i < n.children.length; i++) {
-			count+= get_num_leaves(n.children[i]);
+
+		int count =
+				1;
+
+		for (Node child : node.children) {
+			count +=
+					get_num_nodes(
+							child
+					);
 		}
-		
+
 		return count;
 	}
-	
+
+	public int get_num_leaves() {
+		return get_num_leaves(
+				root
+		);
+	}
+
+	public int get_num_leaves(
+			Node node
+	) {
+		if (node == null) {
+			return 0;
+		}
+
+		if (node.children == null) {
+			return 1;
+		}
+
+		int count =
+				0;
+
+		for (Node child : node.children) {
+			count +=
+					get_num_leaves(
+							child
+					);
+		}
+
+		return count;
+	}
+
 	public int get_num_internal_nodes() {
-		return get_num_internal_nodes(root);
+		return get_num_internal_nodes(
+				root
+		);
 	}
-	
-	public int get_num_internal_nodes(Node n) {
-		int count = 0 ;
-		
-		if (n.children == null) {
+
+	public int get_num_internal_nodes(
+			Node node
+	) {
+		if (node == null
+				|| node.children == null) {
+
 			return 0;
 		}
-		
-		for (int i = 0; i < n.children.length; i++) {
-			count+= get_num_internal_nodes(n.children[i]);
+
+		int count =
+				1;
+
+		for (Node child : node.children) {
+			count +=
+					get_num_internal_nodes(
+							child
+					);
 		}
-		
-		return count+1;
+
+		return count;
 	}
-	
+
 	public int get_height() {
-		return get_height(root);
+		return get_height(
+				root
+		);
 	}
-	
-	public int get_height(Node n) {
-		int max_depth = 0;
-		
-		if (n.children == null) {
+
+	public int get_height(
+			Node node
+	) {
+		if (node == null
+				|| node.children == null) {
+
 			return 0;
 		}
 
-		for (int i = 0; i < n.children.length; i++) {
-			max_depth = Math.max(max_depth, get_height(n.children[i]));
+		int maximumDepth =
+				0;
+
+		for (Node child : node.children) {
+			maximumDepth =
+					Math.max(
+							maximumDepth,
+							get_height(
+									child
+							)
+					);
 		}
-		
-		return max_depth+1;
+
+		return maximumDepth + 1;
 	}
-	
-	public int get_min_depth(Node n) {
-		int max_depth = 0;
-		
-		if (n.children == null) {
+
+	public int get_min_depth(
+			Node node
+	) {
+		if (node == null
+				|| node.children == null) {
+
 			return 0;
 		}
 
-		for (int i = 0; i < n.children.length; i++) {
-			max_depth = Math.min(max_depth, get_height(n.children[i]));
+		int minimumDepth =
+				Integer.MAX_VALUE;
+
+		for (Node child : node.children) {
+			minimumDepth =
+					Math.min(
+							minimumDepth,
+							get_min_depth(
+									child
+							)
+					);
 		}
-		
-		return max_depth+1;
+
+		return minimumDepth + 1;
 	}
-	
-//	public double get_weighted_depth() {
-//		return printTreeComplexity(root, 0, root.data.size());
-//	}
-//	
-//	// high deep and unbalanced
-//	// low is shallow and balanced?
-//	public double printTreeComplexity(Node n, int depth, int root_size) {
-//		double ratio = 0;
-//		
-//		if (n.is_leaf) {
-//			double r = (double)n.data.size()/root_size * (double)depth;
-////			System.out.format("%d: %d/%d*%d/%d + %f + ", n.label, 
-////					n.data.size(),root_size, depth, max_depth, r);
-//			
-//			return r;
-//		}
-//		
-//		for (int i = 0; i < n.children.length; i++) {
-//			ratio += printTreeComplexity(n.children[i], depth+1, root_size);
-//		}
-//		
-//		return ratio;
-//	}		
-	
-	
-	//**************************** END stats -- development/debug code
-	
-	
-	
-	
-	
-	
-	
-	//public class Node{
-	public class Node implements Serializable {
-	
-		protected ArrayList<Integer> InBagIndices; //int[] InBagIndices;
-		protected ArrayList<Integer> OutOfBagIndices; //ArrayList<Integer> OutOfBagIndices;
+
+	/**
+	 * Immutable bootstrap construction result.
+	 */
+	private static final class BootstrapSample {
+
+		private final int[] sampledPositions;
+		private final int[] multiplicities;
+		private final int[] outOfBagPositions;
+
+		private BootstrapSample(
+				int[] sampledPositions,
+				int[] multiplicities,
+				int[] outOfBagPositions
+		) {
+			this.sampledPositions =
+					sampledPositions;
+
+			this.multiplicities =
+					multiplicities;
+
+			this.outOfBagPositions =
+					outOfBagPositions;
+		}
+	}
+
+	/**
+	 * Tree node.
+	 */
+	public class Node
+			implements Serializable {
+
+		@Serial
+		private static final long serialVersionUID =
+				1L;
+
+		protected ArrayList<Integer> InBagIndices;
+
+		protected ArrayList<Integer> OutOfBagIndices;
+
 		public ArrayList<Integer> TestIndices;
+
 		protected Map<Integer, Integer> multiplicities;
-		//protected transient Node parent;	//dont need this, but it helps to debug
-		//protected transient ProximityTree tree;
-		protected Node parent;	//dont need this, but it helps to debug
+
+		protected Node parent;
+
 		protected ProximityTree tree;
-		
+
 		protected int node_id;
-		protected int node_depth = 0;
 
-		protected boolean is_leaf = false;
-		//protected Integer label;
-		protected Object label; // for classification...
+		protected int node_depth =
+				0;
 
-//		protected transient Dataset data;				
+		protected boolean is_leaf =
+				false;
+
+		protected Object label;
+
 		protected Node[] children;
+
 		protected Splitter splitter;
-		//System.out.print()
-		
-		public Node(Node parent, Integer label, int node_id, ProximityTree tree) {
-			this.parent = parent;
-//			this.data = new ListDataset();
-			this.node_id = node_id;
-			this.tree = tree;
-			this.InBagIndices = new ArrayList<>();
-			this.OutOfBagIndices = new ArrayList<>();
-			this.TestIndices = new ArrayList<>();
-			this.multiplicities = null;
-			
+
+		public Node(
+				Node parent,
+				Integer branchLabel,
+				int nodeId,
+				ProximityTree tree
+		) {
+			this.parent =
+					parent;
+
+			this.node_id =
+					nodeId;
+
+			this.tree =
+					tree;
+
+			this.InBagIndices =
+					new ArrayList<>();
+
+			this.OutOfBagIndices =
+					new ArrayList<>();
+
+			this.TestIndices =
+					new ArrayList<>();
+
+			this.multiplicities =
+					null;
+
 			if (parent != null) {
-				node_depth = parent.node_depth + 1;
+				node_depth =
+						parent.node_depth + 1;
 			}
 		}
-		
+
 		public boolean is_leaf() {
-			return this.is_leaf;
+			return is_leaf;
 		}
-		
+
 		public Object label() {
-			return this.label;
-		}	
-		
+			return label;
+		}
+
 		public Node[] get_children() {
-			return this.children;
+			return children;
 		}
 
-		public void setInBagIndices(ArrayList<Integer> indices) { this.InBagIndices=indices;}
+		public void setInBagIndices(
+				ArrayList<Integer> indices
+		) {
+			this.InBagIndices =
+					indices == null
+							? new ArrayList<>()
+							: indices;
+		}
 
-		public ArrayList<Integer> getInBagIndices() {return this.InBagIndices;}
+		public ArrayList<Integer> getInBagIndices() {
+			return InBagIndices;
+		}
 
-		public void setOutOfBagIndices(ArrayList<Integer> indices) { this.OutOfBagIndices=indices;}
+		public void setOutOfBagIndices(
+				ArrayList<Integer> indices
+		) {
+			this.OutOfBagIndices =
+					indices == null
+							? new ArrayList<>()
+							: indices;
+		}
 
-		//public ArrayList<Integer> getOutOfBagIndices() {return this.OutOfBagIndices;}
-		public ArrayList<Integer> getOutOfBagIndices() {return this.OutOfBagIndices;}
+		public ArrayList<Integer> getOutOfBagIndices() {
+			return OutOfBagIndices;
+		}
 
-		public void setMultiplicities(Map<Integer, Integer> multiplicities) { this.multiplicities=multiplicities;}
+		public void setMultiplicities(
+				Map<Integer, Integer> multiplicities
+		) {
+			this.multiplicities =
+					multiplicities;
+		}
 
-		public Map<Integer, Integer> getMultiplicities() {return this.multiplicities;}
-//		public Dataset get_data() {
-//			return this.data;
-//		}		
-		
+		public Map<Integer, Integer> getMultiplicities() {
+			return multiplicities;
+		}
+
+		@Override
 		public String toString() {
-			return "d: ";// + this.data.toString();
+			return "Node{"
+					+ "nodeId="
+					+ node_id
+					+ ", depth="
+					+ node_depth
+					+ ", leaf="
+					+ is_leaf
+					+ '}';
 		}
 
-
-		public static Object computeLeafLabel(List<Object> labels) {
-			if (labels == null || labels.isEmpty()) return null;
-
-			if (AppContext.isRegression) {
-				// Collect numeric values
-				List<Double> numericLabels = new ArrayList<>();
-				for (Object label : labels) {
-					if (label instanceof Number) {
-						numericLabels.add(((Number) label).doubleValue());
-					}
-				}
-
-				if (numericLabels.isEmpty()) return 0.0;
-
-				if (AppContext.voting.equalsIgnoreCase("mean")) {
-					return numericLabels.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-				} else if (AppContext.voting.equalsIgnoreCase("median")) {
-					Collections.sort(numericLabels);
-					int n = numericLabels.size();
-					return (n % 2 == 1)
-							? numericLabels.get(n / 2)
-							: (numericLabels.get(n / 2 - 1) + numericLabels.get(n / 2)) / 2.0;
-				} else {
-					throw new IllegalArgumentException("Unknown voting method: " + AppContext.voting);
-				}
-
-			} else {
-				// Classification: vote for majority label
-				Map<Object, Integer> frequencyMap = new HashMap<>();
-				for (Object label : labels) {
-					frequencyMap.put(label, frequencyMap.getOrDefault(label, 0) + 1);
-				}
-
-				Object mostFrequentLabel = null;
-				int maxFrequency = 0;
-				for (Map.Entry<Object, Integer> entry : frequencyMap.entrySet()) {
-					if (entry.getValue() > maxFrequency) {
-						maxFrequency = entry.getValue();
-						mostFrequentLabel = entry.getKey();
-					}
-				}
-
-				return mostFrequentLabel;
+		/**
+		 * Computes the response attached to a leaf.
+		 */
+		public static Object computeLeafLabel(
+				List<Object> labels
+		) {
+			if (AppContext.isIsolationMode()) {
+				return null;
 			}
+
+			if (labels == null || labels.isEmpty()) {
+				return null;
+			}
+
+			if (AppContext.isRegressionMode()) {
+				return computeRegressionLeafValue(
+						labels
+				);
+			}
+
+			return computeClassificationLeafValue(
+					labels
+			);
 		}
 
-//		public void train(Dataset data) throws Exception {
-//			this.data = data;
-//			this.train();
-//		}		
-		
-		//public void train(Dataset data, Dataset oobData) throws Exception {
-		public void train(ObjectDataset data, ObjectDataset oobData) throws Exception {
-//			System.out.println(this.node_depth + ":   " + (this.parent == null ? "r" : this.parent.node_id)  +"->"+ this.node_id +":"+ data.toString());
-			//System.out.println("The train method was called on a node");
-			//Debugging check
+		private static Object computeRegressionLeafValue(
+				List<Object> labels
+		) {
+			double[] numericValues =
+					new double[labels.size()];
+
+			int numericCount =
+					0;
+
+			double sum =
+					0.0;
+
+			for (Object value : labels) {
+				if (value instanceof Number number) {
+					double numericValue =
+							number.doubleValue();
+
+					numericValues[numericCount++] =
+							numericValue;
+
+					sum +=
+							numericValue;
+				}
+			}
+
+			if (numericCount == 0) {
+				return 0.0;
+			}
+
+			if (AppContext.voting.equalsIgnoreCase(
+					"mean"
+			)) {
+				return sum / numericCount;
+			}
+
+			if (AppContext.voting.equalsIgnoreCase(
+					"median"
+			)) {
+				Arrays.sort(
+						numericValues,
+						0,
+						numericCount
+				);
+
+				if ((numericCount & 1) == 1) {
+					return numericValues[
+							numericCount / 2
+							];
+				}
+
+				return (
+						numericValues[
+								numericCount / 2 - 1
+								]
+								+ numericValues[
+								numericCount / 2
+								]
+				) / 2.0;
+			}
+
+			throw new IllegalArgumentException(
+					"Unknown voting method: "
+							+ AppContext.voting
+			);
+		}
+
+		private static Object computeClassificationLeafValue(
+				List<Object> labels
+		) {
+			Map<Object, Integer> frequencies =
+					new LinkedHashMap<>();
+
+			Object mostFrequentLabel =
+					null;
+
+			int maximumFrequency =
+					0;
+
+			for (Object currentLabel : labels) {
+				int frequency =
+						frequencies.getOrDefault(
+								currentLabel,
+								0
+						) + 1;
+
+				frequencies.put(
+						currentLabel,
+						frequency
+				);
+
+				if (frequency > maximumFrequency) {
+					maximumFrequency =
+							frequency;
+
+					mostFrequentLabel =
+							currentLabel;
+				}
+			}
+
+			return mostFrequentLabel;
+		}
+
+		/**
+		 * Recursively trains this node.
+		 */
+		public void train(
+				ObjectDataset data,
+				ObjectDataset oobData
+		) throws Exception {
+
 			if (data == null || data.size() == 0) {
-				throw new Exception("possible bug: empty node found");
-//				this.is_leaf = true;
-//				return;
+				throw new IllegalStateException(
+						"Cannot train an empty tree node."
+				);
 			}
 
-			if (!AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
-				this.label = computeLeafLabel(data._internal_class_list());
-				this.is_leaf = true;
-				this.tree.leaves.add(this);
+			if (shouldStopForIsolationSize(
+					data
+			)) {
+				makeLeaf(
+						null
+				);
+
 				return;
 			}
 
-			if (AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
-				this.label = computeLeafLabel(data._internal_class_list());
-				this.is_leaf = true;
-				this.tree.leaves.add(this);
+			if (shouldStopForPureClassification(
+					data
+			)) {
+				makeLeaf(
+						onlyClassLabel(
+								data
+						)
+				);
+
 				return;
 			}
 
-			/*if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth){ //0 means no max depth.
-				//first, get a count of each class present in the node. Then find the majority class.
-				//int[] classes = data.get_unique_classes();
-				Object[] classes = data.get_unique_classes();
-				Map<Integer, Integer> frequencyMap = new HashMap<>();
+			if (shouldStopForPurity(
+					data
+			)) {
+				makeLeaf(
+						computeLeafLabel(
+								data._internal_class_list()
+						)
+				);
 
-				// Count frequencies of each element
-				for (int num : classes) {
-					frequencyMap.put(num, frequencyMap.getOrDefault(num, 0) + 1);
-				}
-
-				int mostFrequentElement = classes[0]; // Initialize with the first element
-				int maxFrequency = 0;
-
-				// Find the element with the maximum frequency
-				for (Map.Entry<Integer, Integer> entry : frequencyMap.entrySet()) {
-					if (entry.getValue() > maxFrequency) {
-						maxFrequency = entry.getValue();
-						mostFrequentElement = entry.getKey();
-					}
-				}
-				// Now that we have the most Frequent class, we consider the node to be this class and terminate.
-				this.label = mostFrequentElement;
-				this.is_leaf = true;
-				this.tree.leaves.add(this);
-				return;
-			}*/
-
-			if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth) {
-
-				this.label = computeLeafLabel(data._internal_class_list());
-
-				this.is_leaf = true;
-				this.tree.leaves.add(this);
 				return;
 			}
 
-			this.splitter = new Splitter(this);
+			if (shouldStopForDepth()) {
+				makeLeaf(
+						AppContext.isIsolationMode()
+								? null
+								: computeLeafLabel(
+								data._internal_class_list()
+						)
+				);
 
+				return;
+			}
 
-			//Dataset[] best_splits = splitter.find_best_split(data);
-			ObjectDataset[] best_splits = splitter.find_best_split(data);
+			splitter =
+					new Splitter(
+							this
+					);
 
-			// check to see if any would-be child nodes are empty. We don't want that.
-			if (best_splits == null || Arrays.stream(best_splits).anyMatch(split -> split.size() == 0)) {
-				this.is_leaf = true;
-				this.label = computeLeafLabel(data._internal_class_list());
-				this.tree.leaves.add(this);
-			} else {
+			ObjectDataset[] bestSplits =
+					splitter.find_best_split(
+							data
+					);
 
-				//Dataset[] oob_splits = new Dataset[best_splits.length];
-				ObjectDataset[] oob_splits = new ObjectDataset[best_splits.length];
-				this.children = new Node[best_splits.length];
-				for (int i = 0; i < children.length; i++) {
-					this.children[i] = new Node(this, i, ++tree.node_counter, tree);
-					this.children[i].setInBagIndices(best_splits[i]._internal_indices_list());
-					oob_splits[i] = new ListObjectDataset();
+			if (hasEmptySplit(
+					bestSplits
+			)) {
+				makeLeaf(
+						AppContext.isIsolationMode()
+								? null
+								: computeLeafLabel(
+								data._internal_class_list()
+						)
+				);
+
+				return;
+			}
+
+			initializeChildren(
+					bestSplits
+			);
+
+			ObjectDataset[] oobSplits =
+					createEmptyOobSplits(
+							bestSplits.length,
+							oobData
+					);
+
+			routeOutOfBagData(
+					oobData,
+					oobSplits
+			);
+
+			for (int branch = 0;
+				 branch < bestSplits.length;
+				 branch++) {
+
+				children[branch].train(
+						bestSplits[branch],
+						oobSplits[branch]
+				);
+			}
+		}
+
+		private boolean shouldStopForIsolationSize(
+				ObjectDataset data
+		) {
+			return AppContext.isIsolationMode()
+					&& data.size()
+					<= AppContext.isolation_min_leaf_size;
+		}
+
+		/**
+		 * Avoids a full Gini or entropy scan for an already pure
+		 * classification node.
+		 */
+		private boolean shouldStopForPureClassification(
+				ObjectDataset data
+		) {
+			return !AppContext.isIsolationMode()
+					&& !AppContext.isRegressionMode()
+					&& data.get_num_classes() <= 1;
+		}
+
+		private Object onlyClassLabel(
+				ObjectDataset data
+		) {
+			Set<Object> classes =
+					data.get_unique_classes_as_set();
+
+			if (classes == null || classes.isEmpty()) {
+				return computeLeafLabel(
+						data._internal_class_list()
+				);
+			}
+
+			return classes.iterator()
+					.next();
+		}
+
+		private boolean shouldStopForPurity(
+				ObjectDataset data
+		) {
+			return !AppContext.isIsolationMode()
+					&& data.purity(
+					AppContext.purity_measure
+			)
+					<= AppContext.purity_threshold;
+		}
+
+		private boolean shouldStopForDepth() {
+			return AppContext.max_depth != 0
+					&& node_depth
+					>= AppContext.max_depth;
+		}
+
+		private void makeLeaf(
+				Object leafLabel
+		) {
+			label =
+					leafLabel;
+
+			is_leaf =
+					true;
+
+			children =
+					null;
+
+			tree.leaves.add(
+					this
+			);
+		}
+
+		private boolean hasEmptySplit(
+				ObjectDataset[] splits
+		) {
+			if (splits == null
+					|| splits.length == 0) {
+
+				return true;
+			}
+
+			for (ObjectDataset split : splits) {
+				if (split == null
+						|| split.size() == 0) {
+
+					return true;
 				}
-				//Now we need to let the oob indices trickle down (set the oob indices for the children).
-				//System.out.println(oobData.size());
-				for (int i = 0; i < oobData.size(); i++) {
-					int ind = oobData.get_index(i);
-					//int label = oobData.get_class(i);
-					Object label = oobData.get_class(i);
-					//double[] series = oobData.get_series(i);
-					Object series = oobData.get_series(i);
-					int branch = splitter.find_closest_branch(oobData.get_series(i));
-					//if (this.children[branch] != null){
-					//	this.children[branch].OutOfBagIndices.add(ind);
-					//}
-					this.children[branch].OutOfBagIndices.add(ind);
-					oob_splits[branch].add(label, series, ind);
+			}
+
+			return false;
+		}
+
+		private void initializeChildren(
+				ObjectDataset[] bestSplits
+		) {
+			children =
+					new Node[bestSplits.length];
+
+			for (int branch = 0;
+				 branch < children.length;
+				 branch++) {
+
+				children[branch] =
+						new Node(
+								this,
+								branch,
+								++tree.node_counter,
+								tree
+						);
+
+				children[branch].setInBagIndices(
+						new ArrayList<>(
+								bestSplits[branch]
+										._internal_indices_list()
+						)
+				);
+			}
+		}
+
+		private ObjectDataset[] createEmptyOobSplits(
+				int branchCount,
+				ObjectDataset oobData
+		) {
+			ObjectDataset[] oobSplits =
+					new ObjectDataset[branchCount];
+
+			int expectedBranchSize =
+					oobData == null
+							? 0
+							: Math.max(
+							1,
+							oobData.size()
+									/ branchCount
+					);
+
+			for (int branch = 0;
+				 branch < branchCount;
+				 branch++) {
+
+				ListObjectDataset split =
+						new ListObjectDataset(
+								expectedBranchSize
+						);
+
+				if (oobData != null) {
+					split.setLength(
+							oobData.getLength()
+					);
 				}
 
-				// Now train on the children.
-				for (int i = 0; i < best_splits.length; i++) {
+				oobSplits[branch] =
+						split;
+			}
 
-					//this.children[i].train(best_splits[i]);
-					this.children[i].train(best_splits[i], oob_splits[i]);
+			return oobSplits;
+		}
+
+		/**
+		 * Routes OOB instances through the selected split.
+		 *
+		 * <p>The selected node exemplars are resolved once for the entire OOB batch,
+		 * rather than once for every OOB instance.</p>
+		 */
+		private void routeOutOfBagData(
+				ObjectDataset oobData,
+				ObjectDataset[] oobSplits
+		) throws Exception {
+
+			if (oobData == null
+					|| oobData.size() == 0) {
+
+				return;
+			}
+
+			int[] branches =
+					splitter.findClosestBranches(
+							oobData,
+							tree.deriveSeed(
+									node_id,
+									0x4F4F42
+							)
+					);
+
+			if (branches.length != oobData.size()) {
+				throw new IllegalStateException(
+						"OOB branch-assignment count does not match "
+								+ "the OOB dataset size."
+				);
+			}
+
+			for (int index = 0;
+				 index < oobData.size();
+				 index++) {
+
+				int branch =
+						branches[index];
+
+				if (branch < 0
+						|| branch >= children.length) {
+
+					throw new IllegalStateException(
+							"Invalid OOB branch "
+									+ branch
+									+ " for node "
+									+ node_id
+									+ "."
+					);
 				}
+
+				Integer originalIndex =
+						oobData.get_index(
+								index
+						);
+
+				Object currentLabel =
+						oobData.get_class(
+								index
+						);
+
+				Object storedSeries =
+						oobData.get_series(
+								index
+						);
+
+				children[branch]
+						.OutOfBagIndices
+						.add(
+								originalIndex
+						);
+
+				oobSplits[branch].add(
+						currentLabel,
+						storedSeries,
+						originalIndex
+				);
 			}
 		}
 
 		public Splitter getSplitter() {
 			return splitter;
 		}
-
-
-
 	}
-	
+
+	private static long mixSeed(
+			long seed,
+			int value
+	) {
+		long mixed =
+				seed
+						^ (
+						0x9E3779B97F4A7C15L
+								* (
+								value + 1L
+						)
+				);
+
+		mixed =
+				(mixed ^ (mixed >>> 30))
+						* 0xBF58476D1CE4E5B9L;
+
+		mixed =
+				(mixed ^ (mixed >>> 27))
+						* 0x94D049BB133111EBL;
+
+		return mixed
+				^ (mixed >>> 31);
+	}
 }

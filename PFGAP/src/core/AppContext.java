@@ -1,13 +1,22 @@
 package core;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 //import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
-import core.contracts.ObjectDataset;
+import core.contracts.*;
+import datasets.readers.ReaderType;
+import datasets.readers.lazy.LazySeriesReader;
+import datasets.readers.lazy.LazySeriesReaderFactory;
+import datasets.readers.lazy.LazySeriesReaderSpec;
+import datasets.readers.lazy.LazySeriesRef;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationStats;
+import proximities.ProximityType;
 
 /**
  * 
@@ -34,8 +43,8 @@ public class AppContext {
 	//********************************************************************
 	
 	//DEFAULT SETTINGS, these are overridden by command line arguments
-	public static long rand_seed;	//TODO set seed to reproduce results
-	public static Random rand;
+	//public static long rand_seed;	//TODO set seed to reproduce results
+	//public static Random rand;
 	
 	public static int verbosity = 0; //0, 1, 2 
 	public static int export_level = 1; //0, 1, 2 
@@ -44,11 +53,25 @@ public class AppContext {
 	public static String testing_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TEST.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
 	public static String training_labels = null; // sometimes this is inferred from training_file.
 	public static String testing_labels = null; // sometimes this is inferred from testing_file.
+
+	public static ReaderType readerType = ReaderType.DELIMITED; //null;
+	public static ReaderType trainingReaderType = null;
+	public static ReaderType testingReaderType = null;
+	public static String id_column = null;
+	public static String time_column = null;
+	public static List<String> feature_columns = new ArrayList<>();
+	public static List<String> label_columns = new ArrayList<>();
+	// HDF5
+	public static String hdf5_dataset_path = "/X";
+	public static String hdf5_label_dataset_path = "/y";
+
 	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
+
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
+	public static boolean bootstrap_trees = true;
 
 	// additional imputation variables
 	public static boolean perform_train_imputation = false; // should the model impute (not return) train data?
@@ -71,6 +94,14 @@ public class AppContext {
 	public static String voting = "mean";
 	public static double purity_threshold = 1e-6;
 
+	// variables for isolation forest
+	public static String forest_mode = "classification"; // or "isolation" or "regression"
+	public static int isolation_num_branches = 2;
+	public static int regression_num_branches = 2; // I suppose we can change this as well...
+	public static int isolation_min_leaf_size = 1;
+
+	// proximities
+	public static ProximityType proximityType = ProximityType.PFGAP;
 
 	public static int num_repeats = 1;
 	public static int num_trees = 11;
@@ -110,6 +141,8 @@ public class AppContext {
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;
 	public static boolean parallelPredict = false; // if parallelTrees=true, predictions will be made in parallel across trees.
+	public static boolean parallel_split_assignments = false; // not currently compatible with parallelTrees
+	public static int parallel_split_assignment_threshold = 128;
 	// parallelPredict refers to parallelization across data instances (will not happen if parallelTrees=true).
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
@@ -136,13 +169,38 @@ public class AppContext {
 	public static Map<Integer, Map<Integer, Double>> training_proximities_sparse;
 	public static Map<Integer, Map<Integer, Double>> testing_training_proximities_sparse;
 
-	static {
-		rand = new Random();
+	// lazy data
+	// public static LazySeriesReader lazySeriesReader = null;
+	public static boolean isLazyDataset = false;
+	// public static String perFileDataPath = null;
+	public static String file_pattern = null;
+	public static String trainingFilePattern = null;
+	public static String testingFilePattern = null;
+
+	public static StandardizationConfig standardizationConfig = StandardizationConfig.disabled();
+	public static StandardizationStats standardizationStats = null;
+
+	//static {
+	//	rand = new Random();
+	//}
+
+	public static Long rand_seed = null;
+	private static Random rand = new Random();
+
+	public static void setRandomSeed(long seed) {
+		rand_seed = seed;
+		rand = new Random(seed);
 	}
 
 	public static Random getRand() {
 		return rand;
 	}
+
+	public static void clearRandomSeed() {
+		rand_seed = null;
+		rand = new Random();
+	}
+
 
 	//public static Dataset getTraining_data() {
 	public static ObjectDataset getTraining_data() {
@@ -170,5 +228,253 @@ public class AppContext {
 
 	public static void setDatasetName(String datasetName) {
 		AppContext.datasetName = datasetName;
+	}
+
+	public static boolean isIsolationMode() {
+		return forest_mode != null
+				&& forest_mode.trim().equalsIgnoreCase("isolation");
+	}
+
+	public static boolean isRegressionMode() {
+		return isRegression
+				|| (forest_mode != null
+				&& forest_mode.trim().equalsIgnoreCase("regression"));
+	}
+
+	public static boolean isClassificationMode() {
+		return forest_mode == null
+				|| forest_mode.trim().equalsIgnoreCase("classification");
+	}
+
+	public static boolean useBootstrapTrees() {
+		return bootstrap_trees;
+	}
+
+	//public static Map<String, LazySeriesReader> lazySeriesReaders =
+	//		new HashMap<>();
+
+	private static final Map<String, LazySeriesReader>
+			lazySeriesReaders =
+			new ConcurrentHashMap<>();
+
+	public static void registerLazySeriesReaderSpec(
+			LazySeriesReaderSpec spec
+	) {
+		if (spec == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReaderSpec cannot be null."
+			);
+		}
+
+		lazySeriesReaderSpecs.put(
+				spec.getReaderKey(),
+				spec
+		);
+	}
+
+	public static void registerLazySeriesReader(
+			LazySeriesReaderSpec spec
+	) {
+		if (spec == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReaderSpec cannot be null."
+			);
+		}
+
+		LazySeriesReader reader =
+				LazySeriesReaderFactory.create(spec);
+
+		lazySeriesReaderSpecs.put(
+				spec.getReaderKey(),
+				spec
+		);
+
+		lazySeriesReaders.put(
+				spec.getReaderKey(),
+				reader
+		);
+	}
+
+	public static Map<String, LazySeriesReaderSpec>
+	getLazySeriesReaderSpecsSnapshot() {
+		return new LinkedHashMap<>(
+				lazySeriesReaderSpecs
+		);
+	}
+
+	public static void restoreLazySeriesReaderSpecs(
+			Map<String, LazySeriesReaderSpec> specs
+	) {
+		lazySeriesReaders.clear();
+		lazySeriesReaderSpecs.clear();
+
+		if (specs == null || specs.isEmpty()) {
+			return;
+		}
+
+		for (LazySeriesReaderSpec spec : specs.values()) {
+			registerLazySeriesReader(spec);
+		}
+	}
+
+	public static void clearLazySeriesReaders() {
+		lazySeriesReaders.clear();
+		lazySeriesReaderSpecs.clear();
+	}
+
+	//public static void registerLazySeriesReader(
+	//		String key,
+	//		LazySeriesReader reader
+	//) {
+	//	isLazyDataset = true;
+	//	lazySeriesReaders.put(key, reader);
+	//}
+
+	public static void registerLazySeriesReader(
+			String readerKey,
+			LazySeriesReader reader
+	) {
+		if (readerKey == null || readerKey.isBlank()) {
+			throw new IllegalArgumentException(
+					"Lazy reader key cannot be null or blank."
+			);
+		}
+
+		if (reader == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReader cannot be null."
+			);
+		}
+
+		lazySeriesReaders.put(
+				readerKey,
+				reader
+		);
+	}
+
+	public static LazySeriesReader getLazySeriesReader(
+			String key
+	) {
+		LazySeriesReader reader =
+				lazySeriesReaders.get(key);
+
+		if (reader == null) {
+			throw new IllegalStateException(
+					"No LazySeriesReader registered for key: " + key
+			);
+		}
+
+		return reader;
+	}
+
+	private static final Map<String, LazySeriesReaderSpec>
+			lazySeriesReaderSpecs =
+			new ConcurrentHashMap<>();
+
+	//public static void clearLazySeriesReaders() {
+	//	isLazyDataset = false;
+	//	lazySeriesReaders.clear();
+	//}
+
+	/*public static LazySeriesReader getDefaultLazySeriesReader() {
+		if (lazySeriesReaders.size() == 1) {
+			return lazySeriesReaders.values().iterator().next();
+		}
+
+		throw new IllegalStateException(
+				"Multiple LazySeriesReaders are registered. "
+						+ "Custom LazyDistanceFunction currently requires "
+						+ "a single lazy reader configuration."
+		);
+	}*/
+
+	public static Object readLazySeries(
+			LazySeriesRef ref
+	) {
+		if (ref == null) {
+			throw new IllegalArgumentException(
+					"Cannot resolve a null LazySeriesRef."
+			);
+		}
+
+		return getLazySeriesReader(
+				ref.getReaderKey()
+		).read(ref);
+	}
+
+	public static ReaderType getTrainingReaderType() {
+		ReaderType effectiveReaderType =
+				trainingReaderType != null
+						? trainingReaderType
+						: readerType;
+
+		if (effectiveReaderType == null) {
+			throw new IllegalStateException(
+					"No training reader type was configured. "
+							+ "Use -reader_type or -train_reader_type."
+			);
+		}
+
+		return effectiveReaderType;
+	}
+
+	public static ReaderType getTestingReaderType() {
+		ReaderType effectiveReaderType =
+				testingReaderType != null
+						? testingReaderType
+						: readerType;
+
+		if (effectiveReaderType == null) {
+			throw new IllegalStateException(
+					"No testing reader type was configured. "
+							+ "Use -reader_type or -test_reader_type."
+			);
+		}
+
+		return effectiveReaderType;
+	}
+
+	public static String getTrainingFilePattern() {
+		return trainingFilePattern != null
+				? trainingFilePattern
+				: file_pattern;
+	}
+
+	public static String getTestingFilePattern() {
+		return testingFilePattern != null
+				? testingFilePattern
+				: file_pattern;
+	}
+
+	public static Map<String, LazySeriesReaderSpec>
+	getModelLazySeriesReaderSpecsSnapshot() {
+
+		Map<String, LazySeriesReaderSpec> result =
+				new LinkedHashMap<>();
+
+		LazySeriesReaderSpec trainSpec =
+				lazySeriesReaderSpecs.get("train");
+
+		if (trainSpec != null) {
+			result.put(
+					trainSpec.getReaderKey(),
+					trainSpec
+			);
+		}
+
+		return result;
+	}
+
+	public static boolean isStandardizationEnabled() {
+		return standardizationConfig != null
+				&& standardizationConfig.isEnabled();
+	}
+
+	public static void clearStandardization() {
+		standardizationConfig =
+				StandardizationConfig.disabled();
+
+		standardizationStats =
+				null;
 	}
 }

@@ -1,6 +1,7 @@
 package core;
 
 import datasets.ListObjectDataset;
+import preprocessing.standardization.StandardizationConfig;
 import trees.ProximityForest;
 
 import java.io.*;
@@ -82,7 +83,12 @@ public class ModelIO {
         AppContext.config_skip_distance_when_exemplar_matches_query = snapshot.config_skip_distance_when_exemplar_matches_query;
         AppContext.config_use_random_choice_when_min_distance_is_equal = snapshot.config_use_random_choice_when_min_distance_is_equal;
 
-        AppContext.rand_seed = snapshot.rand_seed;
+        //AppContext.rand_seed = snapshot.rand_seed;
+        if (snapshot.rand_seed != null) {
+            AppContext.setRandomSeed(snapshot.rand_seed);
+        } else {
+            AppContext.clearRandomSeed();
+        }
         AppContext.verbosity = snapshot.verbosity;
         AppContext.export_level = snapshot.export_level;
 
@@ -102,7 +108,24 @@ public class ModelIO {
         //AppContext.eval = snapshot.eval;
         //AppContext.length = snapshot.length;
         AppContext.purity_measure = snapshot.purity_measure;
-        AppContext.isRegression = snapshot.isRegression;
+        //AppContext.isRegression = snapshot.isRegression;
+        if (snapshot.forest_mode != null) {
+            AppContext.forest_mode =
+                    snapshot.forest_mode;
+
+            AppContext.isRegression =
+                    "regression".equalsIgnoreCase(
+                            snapshot.forest_mode
+                    );
+        } else {
+            AppContext.isRegression =
+                    snapshot.isRegression;
+
+            AppContext.forest_mode =
+                    snapshot.isRegression
+                            ? "regression"
+                            : "classification";
+        }
         AppContext.voting = snapshot.voting;
         AppContext.purity_threshold = snapshot.purity_threshold;
 
@@ -122,18 +145,46 @@ public class ModelIO {
         //AppContext.get_predictions = snapshot.get_predictions;
         //AppContext.modelname = snapshot.modelname;
         AppContext.userdistances = snapshot.userdistances;
-        AppContext.Descriptors = snapshot.Descriptors;
+        AppContext.Descriptors = snapshot.Descriptors; // this one might not be right...
         AppContext.meta_predictions = snapshot.meta_predictions;
-        AppContext.MissingStrings = snapshot.MissingStrings;
+        //AppContext.MissingStrings = snapshot.MissingStrings;
         //AppContext.parallelTrees = snapshot.parallelTrees;
         //AppContext.parallelProx = snapshot.parallelProx;
         //AppContext.parallelPredict = snapshot.parallelPredict;
         AppContext.max_depth = snapshot.max_depth;
-        AppContext.impute_train = snapshot.impute_train;
+        //AppContext.impute_train = snapshot.impute_train;
         //AppContext.impute_test = snapshot.impute_test;
         //AppContext.exists_testlabels = snapshot.exists_testlabels;
         AppContext.useSparseProximities = snapshot.useSparseProximities;
         AppContext.setDatasetName(snapshot.datasetName);
+
+        AppContext.restoreLazySeriesReaderSpecs(
+                snapshot.lazySeriesReaderSpecs
+        );
+
+        AppContext.standardizationConfig =
+                snapshot.standardizationConfig == null
+                        ? StandardizationConfig.disabled()
+                        : snapshot.standardizationConfig;
+
+        AppContext.standardizationStats =
+                snapshot.standardizationStats;
+
+        // optional validation
+        if (AppContext.standardizationConfig.isEnabled()
+                && AppContext.standardizationStats == null) {
+
+            throw new IllegalStateException(
+                    "The saved model enables standardization but does not contain "
+                            + "fitted standardization statistics."
+            );
+        }
+
+        if (AppContext.standardizationStats != null) {
+            AppContext.standardizationConfig.validateStatistics(
+                    AppContext.standardizationStats
+            );
+        }
     }
 
     public static class LoadedModel {

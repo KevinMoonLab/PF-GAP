@@ -1,4 +1,4 @@
-package purity;
+package purity.regression;
 
 import java.util.List;
 

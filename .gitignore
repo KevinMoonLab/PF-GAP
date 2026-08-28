@@ -98,6 +98,9 @@ venv.bak/
 docs/demo/Data/*.txt
 docs/demo/training_output/*.txt
 docs/demo/training_output/Data/*.txt
+tests/tests_tmp
+docs/demo/**/*.txt
+docs/demo/**/*.json
 
 # Common data files generated during experiments
 *.csv
@@ -108,6 +111,8 @@ docs/demo/training_output/Data/*.txt
 *.feather
 *.pkl
 *.pickle
+*.h5
+*.mtx
 
 # If you want small test fixtures later, whitelist them, for example:
 # !tests/fixtures/**/*.csv
