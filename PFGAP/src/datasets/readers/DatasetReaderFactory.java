@@ -102,6 +102,9 @@ public final class DatasetReaderFactory {
             case LAZY_PER_FILE_CUSTOM:
                 return new LazyCustomPerFileReader(options);
 
+            case NUMERIC_DELIMITED:
+                return new NumericDelimitedFileReader(options);
+
             default:
                 throw new IllegalArgumentException(
                         "Unsupported reader type: " + readerType

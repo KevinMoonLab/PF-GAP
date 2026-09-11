@@ -281,9 +281,9 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     @Override
     public ListObjectDataset reorder_class_labels(Map<Object, Integer> newOrder) { //error ***
 
-        ListObjectDataset newDataset = new ListObjectDataset();
-        if (newOrder == null) newOrder = new HashMap<>();
-        AtomicInteger newLabel = new AtomicInteger();
+        ListObjectDataset newDataset = new ListObjectDataset(this.size());
+        if (newOrder == null) newOrder = new LinkedHashMap<>();
+        AtomicInteger newLabel = new AtomicInteger(newOrder.size());
 
         for (int i = 0; i < this.size(); i++) {
             Object oldLabel = labels.get(i);
@@ -291,6 +291,9 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
             newDataset.add(mappedLabel, data.get(i), indices.get(i));
         }
 
+        newDataset.setLength(this.length);
+        newDataset.is2D = this.is2D;
+        newDataset.setMissingIndices(this.missingIndices);
         newDataset.setInitialClassOrder(newOrder);
         newDataset.setReordered(true);
         return newDataset;

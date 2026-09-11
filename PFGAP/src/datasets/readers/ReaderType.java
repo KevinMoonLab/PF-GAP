@@ -16,6 +16,12 @@ public enum ReaderType {
      */
     DELIMITED,
 
+    // like delimited, but does not handle multivariate time series data.
+    // it is the fast track for numeric data.
+    // each row is a record, and it supports a single-character delimiter.
+    // designed for tabular data and univariate time series.
+    NUMERIC_DELIMITED,
+
     /**
      * .ts files, such as those used by the UEA/UCR time-series archive.
      * Supports univariate and multivariate time series, with optional
