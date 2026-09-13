@@ -10,7 +10,7 @@ import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationMethod;
 import preprocessing.standardization.StandardizationScope;
 import preprocessing.standardization.VarianceConvention;
-import proximities.ProximityType;
+import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
 import util.GeneralUtilities;
 import util.PrintUtilities;
@@ -648,7 +648,9 @@ public class PFApplication {
 					case "-savemodel":
 						AppContext.savemodel = Boolean.parseBoolean(options[1]);
 						break;
-					case "-parallelTrees":
+					// parallelization strategy is now being changed
+					// we utilize a single work-stealing strategy.
+					/*case "-parallelTrees":
 						AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
 						break;
 					case "-parallelProx":
@@ -662,6 +664,9 @@ public class PFApplication {
 						break;
 					case "-parallelSplitThreshold":
 						AppContext.parallel_split_assignment_threshold = Integer.parseInt(options[1]);
+						break;*/
+					case "-num_workers":
+						AppContext.num_workers = Integer.parseInt(options[1]);
 						break;
 					case "-knn_distances":
 						//String[] distanceNames = options[1].split(",");

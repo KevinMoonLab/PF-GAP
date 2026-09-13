@@ -249,11 +249,12 @@ def train(
     target_column="first",
     distances=None,
     memory="1g",
-    parallel_trees=False,
-    parallel_predict=False,
-    parallel_prox=False,
-    parallel_split_assignments=False,
-    parallel_split_assignment_threshold=128,
+    #parallel_trees=False,
+    #parallel_predict=False,
+    #parallel_prox=False,
+    #parallel_split_assignments=False,
+    #parallel_split_assignment_threshold=128,
+    num_workers=1,
 
     # Missing/imputation controls
     has_missing_values=None,
@@ -400,11 +401,12 @@ def train(
         "-savemodel=" + _bool(save_model),
         "-modelname=" + model_name,
 
-        "-parallelTrees=" + _bool(parallel_trees),
-        "-parallelProx=" + _bool(parallel_prox),
-        "-parallelPredict=" + _bool(parallel_predict),
-        "-parallelSplit=" + _bool(parallel_split_assignments),
-        "-parallelSplitThreshold=" + str(parallel_split_assignment_threshold),
+        #"-parallelTrees=" + _bool(parallel_trees),
+        #"-parallelProx=" + _bool(parallel_prox),
+        #"-parallelPredict=" + _bool(parallel_predict),
+        #"-parallelSplit=" + _bool(parallel_split_assignments),
+        #"-parallelSplitThreshold=" + str(parallel_split_assignment_threshold),
+        "-num_workers=" + str(num_workers),
 
         "-hasMissingValues=" + _bool(has_missing_values),
         "-perform_train_imputation=" + _bool(impute_training_data),
@@ -493,9 +495,10 @@ def predict(
     file_has_header=False,
     forest_mode=None,
     target_column="first",
-    parallel_trees=False,
-    parallel_prox=False,
-    parallel_predict=False,
+    #parallel_trees=False,
+    #parallel_prox=False,
+    #parallel_predict=False,
+    num_workers=1,
     memory="1g",
 
     # Data controls
@@ -588,9 +591,10 @@ def predict(
         "-get_predictions=" + _bool(return_predictions),
         "-modelname=" + model_name,
 
-        "-parallelTrees=" + _bool(parallel_trees),
-        "-parallelProx=" + _bool(parallel_prox),
-        "-parallelPredict=" + _bool(parallel_predict),
+        #"-parallelTrees=" + _bool(parallel_trees),
+        #"-parallelProx=" + _bool(parallel_prox),
+        #"-parallelPredict=" + _bool(parallel_predict),
+        "-num_workers=" + str(num_workers),
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),

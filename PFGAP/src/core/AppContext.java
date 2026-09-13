@@ -16,7 +16,7 @@ import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
 import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationStats;
-import proximities.ProximityType;
+import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
 
 /**
@@ -107,7 +107,7 @@ public class AppContext {
 	public static int regression_num_branches = 2; // I suppose we can change this as well...
 	public static int isolation_min_leaf_size = 1;
 
-	// proximities
+	// proximity
 	public static ProximityType proximityType = ProximityType.PFGAP;
 
 	public static int num_repeats = 1;
@@ -151,6 +151,14 @@ public class AppContext {
 	public static boolean parallel_split_assignments = false; // not currently compatible with parallelTrees
 	public static int parallel_split_assignment_threshold = 128;
 	// parallelPredict refers to parallelization across data instances (will not happen if parallelTrees=true).
+	/**
+	 * Maximum number of PFGAP worker threads.
+	 *
+	 * -1 uses every processor available to the JVM.
+	 *  1 forces sequential execution.
+	 * >1 enables bounded parallel execution with the specified worker count.
+	 */
+	public static int num_workers = 1;
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;
@@ -495,5 +503,29 @@ public class AppContext {
 
 		standardizationStats =
 				null;
+	}
+
+	public static int getEffectiveWorkerCount() {
+		if (num_workers == -1) {
+			return Math.max(
+					1,
+					Runtime.getRuntime().availableProcessors()
+			);
+		}
+
+		if (num_workers < 1) {
+			throw new IllegalArgumentException(
+					"num_workers must be -1 or a positive integer. "
+							+ "Received: "
+							+ num_workers
+							+ "."
+			);
+		}
+
+		return num_workers;
+	}
+
+	public static boolean isParallelExecutionEnabled() {
+		return getEffectiveWorkerCount() > 1;
 	}
 }

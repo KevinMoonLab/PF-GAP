@@ -1,4 +1,4 @@
-package proximities;
+package proximity;
 
 public enum ProximityType {
     PFGAP,

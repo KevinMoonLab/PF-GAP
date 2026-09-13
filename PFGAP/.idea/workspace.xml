@@ -7,10 +7,30 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/src/proximity/PFGAP.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/proximity/proximities/BreimanProximity.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/proximity/proximities/DepthWeightedProximity.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/proximity/proximities/PFGAPProximity.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/imputation/ProximityImputation.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/ProximityImputation.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/imputation/update/DTWPFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/update/DTWPFImpute.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/imputation/update/PFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/update/PFImpute.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/outlier/OutlierScorer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/outlier/OutlierScorer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/output/ProximityWriter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/output/ProximityWriter.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/BreimanProximity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/DepthWeightedProximity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/PFGAP.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/PFGAPProximity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/ProximityType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximity/ProximityType.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/proximities/ProximityUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximity/ProximityUtils.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,6 +48,14 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="GitSEFilterConfiguration">
+    <file-type-list>
+      <filtered-out-file-type name="LOCAL_BRANCH" />
+      <filtered-out-file-type name="REMOTE_BRANCH" />
+      <filtered-out-file-type name="TAG" />
+      <filtered-out-file-type name="COMMIT_BY_MESSAGE" />
+    </file-type-list>
   </component>
   <component name="MavenImportPreferences">
     <option name="importingSettings">

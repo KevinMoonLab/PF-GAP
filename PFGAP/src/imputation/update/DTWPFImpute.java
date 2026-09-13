@@ -1,53 +1,117 @@
 package imputation.update;
 
-import core.AppContext;
+import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import distance.elastic.DTWWithPath;
 import distance.missing.DTWAROW;
 import distance.missing.DTWAROW_D;
 import distance.multiTS.DTW_D;
 import imputation.util.MissingIndices;
+import proximity.CompressedSparseProximityMatrix;
+import proximity.ProximityMatrixResult;
 import util.Pair;
 
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 
-public class DTWPFImpute {
+/**
+ * Performs DTW-aligned proximity-weighted numeric imputation.
+ *
+ * <p>For a missing value at target time {@code t}, each proximity neighbor
+ * contributes the average of its observed values at times aligned to
+ * {@code t}. That neighbor-level average is weighted once by the proximity,
+ * and the result is normalized over neighbors that provide a usable aligned
+ * value.</p>
+ *
+ * <p>This implementation consumes an explicit {@link ProximityMatrixResult},
+ * traverses dense or CSR rows directly, and schedules independent target-row
+ * updates through the caller-owned {@link ParallelRuntime}. It creates no
+ * executors, uses no parallel streams, reads no global proximity state, and
+ * performs no dense-to-map conversion or epsilon-based sparsification.</p>
+ *
+ * <p>Alignment paths are scoped to one target row and one update pass. Each
+ * target-neighbor path is computed once, reused for all missing values in that
+ * target, and released when the row is complete. This avoids the previous
+ * static global cache and prevents path state from leaking across datasets,
+ * repetitions, or concurrent operations.</p>
+ *
+ * <p>Numeric updates use Jacobi-style semantics: workers read only the
+ * unchanged input datasets and publish completed replacement rows after all
+ * row computations finish.</p>
+ */
+public final class DTWPFImpute {
 
-    /*
-     * DTW-aligned GAP update:
-     *
-     * For a missing value x[n][dim][t], each neighbor k contributes the average
-     * of values x[k][dim][s] over all times s aligned to t by the DTW path
-     * between n and k. The neighbor-level average is then weighted once by
-     * the proximity p(n,k). We renormalize over neighbors that contribute a
-     * computable aligned average.
-     */
+    private static final int MINIMUM_PARALLEL_ROW_RANGE_SIZE = 16;
 
-    private static final double EPSILON = 1e-6;
+    private DTWPFImpute() {
+    }
 
-    public static Map<Integer, Map<Integer, List<Pair<Integer, Integer>>>> alignmentPaths;
+    /** Updates missing training values using DTW-aligned train/train weights. */
+    public static void trainNumericImpute(
+            ListObjectDataset data,
+            ProximityMatrixResult proximities,
+            ParallelRuntime runtime,
+            int windowSize
+    ) throws Exception {
+        Objects.requireNonNull(data, "Training data cannot be null.");
+        validateRuntimeAndMatrix(runtime, proximities);
 
-    public static void trainNumericImpute(ListObjectDataset dataToUpdate) {
+        List<Object> rawData = data.getData();
+        MissingIndices missing = data.getMissingIndices();
 
-        List<Object> rawData = dataToUpdate.getData();
-        MissingIndices missingIndices = dataToUpdate.getMissingIndices();
-
-        if (rawData == null || rawData.isEmpty() || missingIndices == null) {
+        if (rawData == null || rawData.isEmpty() || missing == null) {
             return;
         }
 
-        if (missingIndices.is2D()) {
-            trainNumericImpute2D(dataToUpdate);
+        validateShape(
+                proximities,
+                rawData.size(),
+                rawData.size(),
+                "training"
+        );
+
+        NeighborRows neighbors = NeighborRows.from(proximities);
+
+        if (missing.is2D()) {
+            impute2D(
+                    data,
+                    rawData,
+                    rawData,
+                    missing.indices2D,
+                    missing.indices2D,
+                    neighbors,
+                    true,
+                    runtime,
+                    windowSize
+            );
         } else {
-            trainNumericImpute1D(dataToUpdate);
+            impute1D(
+                    data,
+                    rawData,
+                    rawData,
+                    missing.indices1D,
+                    missing.indices1D,
+                    neighbors,
+                    true,
+                    runtime,
+                    windowSize
+            );
         }
     }
 
+    /** Updates missing test values using DTW-aligned test/train weights. */
     public static void testNumericImpute(
             ListObjectDataset testData,
-            ListObjectDataset trainData) {
+            ListObjectDataset trainData,
+            ProximityMatrixResult proximities,
+            ParallelRuntime runtime,
+            int windowSize
+    ) throws Exception {
+        Objects.requireNonNull(testData, "Testing data cannot be null.");
+        Objects.requireNonNull(trainData, "Training data cannot be null.");
+        validateRuntimeAndMatrix(runtime, proximities);
 
         List<Object> testRaw = testData.getData();
         MissingIndices testMissing = testData.getMissingIndices();
@@ -56,715 +120,402 @@ public class DTWPFImpute {
             return;
         }
 
+        List<Object> trainRaw = Objects.requireNonNull(
+                trainData.getData(),
+                "Training data storage cannot be null."
+        );
+
+        validateShape(
+                proximities,
+                testRaw.size(),
+                trainRaw.size(),
+                "test/train"
+        );
+
+        NeighborRows neighbors = NeighborRows.from(proximities);
+        MissingIndices trainMissing = trainData.getMissingIndices();
+
         if (testMissing.is2D()) {
-            testNumericImpute2D(testData, trainData);
+            impute2D(
+                    testData,
+                    testRaw,
+                    trainRaw,
+                    testMissing.indices2D,
+                    trainMissing == null ? null : trainMissing.indices2D,
+                    neighbors,
+                    false,
+                    runtime,
+                    windowSize
+            );
         } else {
-            testNumericImpute1D(testData, trainData);
+            impute1D(
+                    testData,
+                    testRaw,
+                    trainRaw,
+                    testMissing.indices1D,
+                    trainMissing == null ? null : trainMissing.indices1D,
+                    neighbors,
+                    false,
+                    runtime,
+                    windowSize
+            );
         }
     }
 
-    private static void trainNumericImpute1D(ListObjectDataset dataToUpdate) {
-
-        List<Object> rawData = dataToUpdate.getData();
-        List<List<Integer>> missingIndices1D =
-                dataToUpdate.getMissingIndices().indices1D;
-
+    private static void impute1D(
+            ListObjectDataset dataToUpdate,
+            List<Object> targetData,
+            List<Object> neighborData,
+            List<List<Integer>> targetMissing,
+            List<List<Integer>> neighborMissing,
+            NeighborRows neighborRows,
+            boolean excludeSelf,
+            ParallelRuntime runtime,
+            int windowSize
+    ) throws Exception {
         double[] fallbackMeans = computeObservedMeans1D(
-                rawData,
-                missingIndices1D
+                neighborData,
+                neighborMissing
         );
+        Object[] updated = new Object[targetData.size()];
 
-        List<Object> updated = IntStream.range(0, rawData.size())
-                .parallel()
-                .mapToObj(targetIndex -> {
+        forRanges(targetData.size(), runtime, (start, end) -> {
+            for (int target = start; target < end; target++) {
+                Object targetSeries = targetData.get(target);
+                double[] replacement = copySeries1DToPrimitive(targetSeries);
+                List<Integer> missingTimes = targetMissing.get(target);
 
-                    Object targetSeries = rawData.get(targetIndex);
-                    double[] updatedRow = copySeries1DToPrimitive(targetSeries);
+                List<AlignedNeighbor> alignedNeighbors = buildAlignedNeighbors(
+                        target,
+                        targetSeries,
+                        neighborData,
+                        neighborRows,
+                        excludeSelf,
+                        false,
+                        windowSize
+                );
 
-                    List<Integer> missing = missingIndices1D.get(targetIndex);
-                    Map<Integer, Double> neighbors =
-                            getTrainingNeighborWeights(targetIndex);
+                for (int targetTime : missingTimes) {
+                    requireIndex(replacement.length, targetTime, target, -1);
+                    WeightedAverage average = new WeightedAverage();
 
-                    for (int targetTime : missing) {
+                    for (AlignedNeighbor neighbor : alignedNeighbors) {
+                        AlignedAverage aligned = alignedAverage1D(
+                                neighborData.get(neighbor.index()),
+                                neighbor.path(),
+                                targetTime
+                        );
 
-                        double weightedSum = 0.0;
-                        double totalWeight = 0.0;
-
-                        for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
-
-                            int neighborIndex = entry.getKey();
-
-                            if (neighborIndex == targetIndex) {
-                                continue;
-                            }
-
-                            double weight = entry.getValue();
-
-                            if (weight <= EPSILON) {
-                                continue;
-                            }
-
-                            Object neighborSeries = rawData.get(neighborIndex);
-
-                            List<Pair<Integer, Integer>> path =
-                                    getAlignmentPath(targetIndex, neighborIndex);
-
-                            AlignedAverage alignedAverage =
-                                    alignedAverage1D(
-                                            neighborSeries,
-                                            path,
-                                            targetTime
-                                    );
-
-                            if (!alignedAverage.available) {
-                                continue;
-                            }
-
-                            weightedSum += weight * alignedAverage.value;
-                            totalWeight += weight;
+                        if (aligned.available()) {
+                            average.add(neighbor.weight(), aligned.value());
                         }
-
-                        updatedRow[targetTime] =
-                                totalWeight > 0.0
-                                        ? weightedSum / totalWeight
-                                        : fallbackValue1D(
-                                        updatedRow,
-                                        targetTime,
-                                        fallbackMeans
-                                );
                     }
 
-                    return (Object) updatedRow;
-                })
-                .collect(Collectors.toList());
+                    replacement[targetTime] = average.available()
+                            ? average.value()
+                            : fallbackValue1D(
+                            replacement,
+                            targetTime,
+                            fallbackMeans
+                    );
+                }
 
-        dataToUpdate.setData(updated);
+                updated[target] = replacement;
+            }
+        });
+
+        dataToUpdate.setData(asObjectList(updated));
     }
 
-    private static void trainNumericImpute2D(ListObjectDataset dataToUpdate) {
-
-        List<Object> rawData = dataToUpdate.getData();
-        List<List<List<Integer>>> missingIndices2D =
-                dataToUpdate.getMissingIndices().indices2D;
-
+    private static void impute2D(
+            ListObjectDataset dataToUpdate,
+            List<Object> targetData,
+            List<Object> neighborData,
+            List<List<List<Integer>>> targetMissing,
+            List<List<List<Integer>>> neighborMissing,
+            NeighborRows neighborRows,
+            boolean excludeSelf,
+            ParallelRuntime runtime,
+            int windowSize
+    ) throws Exception {
         double[][] fallbackMeans = computeObservedMeans2D(
-                rawData,
-                missingIndices2D
+                neighborData,
+                neighborMissing
         );
+        Object[] updated = new Object[targetData.size()];
 
-        List<Object> updated = IntStream.range(0, rawData.size())
-                .parallel()
-                .mapToObj(targetIndex -> {
+        forRanges(targetData.size(), runtime, (start, end) -> {
+            for (int target = start; target < end; target++) {
+                Object targetSeries = targetData.get(target);
+                double[][] replacement = copySeries2DToPrimitive(targetSeries);
+                List<List<Integer>> missingByDimension = targetMissing.get(target);
 
-                    Object targetSeries = rawData.get(targetIndex);
-                    double[][] updatedMatrix =
-                            copySeries2DToPrimitive(targetSeries);
+                List<AlignedNeighbor> alignedNeighbors = buildAlignedNeighbors(
+                        target,
+                        targetSeries,
+                        neighborData,
+                        neighborRows,
+                        excludeSelf,
+                        true,
+                        windowSize
+                );
 
-                    List<List<Integer>> missingRows =
-                            missingIndices2D.get(targetIndex);
-
-                    Map<Integer, Double> neighbors =
-                            getTrainingNeighborWeights(targetIndex);
-
-                    for (int dim = 0; dim < missingRows.size(); dim++) {
-
-                        if (dim >= updatedMatrix.length) {
-                            continue;
-                        }
-
-                        List<Integer> missing = missingRows.get(dim);
-
-                        for (int targetTime : missing) {
-
-                            double weightedSum = 0.0;
-                            double totalWeight = 0.0;
-
-                            for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
-
-                                int neighborIndex = entry.getKey();
-
-                                if (neighborIndex == targetIndex) {
-                                    continue;
-                                }
-
-                                double weight = entry.getValue();
-
-                                if (weight <= EPSILON) {
-                                    continue;
-                                }
-
-                                Object neighborSeries = rawData.get(neighborIndex);
-
-                                List<Pair<Integer, Integer>> path =
-                                        getAlignmentPath(targetIndex, neighborIndex);
-
-                                AlignedAverage alignedAverage =
-                                        alignedAverage2D(
-                                                neighborSeries,
-                                                path,
-                                                dim,
-                                                targetTime
-                                        );
-
-                                if (!alignedAverage.available) {
-                                    continue;
-                                }
-
-                                weightedSum += weight * alignedAverage.value;
-                                totalWeight += weight;
-                            }
-
-                            updatedMatrix[dim][targetTime] =
-                                    totalWeight > 0.0
-                                            ? weightedSum / totalWeight
-                                            : fallbackValue2D(
-                                            updatedMatrix,
-                                            dim,
-                                            targetTime,
-                                            fallbackMeans
-                                    );
-                        }
+                for (int dimension = 0;
+                     dimension < missingByDimension.size();
+                     dimension++) {
+                    if (dimension >= replacement.length) {
+                        continue;
                     }
 
-                    return (Object) updatedMatrix;
-                })
-                .collect(Collectors.toList());
+                    for (int targetTime : missingByDimension.get(dimension)) {
+                        requireIndex(
+                                replacement[dimension].length,
+                                targetTime,
+                                target,
+                                dimension
+                        );
 
-        dataToUpdate.setData(updated);
-    }
+                        WeightedAverage average = new WeightedAverage();
 
-    private static void testNumericImpute1D(
-            ListObjectDataset testData,
-            ListObjectDataset trainData) {
+                        for (AlignedNeighbor neighbor : alignedNeighbors) {
+                            AlignedAverage aligned = alignedAverage2D(
+                                    neighborData.get(neighbor.index()),
+                                    neighbor.path(),
+                                    dimension,
+                                    targetTime
+                            );
 
-        List<Object> testRaw = testData.getData();
-        List<Object> trainRaw = trainData.getData();
-
-        List<List<Integer>> testMissing1D =
-                testData.getMissingIndices().indices1D;
-
-        List<List<Integer>> trainMissing1D =
-                trainData.getMissingIndices() == null
-                        ? null
-                        : trainData.getMissingIndices().indices1D;
-
-        double[] fallbackMeans =
-                computeObservedMeans1D(trainRaw, trainMissing1D);
-
-        List<Object> updated = IntStream.range(0, testRaw.size())
-                .parallel()
-                .mapToObj(testIndex -> {
-
-                    Object targetSeries = testRaw.get(testIndex);
-                    double[] updatedRow =
-                            copySeries1DToPrimitive(targetSeries);
-
-                    List<Integer> missing =
-                            testMissing1D.get(testIndex);
-
-                    Map<Integer, Double> neighbors =
-                            getTestingTrainingNeighborWeights(testIndex);
-
-                    for (int targetTime : missing) {
-
-                        double weightedSum = 0.0;
-                        double totalWeight = 0.0;
-
-                        for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
-
-                            int trainIndex = entry.getKey();
-                            double weight = entry.getValue();
-
-                            if (weight <= EPSILON) {
-                                continue;
+                            if (aligned.available()) {
+                                average.add(neighbor.weight(), aligned.value());
                             }
-
-                            Object trainSeries = trainRaw.get(trainIndex);
-
-                            List<Pair<Integer, Integer>> path =
-                                    getAlignmentPath(testIndex, trainIndex);
-
-                            AlignedAverage alignedAverage =
-                                    alignedAverage1D(
-                                            trainSeries,
-                                            path,
-                                            targetTime
-                                    );
-
-                            if (!alignedAverage.available) {
-                                continue;
-                            }
-
-                            weightedSum += weight * alignedAverage.value;
-                            totalWeight += weight;
                         }
 
-                        updatedRow[targetTime] =
-                                totalWeight > 0.0
-                                        ? weightedSum / totalWeight
-                                        : fallbackValue1D(
-                                        updatedRow,
-                                        targetTime,
-                                        fallbackMeans
-                                );
+                        replacement[dimension][targetTime] = average.available()
+                                ? average.value()
+                                : fallbackValue2D(
+                                replacement,
+                                dimension,
+                                targetTime,
+                                fallbackMeans
+                        );
                     }
+                }
 
-                    return (Object) updatedRow;
-                })
-                .collect(Collectors.toList());
+                updated[target] = replacement;
+            }
+        });
 
-        testData.setData(updated);
+        dataToUpdate.setData(asObjectList(updated));
     }
 
-    private static void testNumericImpute2D(
-            ListObjectDataset testData,
-            ListObjectDataset trainData) {
+    private static List<AlignedNeighbor> buildAlignedNeighbors(
+            int target,
+            Object targetSeries,
+            List<Object> neighborData,
+            NeighborRows neighborRows,
+            boolean excludeSelf,
+            boolean twoDimensional,
+            int windowSize
+    ) throws Exception {
+        List<AlignedNeighbor> aligned = new ArrayList<>();
 
-        List<Object> testRaw = testData.getData();
-        List<Object> trainRaw = trainData.getData();
+        neighborRows.forEach(target, (neighbor, weight) -> {
+            if (weight <= 0.0 || (excludeSelf && neighbor == target)) {
+                return;
+            }
 
-        List<List<List<Integer>>> testMissing2D =
-                testData.getMissingIndices().indices2D;
+            Object neighborSeries = neighborData.get(neighbor);
+            List<Pair<Integer, Integer>> path = computeAlignmentPath(
+                    targetSeries,
+                    neighborSeries,
+                    twoDimensional,
+                    windowSize
+            );
 
-        List<List<List<Integer>>> trainMissing2D =
-                trainData.getMissingIndices() == null
-                        ? null
-                        : trainData.getMissingIndices().indices2D;
+            if (path != null && !path.isEmpty()) {
+                aligned.add(
+                        new AlignedNeighbor(
+                                neighbor,
+                                weight,
+                                path
+                        )
+                );
+            }
+        });
 
-        double[][] fallbackMeans =
-                computeObservedMeans2D(trainRaw, trainMissing2D);
-
-        List<Object> updated = IntStream.range(0, testRaw.size())
-                .parallel()
-                .mapToObj(testIndex -> {
-
-                    Object targetSeries = testRaw.get(testIndex);
-                    double[][] updatedMatrix =
-                            copySeries2DToPrimitive(targetSeries);
-
-                    List<List<Integer>> missingRows =
-                            testMissing2D.get(testIndex);
-
-                    Map<Integer, Double> neighbors =
-                            getTestingTrainingNeighborWeights(testIndex);
-
-                    for (int dim = 0; dim < missingRows.size(); dim++) {
-
-                        if (dim >= updatedMatrix.length) {
-                            continue;
-                        }
-
-                        List<Integer> missing = missingRows.get(dim);
-
-                        for (int targetTime : missing) {
-
-                            double weightedSum = 0.0;
-                            double totalWeight = 0.0;
-
-                            for (Map.Entry<Integer, Double> entry : neighbors.entrySet()) {
-
-                                int trainIndex = entry.getKey();
-                                double weight = entry.getValue();
-
-                                if (weight <= EPSILON) {
-                                    continue;
-                                }
-
-                                Object trainSeries = trainRaw.get(trainIndex);
-
-                                List<Pair<Integer, Integer>> path =
-                                        getAlignmentPath(testIndex, trainIndex);
-
-                                AlignedAverage alignedAverage =
-                                        alignedAverage2D(
-                                                trainSeries,
-                                                path,
-                                                dim,
-                                                targetTime
-                                        );
-
-                                if (!alignedAverage.available) {
-                                    continue;
-                                }
-
-                                weightedSum += weight * alignedAverage.value;
-                                totalWeight += weight;
-                            }
-
-                            updatedMatrix[dim][targetTime] =
-                                    totalWeight > 0.0
-                                            ? weightedSum / totalWeight
-                                            : fallbackValue2D(
-                                            updatedMatrix,
-                                            dim,
-                                            targetTime,
-                                            fallbackMeans
-                                    );
-                        }
-                    }
-
-                    return (Object) updatedMatrix;
-                })
-                .collect(Collectors.toList());
-
-        testData.setData(updated);
+        return aligned;
     }
 
-    public static void buildAlignmentPathCache(
-            ListObjectDataset dataA,
-            ListObjectDataset dataB,
-            Map<Integer, Map<Integer, Double>> sparseProximities,
-            boolean is2D,
+    private static List<Pair<Integer, Integer>> computeAlignmentPath(
+            Object first,
+            Object second,
+            boolean twoDimensional,
             int windowSize
     ) {
+        boolean missing = containsMissing(first) || containsMissing(second);
 
-        DTWWithPath dtw1D = new DTWWithPath();
-        DTW_D dtw2D = new DTW_D();
+        if (twoDimensional) {
+            if (missing) {
+                return new DTWAROW_D().getAlignmentPath(
+                        first,
+                        second,
+                        windowSize
+                );
+            }
 
-        DTWAROW dtwArow1D = new DTWAROW();
-        DTWAROW_D dtwArow2D = new DTWAROW_D();
-
-        alignmentPaths = new HashMap<>();
-
-        if (dataA == null || dataB == null || sparseProximities == null) {
-            return;
+            return new DTW_D().getAlignmentPath(
+                    copySeries2DToPrimitive(first),
+                    copySeries2DToPrimitive(second),
+                    windowSize
+            );
         }
 
-        int sizeA = dataA.size();
+        if (missing) {
+            return new DTWAROW().getAlignmentPath(
+                    first,
+                    second,
+                    windowSize
+            );
+        }
 
-        for (int i = 0; i < sizeA; i++) {
+        return new DTWWithPath().getAlignmentPath(
+                copySeries1DToPrimitive(first),
+                copySeries1DToPrimitive(second),
+                windowSize
+        );
+    }
 
-            Map<Integer, Double> row = sparseProximities.get(i);
+    private static AlignedAverage alignedAverage1D(
+            Object neighborSeries,
+            List<Pair<Integer, Integer>> path,
+            int targetTime
+    ) {
+        double sum = 0.0;
+        int count = 0;
 
-            if (row == null || row.isEmpty()) {
+        for (Pair<Integer, Integer> pair : path) {
+            if (pair.getKey() != targetTime) {
                 continue;
             }
 
-            for (Map.Entry<Integer, Double> entry : row.entrySet()) {
-
-                int j = entry.getKey();
-                double proximity = entry.getValue();
-
-                if (i == j && dataA == dataB) {
-                    continue;
-                }
-
-                if (proximity <= EPSILON) {
-                    continue;
-                }
-
-                if (j < 0 || j >= dataB.size()) {
-                    continue;
-                }
-
-                Object s1 = dataA.get_series(i);
-                Object s2 = dataB.get_series(j);
-
-                List<Pair<Integer, Integer>> path;
-
-                if (is2D) {
-                    if (containsMissing(s1) || containsMissing(s2)) {
-                        path = dtwArow2D.getAlignmentPath(
-                                s1,
-                                s2,
-                                windowSize
-                        );
-                    } else {
-                        path = dtw2D.getAlignmentPath(
-                                copySeries2DToPrimitive(s1),
-                                copySeries2DToPrimitive(s2),
-                                windowSize
-                        );
-                    }
-                } else {
-                    if (containsMissing(s1) || containsMissing(s2)) {
-                        path = dtwArow1D.getAlignmentPath(
-                                s1,
-                                s2,
-                                windowSize
-                        );
-                    } else {
-                        path = dtw1D.getAlignmentPath(
-                                copySeries1DToPrimitive(s1),
-                                copySeries1DToPrimitive(s2),
-                                windowSize
-                        );
-                    }
-                }
-
-                alignmentPaths
-                        .computeIfAbsent(i, key -> new HashMap<>())
-                        .put(j, path);
-            }
-        }
-    }
-
-    private static List<Pair<Integer, Integer>> getAlignmentPath(
-            int i,
-            int j) {
-
-        if (alignmentPaths == null) {
-            return Collections.emptyList();
-        }
-
-        return alignmentPaths
-                .getOrDefault(i, Collections.emptyMap())
-                .getOrDefault(j, Collections.emptyList());
-    }
-
-    private static Map<Integer, Double> getTrainingNeighborWeights(
-            int targetIndex) {
-
-        if (AppContext.useSparseProximities) {
-            if (AppContext.training_proximities_sparse == null) {
-                return Collections.emptyMap();
+            int alignedTime = pair.getValue();
+            if (!hasIndex1D(neighborSeries, alignedTime)) {
+                continue;
             }
 
-            return AppContext.training_proximities_sparse.getOrDefault(
-                    targetIndex,
-                    Collections.emptyMap()
+            double value = getNumericValue1D(neighborSeries, alignedTime);
+            if (!Double.isNaN(value)) {
+                sum += value;
+                count++;
+            }
+        }
+
+        return count == 0
+                ? AlignedAverage.UNAVAILABLE
+                : new AlignedAverage(true, sum / count);
+    }
+
+    private static AlignedAverage alignedAverage2D(
+            Object neighborSeries,
+            List<Pair<Integer, Integer>> path,
+            int dimension,
+            int targetTime
+    ) {
+        double sum = 0.0;
+        int count = 0;
+
+        for (Pair<Integer, Integer> pair : path) {
+            if (pair.getKey() != targetTime) {
+                continue;
+            }
+
+            int alignedTime = pair.getValue();
+            if (!hasIndex2D(neighborSeries, dimension, alignedTime)) {
+                continue;
+            }
+
+            double value = getNumericValue2D(
+                    neighborSeries,
+                    dimension,
+                    alignedTime
             );
-        }
-
-        if (AppContext.training_proximities == null
-                || targetIndex >= AppContext.training_proximities.length) {
-            return Collections.emptyMap();
-        }
-
-        return convertDenseRowToMap(
-                AppContext.training_proximities[targetIndex]
-        );
-    }
-
-    private static Map<Integer, Double> getTestingTrainingNeighborWeights(
-            int testIndex) {
-
-        if (AppContext.useSparseProximities) {
-            if (AppContext.testing_training_proximities_sparse == null) {
-                return Collections.emptyMap();
+            if (!Double.isNaN(value)) {
+                sum += value;
+                count++;
             }
-
-            return AppContext.testing_training_proximities_sparse.getOrDefault(
-                    testIndex,
-                    Collections.emptyMap()
-            );
         }
 
-        if (AppContext.testing_training_proximities == null
-                || testIndex >= AppContext.testing_training_proximities.length) {
-            return Collections.emptyMap();
-        }
+        return count == 0
+                ? AlignedAverage.UNAVAILABLE
+                : new AlignedAverage(true, sum / count);
+    }
 
-        return convertDenseRowToMap(
-                AppContext.testing_training_proximities[testIndex]
+    private static void validateRuntimeAndMatrix(
+            ParallelRuntime runtime,
+            ProximityMatrixResult proximities
+    ) {
+        Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
+        Objects.requireNonNull(
+                proximities,
+                "ProximityMatrixResult cannot be null."
         );
     }
 
-    private static boolean isMissing1D(
-            List<List<Integer>> missingIndices,
-            int seriesIndex,
-            int featureIndex) {
-
-        if (missingIndices == null) {
-            return false;
-        }
-
-        if (seriesIndex < 0 || seriesIndex >= missingIndices.size()) {
-            return true;
-        }
-
-        return missingIndices.get(seriesIndex).contains(featureIndex);
-    }
-
-    private static boolean isMissing2D(
-            List<List<List<Integer>>> missingIndices,
-            int seriesIndex,
-            int dim,
-            int featureIndex) {
-
-        if (missingIndices == null) {
-            return false;
-        }
-
-        if (seriesIndex < 0 || seriesIndex >= missingIndices.size()) {
-            return true;
-        }
-
-        List<List<Integer>> instanceMissing =
-                missingIndices.get(seriesIndex);
-
-        if (dim < 0 || dim >= instanceMissing.size()) {
-            return true;
-        }
-
-        return instanceMissing.get(dim).contains(featureIndex);
-    }
-
-    private static boolean hasIndex1D(
-            Object series,
-            int featureIndex) {
-
-        if (series instanceof double[]) {
-            return featureIndex >= 0
-                    && featureIndex < ((double[]) series).length;
-        }
-
-        if (series instanceof Object[]) {
-            return featureIndex >= 0
-                    && featureIndex < ((Object[]) series).length;
-        }
-
-        return false;
-    }
-
-    private static boolean hasIndex2D(
-            Object series,
-            int dim,
-            int featureIndex) {
-
-        if (series instanceof double[][]) {
-            double[][] matrix = (double[][]) series;
-
-            return dim >= 0
-                    && dim < matrix.length
-                    && featureIndex >= 0
-                    && featureIndex < matrix[dim].length;
-        }
-
-        if (series instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) series;
-
-            return dim >= 0
-                    && dim < matrix.length
-                    && featureIndex >= 0
-                    && featureIndex < matrix[dim].length;
-        }
-
-        return false;
-    }
-
-    private static double getNumericValue1D(
-            Object series,
-            int featureIndex) {
-
-        if (series instanceof double[]) {
-            return ((double[]) series)[featureIndex];
-        }
-
-        if (series instanceof Object[]) {
-            return objectToDouble(((Object[]) series)[featureIndex]);
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported 1D numeric series type: "
-                        + series.getClass().getName()
-        );
-    }
-
-    private static double getNumericValue2D(
-            Object series,
-            int dim,
-            int featureIndex) {
-
-        if (series instanceof double[][]) {
-            return ((double[][]) series)[dim][featureIndex];
-        }
-
-        if (series instanceof Object[][]) {
-            return objectToDouble(((Object[][]) series)[dim][featureIndex]);
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported 2D numeric series type: "
-                        + series.getClass().getName()
-        );
-    }
-
-    private static double objectToDouble(Object value) {
-
-        if (value == null) {
-            return Double.NaN;
-        }
-
-        if (!(value instanceof Number)) {
+    private static void validateShape(
+            ProximityMatrixResult matrix,
+            int expectedRows,
+            int expectedColumns,
+            String description
+    ) {
+        if (matrix.rowCount() != expectedRows
+                || matrix.columnCount() != expectedColumns) {
             throw new IllegalArgumentException(
-                    "Expected numeric value but found "
-                            + value.getClass().getName()
+                    description
+                            + " proximity matrix shape must be "
+                            + expectedRows
+                            + " x "
+                            + expectedColumns
+                            + ", but received "
+                            + matrix.rowCount()
+                            + " x "
+                            + matrix.columnCount()
+                            + "."
             );
         }
-
-        double numericValue = ((Number) value).doubleValue();
-
-        return Double.isNaN(numericValue)
-                ? Double.NaN
-                : numericValue;
     }
 
-    private static double[] copySeries1DToPrimitive(Object series) {
-
-        if (series instanceof double[]) {
-            return Arrays.copyOf(
-                    (double[]) series,
-                    ((double[]) series).length
+    private static void forRanges(
+            int count,
+            ParallelRuntime runtime,
+            RangeAction action
+    ) throws Exception {
+        if (runtime.isParallel()
+                && count >= MINIMUM_PARALLEL_ROW_RANGE_SIZE) {
+            runtime.forRanges(
+                    0,
+                    count,
+                    MINIMUM_PARALLEL_ROW_RANGE_SIZE,
+                    action::run
             );
+            return;
         }
 
-        if (series instanceof Object[]) {
-            Object[] row = (Object[]) series;
-            double[] copied = new double[row.length];
-
-            for (int i = 0; i < row.length; i++) {
-                copied[i] = objectToDouble(row[i]);
-            }
-
-            return copied;
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported 1D numeric series type: "
-                        + series.getClass().getName()
-        );
+        action.run(0, count);
     }
 
-    private static double[][] copySeries2DToPrimitive(Object series) {
-
-        if (series instanceof double[][]) {
-            double[][] matrix = (double[][]) series;
-            double[][] copied = new double[matrix.length][];
-
-            for (int i = 0; i < matrix.length; i++) {
-                copied[i] = Arrays.copyOf(matrix[i], matrix[i].length);
-            }
-
-            return copied;
-        }
-
-        if (series instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) series;
-            double[][] copied = new double[matrix.length][];
-
-            for (int i = 0; i < matrix.length; i++) {
-                copied[i] = new double[matrix[i].length];
-
-                for (int j = 0; j < matrix[i].length; j++) {
-                    copied[i][j] = objectToDouble(matrix[i][j]);
+    private static boolean containsMissing(
+            Object series
+    ) {
+        if (series instanceof double[] row) {
+            for (double value : row) {
+                if (Double.isNaN(value)) {
+                    return true;
                 }
             }
-
-            return copied;
+            return false;
         }
 
-        throw new IllegalArgumentException(
-                "Unsupported 2D numeric series type: "
-                        + series.getClass().getName()
-        );
-    }
-
-    private static boolean containsMissing(Object series) {
-
-        if (series instanceof double[][]) {
-            double[][] matrix = (double[][]) series;
-
+        if (series instanceof double[][] matrix) {
             for (double[] row : matrix) {
                 for (double value : row) {
                     if (Double.isNaN(value)) {
@@ -772,25 +523,19 @@ public class DTWPFImpute {
                     }
                 }
             }
-
             return false;
         }
 
-        if (series instanceof double[]) {
-            double[] row = (double[]) series;
-
-            for (double value : row) {
-                if (Double.isNaN(value)) {
+        if (series instanceof Object[] row) {
+            for (Object value : row) {
+                if (isMissingObject(value)) {
                     return true;
                 }
             }
-
             return false;
         }
 
-        if (series instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) series;
-
+        if (series instanceof Object[][] matrix) {
             for (Object[] row : matrix) {
                 for (Object value : row) {
                     if (isMissingObject(value)) {
@@ -798,371 +543,503 @@ public class DTWPFImpute {
                     }
                 }
             }
-
-            return false;
-        }
-
-        if (series instanceof Object[]) {
-            Object[] row = (Object[]) series;
-
-            for (Object value : row) {
-                if (isMissingObject(value)) {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         return false;
     }
 
-    private static boolean isMissingObject(Object value) {
+    private static boolean isMissingObject(
+            Object value
+    ) {
+        return value == null
+                || value instanceof Number number
+                && Double.isNaN(number.doubleValue());
+    }
 
-        if (value == null) {
-            return true;
+    private static boolean hasIndex1D(
+            Object series,
+            int index
+    ) {
+        if (series instanceof double[] row) {
+            return index >= 0 && index < row.length;
         }
-
-        if (value instanceof Double) {
-            return Double.isNaN((Double) value);
+        if (series instanceof Object[] row) {
+            return index >= 0 && index < row.length;
         }
-
-        if (value instanceof Float) {
-            return Float.isNaN((Float) value);
-        }
-
-        if (value instanceof Number) {
-            return Double.isNaN(((Number) value).doubleValue());
-        }
-
         return false;
+    }
+
+    private static boolean hasIndex2D(
+            Object series,
+            int dimension,
+            int index
+    ) {
+        if (series instanceof double[][] matrix) {
+            return dimension >= 0
+                    && dimension < matrix.length
+                    && index >= 0
+                    && index < matrix[dimension].length;
+        }
+        if (series instanceof Object[][] matrix) {
+            return dimension >= 0
+                    && dimension < matrix.length
+                    && index >= 0
+                    && index < matrix[dimension].length;
+        }
+        return false;
+    }
+
+    private static double getNumericValue1D(
+            Object series,
+            int index
+    ) {
+        if (series instanceof double[] row) {
+            return row[index];
+        }
+        if (series instanceof Object[] row) {
+            return objectToDouble(row[index]);
+        }
+        throw unsupportedSeries(series, "1D");
+    }
+
+    private static double getNumericValue2D(
+            Object series,
+            int dimension,
+            int index
+    ) {
+        if (series instanceof double[][] matrix) {
+            return matrix[dimension][index];
+        }
+        if (series instanceof Object[][] matrix) {
+            return objectToDouble(matrix[dimension][index]);
+        }
+        throw unsupportedSeries(series, "2D");
+    }
+
+    private static double objectToDouble(
+            Object value
+    ) {
+        if (value == null) {
+            return Double.NaN;
+        }
+        if (!(value instanceof Number number)) {
+            throw new IllegalArgumentException(
+                    "Expected numeric value but found "
+                            + value.getClass().getName()
+                            + "."
+            );
+        }
+        return number.doubleValue();
+    }
+
+    private static double[] copySeries1DToPrimitive(
+            Object series
+    ) {
+        if (series instanceof double[] row) {
+            return row.clone();
+        }
+        if (series instanceof Object[] row) {
+            double[] copied = new double[row.length];
+            for (int index = 0; index < row.length; index++) {
+                copied[index] = objectToDouble(row[index]);
+            }
+            return copied;
+        }
+        throw unsupportedSeries(series, "1D");
+    }
+
+    private static double[][] copySeries2DToPrimitive(
+            Object series
+    ) {
+        if (series instanceof double[][] matrix) {
+            double[][] copied = new double[matrix.length][];
+            for (int dimension = 0;
+                 dimension < matrix.length;
+                 dimension++) {
+                copied[dimension] = matrix[dimension].clone();
+            }
+            return copied;
+        }
+        if (series instanceof Object[][] matrix) {
+            double[][] copied = new double[matrix.length][];
+            for (int dimension = 0;
+                 dimension < matrix.length;
+                 dimension++) {
+                copied[dimension] = new double[matrix[dimension].length];
+                for (int index = 0;
+                     index < matrix[dimension].length;
+                     index++) {
+                    copied[dimension][index] = objectToDouble(
+                            matrix[dimension][index]
+                    );
+                }
+            }
+            return copied;
+        }
+        throw unsupportedSeries(series, "2D");
+    }
+
+    private static IllegalArgumentException unsupportedSeries(
+            Object series,
+            String description
+    ) {
+        return new IllegalArgumentException(
+                "Unsupported "
+                        + description
+                        + " numeric series type: "
+                        + (series == null
+                        ? "null"
+                        : series.getClass().getName())
+                        + "."
+        );
+    }
+
+    private static void requireIndex(
+            int length,
+            int index,
+            int instance,
+            int dimension
+    ) {
+        if (index < 0 || index >= length) {
+            throw new IndexOutOfBoundsException(
+                    "Missing time index "
+                            + index
+                            + " is invalid for instance "
+                            + instance
+                            + (dimension < 0
+                            ? ""
+                            : ", dimension " + dimension)
+                            + " with length "
+                            + length
+                            + "."
+            );
+        }
     }
 
     private static double fallbackValue1D(
             double[] row,
-            int featureIndex,
-            double[] fallbackMeans) {
-
-        if (featureIndex >= 0
-                && featureIndex < row.length
-                && !Double.isNaN(row[featureIndex])) {
-            return row[featureIndex];
+            int index,
+            double[] means
+    ) {
+        if (!Double.isNaN(row[index])) {
+            return row[index];
         }
-
-        if (featureIndex >= 0
-                && featureIndex < fallbackMeans.length
-                && !Double.isNaN(fallbackMeans[featureIndex])) {
-            return fallbackMeans[featureIndex];
+        if (index < means.length && !Double.isNaN(means[index])) {
+            return means[index];
         }
-
         return 0.0;
     }
 
     private static double fallbackValue2D(
             double[][] matrix,
-            int dim,
-            int featureIndex,
-            double[][] fallbackMeans) {
-
-        if (dim >= 0
-                && dim < matrix.length
-                && featureIndex >= 0
-                && featureIndex < matrix[dim].length
-                && !Double.isNaN(matrix[dim][featureIndex])) {
-            return matrix[dim][featureIndex];
+            int dimension,
+            int index,
+            double[][] means
+    ) {
+        if (!Double.isNaN(matrix[dimension][index])) {
+            return matrix[dimension][index];
         }
-
-        if (dim >= 0
-                && dim < fallbackMeans.length
-                && featureIndex >= 0
-                && featureIndex < fallbackMeans[dim].length
-                && !Double.isNaN(fallbackMeans[dim][featureIndex])) {
-            return fallbackMeans[dim][featureIndex];
+        if (dimension < means.length
+                && index < means[dimension].length
+                && !Double.isNaN(means[dimension][index])) {
+            return means[dimension][index];
         }
-
         return 0.0;
     }
 
     private static double[] computeObservedMeans1D(
             List<Object> data,
-            List<List<Integer>> missingIndices) {
-
-        int maxLength = 0;
-
+            List<List<Integer>> missing
+    ) {
+        int maximumLength = 0;
         for (Object series : data) {
-            maxLength = Math.max(maxLength, length1D(series));
+            maximumLength = Math.max(maximumLength, length1D(series));
         }
 
-        double[] sums = new double[maxLength];
-        int[] counts = new int[maxLength];
+        double[] sums = new double[maximumLength];
+        int[] counts = new int[maximumLength];
 
-        for (int i = 0; i < data.size(); i++) {
-
-            Object series = data.get(i);
+        for (int instance = 0; instance < data.size(); instance++) {
+            Object series = data.get(instance);
             int length = length1D(series);
-
-            for (int k = 0; k < length; k++) {
-
-                if (isMissing1D(missingIndices, i, k)) {
+            for (int index = 0; index < length; index++) {
+                if (isMissing1D(missing, instance, index)) {
                     continue;
                 }
-
-                double value = getNumericValue1D(series, k);
-
-                if (Double.isNaN(value)) {
-                    continue;
+                double value = getNumericValue1D(series, index);
+                if (!Double.isNaN(value)) {
+                    sums[index] += value;
+                    counts[index]++;
                 }
-
-                sums[k] += value;
-                counts[k]++;
             }
         }
 
-        double[] means = new double[maxLength];
-
-        for (int k = 0; k < maxLength; k++) {
-            means[k] = counts[k] > 0
-                    ? sums[k] / counts[k]
-                    : Double.NaN;
+        double[] means = new double[maximumLength];
+        for (int index = 0; index < maximumLength; index++) {
+            means[index] = counts[index] == 0
+                    ? Double.NaN
+                    : sums[index] / counts[index];
         }
-
         return means;
     }
 
     private static double[][] computeObservedMeans2D(
             List<Object> data,
-            List<List<List<Integer>>> missingIndices) {
-
-        int maxDims = 0;
-
+            List<List<List<Integer>>> missing
+    ) {
+        int maximumDimensions = 0;
         for (Object series : data) {
-            maxDims = Math.max(maxDims, dimensions2D(series));
+            maximumDimensions = Math.max(
+                    maximumDimensions,
+                    dimensions2D(series)
+            );
         }
 
-        int[] maxLengths = new int[maxDims];
-
+        int[] maximumLengths = new int[maximumDimensions];
         for (Object series : data) {
-            for (int dim = 0; dim < dimensions2D(series); dim++) {
-                maxLengths[dim] = Math.max(
-                        maxLengths[dim],
-                        length2D(series, dim)
+            for (int dimension = 0;
+                 dimension < dimensions2D(series);
+                 dimension++) {
+                maximumLengths[dimension] = Math.max(
+                        maximumLengths[dimension],
+                        length2D(series, dimension)
                 );
             }
         }
 
-        double[][] sums = new double[maxDims][];
-        int[][] counts = new int[maxDims][];
-
-        for (int dim = 0; dim < maxDims; dim++) {
-            sums[dim] = new double[maxLengths[dim]];
-            counts[dim] = new int[maxLengths[dim]];
+        double[][] sums = new double[maximumDimensions][];
+        int[][] counts = new int[maximumDimensions][];
+        for (int dimension = 0;
+             dimension < maximumDimensions;
+             dimension++) {
+            sums[dimension] = new double[maximumLengths[dimension]];
+            counts[dimension] = new int[maximumLengths[dimension]];
         }
 
-        for (int i = 0; i < data.size(); i++) {
-
-            Object series = data.get(i);
-
-            for (int dim = 0; dim < dimensions2D(series); dim++) {
-                for (int k = 0; k < length2D(series, dim); k++) {
-
-                    if (isMissing2D(missingIndices, i, dim, k)) {
+        for (int instance = 0; instance < data.size(); instance++) {
+            Object series = data.get(instance);
+            for (int dimension = 0;
+                 dimension < dimensions2D(series);
+                 dimension++) {
+                for (int index = 0;
+                     index < length2D(series, dimension);
+                     index++) {
+                    if (isMissing2D(
+                            missing,
+                            instance,
+                            dimension,
+                            index
+                    )) {
                         continue;
                     }
 
-                    double value = getNumericValue2D(series, dim, k);
-
-                    if (Double.isNaN(value)) {
-                        continue;
+                    double value = getNumericValue2D(
+                            series,
+                            dimension,
+                            index
+                    );
+                    if (!Double.isNaN(value)) {
+                        sums[dimension][index] += value;
+                        counts[dimension][index]++;
                     }
-
-                    sums[dim][k] += value;
-                    counts[dim][k]++;
                 }
             }
         }
 
-        double[][] means = new double[maxDims][];
-
-        for (int dim = 0; dim < maxDims; dim++) {
-            means[dim] = new double[maxLengths[dim]];
-
-            for (int k = 0; k < maxLengths[dim]; k++) {
-                means[dim][k] =
-                        counts[dim][k] > 0
-                                ? sums[dim][k] / counts[dim][k]
-                                : Double.NaN;
+        double[][] means = new double[maximumDimensions][];
+        for (int dimension = 0;
+             dimension < maximumDimensions;
+             dimension++) {
+            means[dimension] = new double[maximumLengths[dimension]];
+            for (int index = 0;
+                 index < maximumLengths[dimension];
+                 index++) {
+                means[dimension][index] = counts[dimension][index] == 0
+                        ? Double.NaN
+                        : sums[dimension][index]
+                        / counts[dimension][index];
             }
         }
-
         return means;
     }
 
-    private static int length1D(Object series) {
-
-        if (series instanceof double[]) {
-            return ((double[]) series).length;
+    private static boolean isMissing1D(
+            List<List<Integer>> missing,
+            int instance,
+            int index
+    ) {
+        if (missing == null) {
+            return false;
         }
-
-        if (series instanceof Object[]) {
-            return ((Object[]) series).length;
+        if (instance < 0 || instance >= missing.size()) {
+            return true;
         }
+        List<Integer> positions = missing.get(instance);
+        return positions != null && positions.contains(index);
+    }
 
+    private static boolean isMissing2D(
+            List<List<List<Integer>>> missing,
+            int instance,
+            int dimension,
+            int index
+    ) {
+        if (missing == null) {
+            return false;
+        }
+        if (instance < 0 || instance >= missing.size()) {
+            return true;
+        }
+        List<List<Integer>> instanceMissing = missing.get(instance);
+        if (instanceMissing == null
+                || dimension < 0
+                || dimension >= instanceMissing.size()) {
+            return true;
+        }
+        List<Integer> positions = instanceMissing.get(dimension);
+        return positions != null && positions.contains(index);
+    }
+
+    private static int length1D(
+            Object series
+    ) {
+        if (series instanceof double[] row) {
+            return row.length;
+        }
+        if (series instanceof Object[] row) {
+            return row.length;
+        }
         return 0;
     }
 
-    private static int dimensions2D(Object series) {
-
-        if (series instanceof double[][]) {
-            return ((double[][]) series).length;
+    private static int dimensions2D(
+            Object series
+    ) {
+        if (series instanceof double[][] matrix) {
+            return matrix.length;
         }
-
-        if (series instanceof Object[][]) {
-            return ((Object[][]) series).length;
+        if (series instanceof Object[][] matrix) {
+            return matrix.length;
         }
-
         return 0;
     }
 
-    private static int length2D(Object series, int dim) {
-
-        if (series instanceof double[][]) {
-            double[][] matrix = (double[][]) series;
-
-            if (dim < 0 || dim >= matrix.length) {
-                return 0;
-            }
-
-            return matrix[dim].length;
+    private static int length2D(
+            Object series,
+            int dimension
+    ) {
+        if (series instanceof double[][] matrix) {
+            return dimension >= 0 && dimension < matrix.length
+                    ? matrix[dimension].length
+                    : 0;
         }
-
-        if (series instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) series;
-
-            if (dim < 0 || dim >= matrix.length) {
-                return 0;
-            }
-
-            return matrix[dim].length;
+        if (series instanceof Object[][] matrix) {
+            return dimension >= 0 && dimension < matrix.length
+                    ? matrix[dimension].length
+                    : 0;
         }
-
         return 0;
     }
 
-    private static Map<Integer, Double> convertDenseRowToMap(double[] row) {
-
-        Map<Integer, Double> map = new HashMap<>();
-
-        if (row == null) {
-            return map;
-        }
-
-        for (int i = 0; i < row.length; i++) {
-            if (row[i] > EPSILON) {
-                map.put(i, row[i]);
-            }
-        }
-
-        return map;
+    private static List<Object> asObjectList(
+            Object[] values
+    ) {
+        return new ArrayList<>(Arrays.asList(values));
     }
 
-    private static class AlignedAverage {
-
-        final boolean available;
-        final double value;
-
-        AlignedAverage(boolean available, double value) {
-            this.available = available;
-            this.value = value;
-        }
-
-
+    @FunctionalInterface
+    private interface RangeAction {
+        void run(int startInclusive, int endExclusive) throws Exception;
     }
 
-    private static AlignedAverage alignedAverage1D(
-            Object neighborSeries,
-            List<Pair<Integer, Integer>> path,
-            int targetTime) {
+    @FunctionalInterface
+    private interface NeighborConsumer {
+        void accept(int neighborIndex, double weight) throws Exception;
+    }
 
-        double alignedSum = 0.0;
-        int alignedCount = 0;
+    private interface NeighborRows {
+        void forEach(int rowIndex, NeighborConsumer consumer) throws Exception;
 
-        for (Pair<Integer, Integer> pair : path) {
-
-            if (pair.getKey() != targetTime) {
-                continue;
+        static NeighborRows from(ProximityMatrixResult result) {
+            if (result instanceof ProximityMatrixResult.Dense dense) {
+                return new DenseNeighborRows(dense.values());
             }
-
-            int alignedTime = pair.getValue();
-
-            if (!hasIndex1D(neighborSeries, alignedTime)) {
-                continue;
+            if (result instanceof ProximityMatrixResult.Sparse sparse) {
+                return new SparseNeighborRows(sparse.values());
             }
-
-            double value = getNumericValue1D(
-                    neighborSeries,
-                    alignedTime
+            throw new IllegalArgumentException(
+                    "Unsupported proximity result implementation: "
+                            + result.getClass().getName()
+                            + "."
             );
-
-            if (Double.isNaN(value)) {
-                continue;
-            }
-
-            alignedSum += value;
-            alignedCount++;
         }
-
-        if (alignedCount == 0) {
-            return new AlignedAverage(false, Double.NaN);
-        }
-
-        return new AlignedAverage(
-                true,
-                alignedSum / alignedCount
-        );
     }
 
-    private static AlignedAverage alignedAverage2D(
-            Object neighborSeries,
-            List<Pair<Integer, Integer>> path,
-            int dim,
-            int targetTime) {
-
-        double alignedSum = 0.0;
-        int alignedCount = 0;
-
-        for (Pair<Integer, Integer> pair : path) {
-
-            if (pair.getKey() != targetTime) {
-                continue;
+    private record DenseNeighborRows(double[][] matrix)
+            implements NeighborRows {
+        @Override
+        public void forEach(
+                int rowIndex,
+                NeighborConsumer consumer
+        ) throws Exception {
+            double[] row = matrix[rowIndex];
+            for (int column = 0; column < row.length; column++) {
+                double weight = row[column];
+                if (weight != 0.0) {
+                    consumer.accept(column, weight);
+                }
             }
+        }
+    }
 
-            int alignedTime = pair.getValue();
-
-            if (!hasIndex2D(neighborSeries, dim, alignedTime)) {
-                continue;
+    private record SparseNeighborRows(
+            CompressedSparseProximityMatrix matrix
+    ) implements NeighborRows {
+        @Override
+        public void forEach(
+                int rowIndex,
+                NeighborConsumer consumer
+        ) throws Exception {
+            int count = matrix.rowEntryCount(rowIndex);
+            for (int offset = 0; offset < count; offset++) {
+                consumer.accept(
+                        matrix.columnIndexAt(rowIndex, offset),
+                        matrix.valueAt(rowIndex, offset)
+                );
             }
+        }
+    }
 
-            double value = getNumericValue2D(
-                    neighborSeries,
-                    dim,
-                    alignedTime
-            );
+    private record AlignedNeighbor(
+            int index,
+            double weight,
+            List<Pair<Integer, Integer>> path
+    ) {
+    }
 
-            if (Double.isNaN(value)) {
-                continue;
-            }
+    private record AlignedAverage(
+            boolean available,
+            double value
+    ) {
+        private static final AlignedAverage UNAVAILABLE =
+                new AlignedAverage(false, Double.NaN);
+    }
 
-            alignedSum += value;
-            alignedCount++;
+    private static final class WeightedAverage {
+        private double weightedSum;
+        private double totalWeight;
+
+        private void add(double weight, double value) {
+            weightedSum += weight * value;
+            totalWeight += weight;
         }
 
-        if (alignedCount == 0) {
-            return new AlignedAverage(false, Double.NaN);
+        private boolean available() {
+            return totalWeight > 0.0;
         }
 
-        return new AlignedAverage(
-                true,
-                alignedSum / alignedCount
-        );
+        private double value() {
+            return weightedSum / totalWeight;
+        }
     }
 }
