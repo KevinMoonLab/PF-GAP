@@ -2,38 +2,19 @@ package preprocessing.standardization;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Objects;
 
 /**
- * Numerically stable online accumulator for the mean and variance of a
- * sequence of finite numeric observations.
+ * Mutable Welford accumulator for online mean and variance fitting.
  *
- * This class uses Welford's online algorithm and stores:
+ * <p>The hot {@link #add(double)} path trusts its caller to supply finite
+ * observations. Missing-value filtering belongs to the reader or fitter.
+ * This avoids repeating finite-value validation for every observation in
+ * large numeric datasets. Use {@link #addChecked(double)} when accepting
+ * values from an untrusted source.</p>
  *
- *     count
- *         Number of accepted observations.
- *
- *     mean
- *         Running arithmetic mean.
- *
- *     m2
- *         Running sum of squared deviations from the mean.
- *
- * The accumulated state can be converted to either population or sample
- * variance through {@link VarianceConvention}.
- *
- * OnlineMoments can also merge another accumulator without revisiting the
- * original observations. This is useful for:
- *
- *     parallel standardization fitting
- *     per-file accumulation
- *     combining independently processed dataset partitions
- *
- * Missing-value handling is intentionally not built into this class.
- * Callers must decide whether null, NaN, or infinite values should be
- * skipped or rejected before calling add(...).
- *
- * This class is mutable and is not thread-safe. Parallel code should use
- * independent accumulators and merge them after local accumulation.
+ * <p>This class is not thread-safe. Parallel fitting should use independent
+ * accumulators and combine them with {@link #merge(OnlineMoments)}.</p>
  */
 public final class OnlineMoments implements Serializable {
 
@@ -44,102 +25,68 @@ public final class OnlineMoments implements Serializable {
     private double mean;
     private double m2;
 
-    /**
-     * Creates an empty accumulator.
-     */
     public OnlineMoments() {
-        this.count = 0L;
-        this.mean = 0.0;
-        this.m2 = 0.0;
+        // Java's zero initialization is exactly the empty Welford state.
     }
 
     /**
-     * Creates an accumulator from an existing valid state.
-     *
-     * This constructor is primarily useful when reconstructing statistics
-     * from another representation.
-     *
-     * @param count number of accumulated observations
-     * @param mean accumulated arithmetic mean
-     * @param m2 accumulated sum of squared deviations from the mean
+     * Reconstructs a validated accumulator state.
      */
     public OnlineMoments(
             long count,
             double mean,
             double m2
     ) {
-        validateState(
-                count,
-                mean,
-                m2
-        );
-
+        validateState(count, mean, m2);
         this.count = count;
-        this.mean = count == 0L
-                ? 0.0
-                : mean;
-        this.m2 = count == 0L
-                ? 0.0
-                : normalizeM2(m2);
+        this.mean = count == 0L ? 0.0 : mean;
+        this.m2 = count == 0L ? 0.0 : normalizeM2(m2);
     }
 
     /**
-     * Adds one finite observation to this accumulator.
+     * Adds one trusted finite observation using Welford's recurrence.
      *
-     * @param value finite numeric observation
-     * @throws IllegalArgumentException if value is NaN or infinite
+     * <p>No NaN or infinity check is performed. Supplying a nonfinite value
+     * corrupts the accumulator and is a caller configuration error.</p>
+     *
+     * @param value trusted finite observation
      * @throws ArithmeticException if the observation count overflows
      */
     public void add(
             double value
     ) {
-        if (!Double.isFinite(value)) {
-            throw new IllegalArgumentException(
-                    "OnlineMoments accepts only finite observations, "
-                            + "but received: "
-                            + value
-            );
-        }
-
         if (count == Long.MAX_VALUE) {
             throw new ArithmeticException(
                     "OnlineMoments observation count overflow."
             );
         }
 
-        long updatedCount =
-                count + 1L;
+        long updatedCount = count + 1L;
+        double delta = value - mean;
+        double updatedMean = mean + delta / updatedCount;
 
-        double delta =
-                value - mean;
-
-        double updatedMean =
-                mean + delta / updatedCount;
-
-        double deltaFromUpdatedMean =
-                value - updatedMean;
-
-        double updatedM2 =
-                m2 + delta * deltaFromUpdatedMean;
-
-        count =
-                updatedCount;
-
-        mean =
-                updatedMean;
-
-        m2 =
-                normalizeM2(updatedM2);
+        m2 += delta * (value - updatedMean);
+        mean = updatedMean;
+        count = updatedCount;
     }
 
     /**
-     * Adds a boxed observation when it is non-null.
-     *
-     * A null value is ignored and returns false. A non-null NaN or infinite
-     * value is rejected in the same way as {@link #add(double)}.
-     *
-     * @param value boxed observation, possibly null
-     * @return true if an observation was added, or false if value was null
+     * Validates and adds one finite observation.
+     */
+    public void addChecked(
+            double value
+    ) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(
+                    "OnlineMoments requires a finite observation: " + value
+            );
+        }
+
+        add(value);
+    }
+
+    /**
+     * Adds a non-null boxed value through the trusted hot path.
      */
     public boolean addIfPresent(
             Double value
@@ -149,19 +96,11 @@ public final class OnlineMoments implements Serializable {
         }
 
         add(value);
-
         return true;
     }
 
     /**
-     * Adds an observation only when it is finite.
-     *
-     * NaN and positive or negative infinity are ignored rather than rejected.
-     * This method is useful when the caller deliberately treats non-finite
-     * numeric values as missing observations.
-     *
-     * @param value numeric observation
-     * @return true if the observation was added
+     * Adds a primitive value only when it is finite.
      */
     public boolean addIfFinite(
             double value
@@ -171,293 +110,148 @@ public final class OnlineMoments implements Serializable {
         }
 
         add(value);
-
         return true;
     }
 
     /**
-     * Adds a boxed observation only when it is non-null and finite.
-     *
-     * @param value boxed numeric observation
-     * @return true if the observation was added
+     * Adds a boxed value only when it is non-null and finite.
      */
     public boolean addIfFinite(
             Double value
     ) {
-        if (value == null
-                || !Double.isFinite(value)) {
-
+        if (value == null || !Double.isFinite(value)) {
             return false;
         }
 
         add(value);
-
         return true;
     }
 
     /**
-     * Merges another independent accumulator into this accumulator.
-     *
-     * The operation uses the parallel form of the online variance algorithm,
-     * allowing independently accumulated partitions to be combined without
-     * revisiting their observations.
-     *
-     * Merging an empty accumulator has no effect. If this accumulator is
-     * empty, it adopts the complete state of the other accumulator.
-     *
-     * @param other accumulator to merge
-     * @throws IllegalArgumentException if other is null
-     * @throws ArithmeticException if the combined count overflows
+     * Merges another Welford state without revisiting observations.
      */
     public void merge(
             OnlineMoments other
     ) {
-        if (other == null) {
-            throw new IllegalArgumentException(
-                    "Cannot merge a null OnlineMoments accumulator."
-            );
-        }
+        Objects.requireNonNull(other, "OnlineMoments to merge cannot be null.");
 
         if (other.count == 0L) {
             return;
         }
 
-        if (this.count == 0L) {
-            this.count =
-                    other.count;
-
-            this.mean =
-                    other.mean;
-
-            this.m2 =
-                    other.m2;
-
+        if (count == 0L) {
+            count = other.count;
+            mean = other.mean;
+            m2 = other.m2;
             return;
         }
 
-        if (Long.MAX_VALUE - this.count < other.count) {
+        if (Long.MAX_VALUE - count < other.count) {
             throw new ArithmeticException(
-                    "OnlineMoments observation count overflow while "
-                            + "merging accumulators."
+                    "OnlineMoments observation count overflow during merge."
             );
         }
 
-        long combinedCount =
-                this.count + other.count;
+        long combinedCount = count + other.count;
+        double delta = other.mean - mean;
+        double firstWeight = (double) count;
+        double secondWeight = (double) other.count;
 
-        double delta =
-                other.mean - this.mean;
+        mean += delta * secondWeight / combinedCount;
+        m2 += other.m2
+                + delta * delta
+                * firstWeight * secondWeight
+                / combinedCount;
+        count = combinedCount;
 
-        double firstWeight =
-                (double) this.count
-                        / combinedCount;
+        m2 = normalizeM2(m2);
 
-        double secondWeight =
-                (double) other.count
-                        / combinedCount;
-
-        double combinedMean =
-                this.mean * firstWeight
-                        + other.mean * secondWeight;
-
-        double crossTerm =
-                delta
-                        * delta
-                        * ((double) this.count * other.count)
-                        / combinedCount;
-
-        double combinedM2 =
-                this.m2
-                        + other.m2
-                        + crossTerm;
-
-        this.count =
-                combinedCount;
-
-        this.mean =
-                combinedMean;
-
-        this.m2 =
-                normalizeM2(combinedM2);
+        if (!Double.isFinite(mean) || !Double.isFinite(m2)) {
+            throw new ArithmeticException(
+                    "Merging OnlineMoments produced nonfinite state."
+            );
+        }
     }
 
-    /**
-     * Returns an independent copy of this accumulator.
-     *
-     * @return copied accumulator
-     */
     public OnlineMoments copy() {
-        return new OnlineMoments(
-                count,
-                mean,
-                m2
-        );
+        return new OnlineMoments(count, mean, m2);
     }
 
-    /**
-     * Removes all accumulated observations.
-     */
     public void reset() {
         count = 0L;
         mean = 0.0;
         m2 = 0.0;
     }
 
-    /**
-     * Returns whether no observations have been accumulated.
-     *
-     * @return true if the count is zero
-     */
     public boolean isEmpty() {
         return count == 0L;
     }
 
-    /**
-     * Returns whether at least one observation has been accumulated.
-     *
-     * @return true if the count is positive
-     */
     public boolean hasObservations() {
         return count > 0L;
     }
 
-    /**
-     * Returns the number of accumulated observations.
-     *
-     * @return observation count
-     */
     public long getCount() {
         return count;
     }
 
-    /**
-     * Returns the accumulated arithmetic mean.
-     *
-     * @return arithmetic mean
-     * @throws IllegalStateException if no observations have been accumulated
-     */
     public double getMean() {
         requireObservations();
-
         return mean;
     }
 
-    /**
-     * Returns the mean, or the supplied fallback when this accumulator is
-     * empty.
-     *
-     * @param fallback value returned for an empty accumulator
-     * @return accumulated mean or fallback
-     */
     public double getMeanOrDefault(
             double fallback
     ) {
-        return count == 0L
-                ? fallback
-                : mean;
+        return count == 0L ? fallback : mean;
     }
 
-    /**
-     * Returns the accumulated sum of squared deviations from the mean.
-     *
-     * For an empty accumulator, this value is zero.
-     *
-     * @return accumulated M2 value
-     */
     public double getM2() {
         return m2;
     }
 
-    /**
-     * Calculates variance using the requested denominator convention.
-     *
-     * @param convention population or sample variance convention
-     * @return fitted variance
-     */
     public double getVariance(
             VarianceConvention convention
     ) {
         requireConvention(convention);
-
-        return convention.variance(
-                count,
-                m2
-        );
+        return convention.variance(count, normalizedM2());
     }
 
-    /**
-     * Calculates standard deviation using the requested denominator
-     * convention.
-     *
-     * @param convention population or sample variance convention
-     * @return fitted standard deviation
-     */
     public double getStandardDeviation(
             VarianceConvention convention
     ) {
         requireConvention(convention);
-
-        return convention.standardDeviation(
-                count,
-                m2
-        );
+        return convention.standardDeviation(count, normalizedM2());
     }
 
-    /**
-     * Returns whether this accumulator contains enough observations to
-     * calculate variance under the requested convention.
-     *
-     * Population variance requires at least one observation.
-     * Sample variance requires at least two observations.
-     *
-     * @param convention population or sample variance convention
-     * @return true if variance can be calculated
-     */
     public boolean canCalculateVariance(
             VarianceConvention convention
     ) {
         requireConvention(convention);
-
-        return count
-                > convention.degreesOfFreedom();
+        return count > convention.degreesOfFreedom();
     }
 
-    /**
-     * Calculates variance when possible, otherwise returns a caller-supplied
-     * fallback.
-     *
-     * @param convention population or sample variance convention
-     * @param fallback value returned when observations are insufficient
-     * @return variance or fallback
-     */
     public double getVarianceOrDefault(
             VarianceConvention convention,
             double fallback
     ) {
-        if (!canCalculateVariance(convention)) {
-            return fallback;
-        }
-
-        return getVariance(convention);
+        return canCalculateVariance(convention)
+                ? getVariance(convention)
+                : fallback;
     }
 
-    /**
-     * Calculates standard deviation when possible, otherwise returns a
-     * caller-supplied fallback.
-     *
-     * @param convention population or sample variance convention
-     * @param fallback value returned when observations are insufficient
-     * @return standard deviation or fallback
-     */
     public double getStandardDeviationOrDefault(
             VarianceConvention convention,
             double fallback
     ) {
-        if (!canCalculateVariance(convention)) {
-            return fallback;
-        }
+        return canCalculateVariance(convention)
+                ? getStandardDeviation(convention)
+                : fallback;
+    }
 
-        return getStandardDeviation(convention);
+    private double normalizedM2() {
+        m2 = normalizeM2(m2);
+        return m2;
     }
 
     private void requireObservations() {
@@ -471,11 +265,10 @@ public final class OnlineMoments implements Serializable {
     private static void requireConvention(
             VarianceConvention convention
     ) {
-        if (convention == null) {
-            throw new IllegalArgumentException(
-                    "VarianceConvention cannot be null."
-            );
-        }
+        Objects.requireNonNull(
+                convention,
+                "VarianceConvention cannot be null."
+        );
     }
 
     private static void validateState(
@@ -485,42 +278,27 @@ public final class OnlineMoments implements Serializable {
     ) {
         if (count < 0L) {
             throw new IllegalArgumentException(
-                    "Observation count cannot be negative: "
-                            + count
+                    "Observation count cannot be negative: " + count
             );
         }
 
-        if (!Double.isFinite(mean)) {
+        if (!Double.isFinite(mean) || !Double.isFinite(m2)) {
             throw new IllegalArgumentException(
-                    "Mean must be finite: "
-                            + mean
+                    "OnlineMoments state must be finite."
             );
         }
 
-        if (!Double.isFinite(m2)) {
+        if (count == 0L && (mean != 0.0 || m2 != 0.0)) {
             throw new IllegalArgumentException(
-                    "Accumulated squared deviation must be finite: "
-                            + m2
+                    "An empty accumulator requires mean=0.0 and m2=0.0."
             );
-        }
-
-        if (count == 0L) {
-            if (mean != 0.0 || m2 != 0.0) {
-                throw new IllegalArgumentException(
-                        "An empty OnlineMoments accumulator must have "
-                                + "mean=0.0 and m2=0.0."
-                );
-            }
-
-            return;
         }
 
         normalizeM2(m2);
     }
 
     /**
-     * Clamps very small negative M2 values caused by floating-point
-     * roundoff, while rejecting meaningfully negative values.
+     * Clamps tiny negative M2 values attributable to floating-point roundoff.
      */
     private static double normalizeM2(
             double value
@@ -529,27 +307,15 @@ public final class OnlineMoments implements Serializable {
             return value;
         }
 
-        /*
-         * Scale the tolerance to the magnitude of the accumulated value.
-         * The minimum scale of 1.0 keeps the comparison meaningful when M2
-         * is close to zero.
-         */
         double tolerance =
-                32.0
-                        * Math.ulp(
-                        Math.max(
-                                1.0,
-                                Math.abs(value)
-                        )
-                );
+                32.0 * Math.ulp(Math.max(1.0, Math.abs(value)));
 
         if (value >= -tolerance) {
             return 0.0;
         }
 
         throw new IllegalArgumentException(
-                "Accumulated squared deviation cannot be negative: "
-                        + value
+                "Accumulated squared deviation cannot be negative: " + value
         );
     }
 

@@ -31,6 +31,12 @@ import java.util.stream.Stream;
  * {@link NumericPerFileParquetSeriesReader}, which uses Hardwood's
  * batch-oriented column-reading API.</p>
  *
+ * <p>This eager dataset reader always returns raw, unstandardized numeric
+ * arrays. Standardization statistics may be present in {@link ReaderOptions}
+ * because the same option object is also used by lazy readers, but eager
+ * transformation is coordinated after reading. This prevents reader-time
+ * transformation from being applied a second time by the eager workflow.</p>
+ *
  * <p>Returned instance representations:</p>
  *
  * <pre>
@@ -123,7 +129,6 @@ public class NumericPerFileParquetReader
     private final String filePattern;
     private final boolean isTest;
     private final boolean isRegression;
-    private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
     private final NumericPerFileParquetSeriesReader.TimeOrderPolicy
             timeOrderPolicy;
@@ -277,8 +282,17 @@ public class NumericPerFileParquetReader
         this.isRegression =
                 isRegression;
 
-        this.standardizationStats =
-                standardizationStats;
+        /*
+         * Retain the constructor parameter for source compatibility and for
+         * early feature-order validation. The eager reader deliberately does
+         * not retain or apply the statistics. Lazy readers own reader-time
+         * standardization; eager workflows transform the completed dataset.
+         */
+        if (standardizationStats != null) {
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns
+            );
+        }
 
         if (initialTimeCapacity < 1) {
             throw new IllegalArgumentException(
@@ -305,7 +319,7 @@ public class NumericPerFileParquetReader
      * Discovers and eagerly materializes every configured numeric
      * per-instance Parquet file.
      *
-     * @return eager dataset containing numeric time-series instances
+     * @return eager dataset containing raw, unstandardized numeric time-series instances
      * @throws IOException if discovery or materialization fails
      */
     @Override
@@ -322,7 +336,7 @@ public class NumericPerFileParquetReader
                         timeColumn,
                         featureColumns,
                         hasMissingValues,
-                        standardizationStats,
+                        null,
                         initialTimeCapacity,
                         timeOrderPolicy
                 );
@@ -454,12 +468,6 @@ public class NumericPerFileParquetReader
                     "The configured time column cannot also be selected "
                             + "as a numeric feature column: "
                             + timeColumn
-            );
-        }
-
-        if (standardizationStats != null) {
-            standardizationStats.validateFeatureCompatibility(
-                    featureColumns
             );
         }
     }

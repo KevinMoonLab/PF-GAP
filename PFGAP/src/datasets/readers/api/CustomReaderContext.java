@@ -3,11 +3,7 @@ package datasets.readers.api;
 import java.io.Serial;
 import java.io.Serializable;
 import java.nio.file.Path;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * Immutable configuration supplied to a user-defined reader.
@@ -46,18 +42,25 @@ public final class CustomReaderContext
     private final boolean numeric;
     private final boolean hasMissingValues;
     private final Map<String, String> parameters;
+    private final List<String> featureColumns;
 
     /**
-     * Creates an immutable custom-reader context.
+     * Creates an immutable custom-reader context with ordered feature-column
+     * metadata.
      *
-     * @param dataPath          configured dataset path, or null when the
-     *                          instance reference supplies all location
-     *                          information
-     * @param test              whether this context is for test data
-     * @param regression        whether the experiment is a regression task
-     * @param numeric           whether numerical output is expected
-     * @param hasMissingValues  whether missing values are expected
-     * @param parameters        reader-specific string parameters
+     * <p>Feature columns describe the source fields selected for the custom
+     * reader. Their interpretation remains format-specific. For conventional
+     * multivariate time-series readers, their order should match the dimension
+     * order of the returned instance.</p>
+     *
+     * @param dataPath configured dataset path, or null when the instance
+     *                 reference supplies all location information
+     * @param test whether this context is for test data
+     * @param regression whether the experiment is a regression task
+     * @param numeric whether numerical output is expected
+     * @param hasMissingValues whether missing values are expected
+     * @param featureColumns ordered selected feature columns
+     * @param parameters reader-specific string parameters
      */
     public CustomReaderContext(
             Path dataPath,
@@ -65,6 +68,7 @@ public final class CustomReaderContext
             boolean regression,
             boolean numeric,
             boolean hasMissingValues,
+            List<String> featureColumns,
             Map<String, String> parameters
     ) {
         this.dataPath =
@@ -82,10 +86,37 @@ public final class CustomReaderContext
         this.hasMissingValues =
                 hasMissingValues;
 
+        this.featureColumns =
+                copyFeatureColumns(
+                        featureColumns
+                );
+
         this.parameters =
                 normalizeParameters(
                         parameters
                 );
+    }
+
+    /**
+     * Backward-compatible constructor without explicit feature columns.
+     */
+    public CustomReaderContext(
+            Path dataPath,
+            boolean test,
+            boolean regression,
+            boolean numeric,
+            boolean hasMissingValues,
+            Map<String, String> parameters
+    ) {
+        this(
+                dataPath,
+                test,
+                regression,
+                numeric,
+                hasMissingValues,
+                List.of(),
+                parameters
+        );
     }
 
     /**
@@ -104,6 +135,7 @@ public final class CustomReaderContext
                 regression,
                 numeric,
                 hasMissingValues,
+                List.of(),
                 Map.of()
         );
     }
@@ -152,6 +184,14 @@ public final class CustomReaderContext
 
     public boolean hasMissingValues() {
         return hasMissingValues;
+    }
+
+    public List<String> getFeatureColumns() {
+        return featureColumns;
+    }
+
+    public boolean hasFeatureColumns() {
+        return !featureColumns.isEmpty();
     }
 
     /**
@@ -455,6 +495,36 @@ public final class CustomReaderContext
                 .normalize();
     }
 
+    private static List<String> copyFeatureColumns(
+            List<String> featureColumns
+    ) {
+        if (featureColumns == null || featureColumns.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> copy =
+                new ArrayList<>(
+                        featureColumns.size()
+                );
+
+        for (String featureColumn : featureColumns) {
+            if (featureColumn == null || featureColumn.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Custom-reader feature columns cannot contain "
+                                + "null or blank names."
+                );
+            }
+
+            copy.add(
+                    featureColumn.trim()
+            );
+        }
+
+        return Collections.unmodifiableList(
+                copy
+        );
+    }
+
     private static Map<String, String> normalizeParameters(
             Map<String, String> parameters
     ) {
@@ -693,6 +763,8 @@ public final class CustomReaderContext
                 + numeric
                 + ", hasMissingValues="
                 + hasMissingValues
+                + ", featureColumns="
+                + featureColumns
                 + ", parameterNames="
                 + parameters.keySet()
                 + '}';

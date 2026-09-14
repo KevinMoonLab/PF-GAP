@@ -11,6 +11,7 @@ import java.util.Objects;
 import core.AppContext;
 import datasets.readers.lazy.LazySeriesRef;
 import core.contracts.ObjectDataset;
+import distance.api.DimensionSelectableDistanceFunction;
 import distance.api.DistanceFunction;
 import distance.api.LazyDistanceFunction;
 import distance.elastic.*;
@@ -609,21 +610,73 @@ public class DistanceMeasure implements Serializable {
 		return distance(
 				s,
 				t,
-				Double.POSITIVE_INFINITY
+				Double.POSITIVE_INFINITY,
+				null
 		);
 	}
 
 	/**
-	 * Computes a distance between stored or materialized series.
+	 * Computes a distance between stored or materialized series using an
+	 * optional subset of realized dimensions.
 	 *
-	 * <p>This compatibility entry point resolves ordinary lazy references and
-	 * then delegates to distanceResolved(). Custom Java distances implementing
-	 * LazyDistanceFunction retain control over their own resolution behavior.</p>
+	 * @param first stored or materialized first input
+	 * @param second stored or materialized second input
+	 * @param selectedDimensions sorted selected dimension indices, or null to
+	 *                           use every available dimension
+	 * @return distance value
 	 */
 	public double distance(
 			Object first,
 			Object second,
+			int[] selectedDimensions
+	) throws IOException, InterruptedException {
+
+		return distance(
+				first,
+				second,
+				Double.POSITIVE_INFINITY,
+				selectedDimensions
+		);
+	}
+
+	public double distance(
+			Object first,
+			Object second,
 			double bestSoFar
+	) throws IOException, InterruptedException {
+
+		return distance(
+				first,
+				second,
+				bestSoFar,
+				null
+		);
+	}
+
+	/**
+	 * Computes a distance between stored or materialized inputs using an
+	 * optional subset of realized dimensions.
+	 *
+	 * <p>A null selected-dimension array activates the existing all-dimensions
+	 * fast path. A non-null array is treated as immutable and is forwarded
+	 * without copying.</p>
+	 *
+	 * <p>Custom lazy distances do not yet support selected dimensions. They
+	 * continue to receive their original stored representations when no subset
+	 * is supplied.</p>
+	 *
+	 * @param first stored or materialized first input
+	 * @param second stored or materialized second input
+	 * @param bestSoFar current best distance for early abandoning
+	 * @param selectedDimensions sorted selected dimension indices, or null to
+	 *                           use every available dimension
+	 * @return distance value
+	 */
+	public double distance(
+			Object first,
+			Object second,
+			double bestSoFar,
+			int[] selectedDimensions
 	) throws IOException, InterruptedException {
 
 		if (first == null || second == null) {
@@ -633,13 +686,22 @@ public class DistanceMeasure implements Serializable {
 		}
 
 		/*
-		 * Preserve the existing LazyDistanceFunction contract. Such a custom
-		 * Java distance receives the original stored representations and decides
-		 * when to resolve them.
+		 * Preserve the existing LazyDistanceFunction contract when all
+		 * dimensions are used. A future selection-aware lazy plugin interface
+		 * can extend this behavior explicitly.
 		 */
 		if (distance_measure == MEASURE.javadistance
 				&& distanceFunction
 				instanceof LazyDistanceFunction lazyDistance) {
+
+			if (selectedDimensions != null) {
+				throw new UnsupportedOperationException(
+						"Dimension subsampling is enabled, but custom lazy "
+								+ "distance "
+								+ distanceFunction.getClass().getName()
+								+ " does not yet support selected dimensions."
+				);
+			}
 
 			return lazyDistance.compute(
 					first,
@@ -661,7 +723,8 @@ public class DistanceMeasure implements Serializable {
 		return distanceResolved(
 				resolvedFirst,
 				resolvedSecond,
-				bestSoFar
+				bestSoFar,
+				selectedDimensions
 		);
 	}
 
@@ -679,7 +742,84 @@ public class DistanceMeasure implements Serializable {
 		return distanceResolved(
 				s,
 				t,
-				Double.POSITIVE_INFINITY
+				Double.POSITIVE_INFINITY,
+				null
+		);
+	}
+
+	/**
+	 * Computes a distance between already materialized inputs using an optional
+	 * subset of realized dimensions.
+	 */
+	public double distanceResolved(
+			Object first,
+			Object second,
+			int[] selectedDimensions
+	) throws IOException, InterruptedException {
+
+		return distanceResolved(
+				first,
+				second,
+				Double.POSITIVE_INFINITY,
+				selectedDimensions
+		);
+	}
+
+	public double distanceResolved(
+			Object first,
+			Object second,
+			double bestSoFar
+	) throws IOException, InterruptedException {
+
+		return distanceResolved(
+				first,
+				second,
+				bestSoFar,
+				null
+		);
+	}
+
+	/**
+	 * Computes a distance between already materialized inputs using an optional
+	 * subset of realized dimensions.
+	 *
+	 * <p>The null-selection path delegates directly to the established
+	 * all-dimensions distance switch. A non-null selection is dispatched to the
+	 * selection-aware switch so adapted distances can use zero-copy selected
+	 * kernels.</p>
+	 *
+	 * @param first materialized first input
+	 * @param second materialized second input
+	 * @param bestSoFar current best distance for early abandoning
+	 * @param selectedDimensions sorted selected dimension indices, or null to
+	 *                           use every available dimension
+	 * @return distance value
+	 */
+	public double distanceResolved(
+			Object first,
+			Object second,
+			double bestSoFar,
+			int[] selectedDimensions
+	) throws IOException, InterruptedException {
+
+		validateResolvedInputs(
+				first,
+				second
+		);
+
+		if (selectedDimensions == null) {
+			return distanceResolvedAllDimensions(
+					first,
+					second,
+					bestSoFar
+			);
+		}
+
+		return distanceResolvedSelectedDimensions(
+				first,
+				second,
+				bestSoFar,
+				selectedDimensions
 		);
 	}
 
@@ -691,13 +831,13 @@ public class DistanceMeasure implements Serializable {
 	 * @param bsf current best distance for early abandoning
 	 * @return distance value
 	 */
-	public double distanceResolved(
+	public double distanceResolvedAllDimensions(
 			Object s,
 			Object t,
 			double bsf
 	) throws IOException, InterruptedException {
 
-		if (s == null || t == null) {
+		/*if (s == null || t == null) {
 			throw new IllegalArgumentException(
 					"Resolved distance inputs cannot be null."
 			);
@@ -710,7 +850,7 @@ public class DistanceMeasure implements Serializable {
 					"distanceResolved() received a LazySeriesRef. "
 							+ "Resolve the inputs with resolveSeries() first."
 			);
-		}
+		}*/
 
 		double distance =
 				Double.POSITIVE_INFINITY;
@@ -772,10 +912,10 @@ public class DistanceMeasure implements Serializable {
 			distance = python.distance(s,t);
 			//distance = PythonDistance.distance(s,t);
 			break;
-		/*case javadistance:
+		//case javadistance:
 			//distance = distanceFunction.compute(s,t);
-			distance = computeJavaDistance(s,t);
-			break;*/
+		//	distance = computeJavaDistance(s,t);
+		//	break;
 		case javadistance:
 			if (distanceFunction == null) {
 				throw new IllegalStateException(
@@ -783,10 +923,9 @@ public class DistanceMeasure implements Serializable {
 				);
 			}
 
-			/*
-			 * distanceResolved() guarantees that both inputs have already been
-			 * materialized. Do not ask a LazyDistanceFunction to resolve them again.
-			 */
+			 //distanceResolved() guarantees that both inputs have already been
+			 //materialized. Do not ask a LazyDistanceFunction to resolve them again.
+
 			distance =
 					distanceFunction.compute(s,t);
 
@@ -939,10 +1078,10 @@ public class DistanceMeasure implements Serializable {
 			);
 		}
 
-		/*
-		 * Positive infinity may be a legitimate early-abandoning result when
-		 * bestSoFar is finite. Do not print from the distance hot path.
-		 */
+
+		 //Positive infinity may be a legitimate early-abandoning result when
+		 //bestSoFar is finite. Do not print from the distance hot path.
+
 		return distance;
 	}
 	
@@ -1006,6 +1145,114 @@ public class DistanceMeasure implements Serializable {
 	public void setWeigthWDDTW(double g){
 		this.weightWDDTW = g;
 	}
+
+	/**
+	 * Validates the contract of the resolved-input distance entry points.
+	 */
+	private static void validateResolvedInputs(
+			Object first,
+			Object second
+	) {
+		if (first == null || second == null) {
+			throw new IllegalArgumentException(
+					"Resolved distance inputs cannot be null."
+			);
+		}
+
+		if (first instanceof LazySeriesRef
+				|| second instanceof LazySeriesRef) {
+
+			throw new IllegalArgumentException(
+					"distanceResolved() received a LazySeriesRef. "
+							+ "Resolve the inputs with resolveSeries() first."
+			);
+		}
+	}
+
+	/**
+	 * Dispatches selected-dimension distance calculations.
+	 *
+	 * <p>Distance measures are added to this switch as their zero-copy selected
+	 * kernels are implemented. Until then, a non-null dimension subset fails
+	 * explicitly rather than silently reverting to every dimension.</p>
+	 */
+	private double distanceResolvedSelectedDimensions(
+			Object first,
+			Object second,
+			double bestSoFar,
+			int[] selectedDimensions
+	) throws IOException, InterruptedException {
+
+		if (selectedDimensions.length == 0) {
+			throw new IllegalArgumentException(
+					"Selected dimensions cannot be empty."
+			);
+		}
+
+		switch (distance_measure) {
+			/*
+			 * Selection-aware built-in distance cases will be added during the
+			 * next implementation stage.
+			 */
+
+			case euclidean:
+			case shifazEUCLIDEAN:
+				return euc.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case javadistance:
+				return computeSelectedJavaDistance(
+						first,
+						second,
+						selectedDimensions
+				);
+
+			default:
+				throw new UnsupportedOperationException(
+						"Dimension subsampling is not yet implemented for "
+								+ "distance measure "
+								+ distance_measure
+								+ "."
+				);
+		}
+	}
+
+	/**
+	 * Invokes a selection-aware custom Java distance.
+	 */
+	private double computeSelectedJavaDistance(
+			Object first,
+			Object second,
+			int[] selectedDimensions
+	) {
+		if (distanceFunction == null) {
+			throw new IllegalStateException(
+					"DistanceFunction is null for javadistance measure."
+			);
+		}
+
+		if (!(distanceFunction
+				instanceof DimensionSelectableDistanceFunction selectable)) {
+
+			throw new UnsupportedOperationException(
+					"Dimension subsampling is enabled, but custom Java "
+							+ "distance "
+							+ distanceFunction.getClass().getName()
+							+ " does not implement "
+							+ "DimensionSelectableDistanceFunction."
+			);
+		}
+
+		return selectable.compute(
+				first,
+				second,
+				selectedDimensions
+		);
+	}
 	
 	
 	//just to reuse this data structure
@@ -1029,6 +1276,27 @@ public class DistanceMeasure implements Serializable {
 			String... distanceFiles
 	) throws Exception {
 
+		return find_closest_node(
+				query,
+				exemplars,
+				train,
+				null,
+				distanceFiles
+		);
+	}
+
+	/**
+	 * Compatibility nearest-node method supporting optional selected
+	 * dimensions.
+	 */
+	public int find_closest_node(
+			Object query,
+			Object[] exemplars,
+			boolean train,
+			int[] selectedDimensions,
+			String... distanceFiles
+	) throws Exception {
+
 		Object resolvedQuery =
 				resolveSeries(
 						query
@@ -1042,130 +1310,187 @@ public class DistanceMeasure implements Serializable {
 		return findClosestResolvedNode(
 				resolvedQuery,
 				resolvedExemplars,
-				AppContext.getRand()
+				AppContext.getRand(),
+				selectedDimensions
 		);
 	}
 
 	/**
 	 * Finds the closest exemplar when every input has already been materialized.
 	 *
-	 * <p>All mutable nearest-node state is method-local, so separate calls may
-	 * execute concurrently when they use independent DistanceMeasure instances.
-	 * The current best distance is passed through to compatible distances for
-	 * early abandoning.</p>
+	 * <p>This branch-only fast path allocates no result carrier. Mutable routing
+	 * state is method-local, so separate calls may execute concurrently when they
+	 * use independent DistanceMeasure instances.</p>
 	 */
 	public int findClosestResolvedNode(
 			Object resolvedQuery,
 			Object[] resolvedExemplars,
 			Random random
 	) throws IOException, InterruptedException {
-
-		if (resolvedQuery == null) {
-			throw new IllegalArgumentException(
-					"Resolved query cannot be null."
-			);
-		}
-
-		if (resolvedQuery instanceof LazySeriesRef) {
-			throw new IllegalArgumentException(
-					"Resolved query cannot be a LazySeriesRef."
-			);
-		}
-
-		if (resolvedExemplars == null
-				|| resolvedExemplars.length == 0) {
-
-			throw new IllegalArgumentException(
-					"At least one resolved exemplar is required."
-			);
-		}
-
-		Objects.requireNonNull(
+		return findClosestResolvedNode(
+				resolvedQuery,
+				resolvedExemplars,
 				random,
-				"Nearest-node selection requires a Random instance."
+				null
 		);
+	}
 
-		double bestDistance =
-				Double.POSITIVE_INFINITY;
+	/**
+	 * Finds the closest materialized exemplar using an optional selected subset
+	 * of realized dimensions.
+	 *
+	 * <p>The selected-dimension array is shared read-only throughout the
+	 * comparison loop and is not copied. This branch-only path does not allocate
+	 * a ClosestBranchResult.</p>
+	 */
+	public int findClosestResolvedNode(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random,
+			int[] selectedDimensions
+	) throws IOException, InterruptedException {
+		return findClosestResolvedNodeInternal(
+				resolvedQuery,
+				resolvedExemplars,
+				random,
+				selectedDimensions,
+				null
+		);
+	}
 
-		int[] tiedBranches =
-				new int[resolvedExemplars.length];
+	/**
+	 * Finds the closest materialized exemplar and writes both the selected branch
+	 * and its winning distance to a reusable output carrier.
+	 *
+	 * <p>The caller owns the carrier. Sequential callers should reuse one carrier
+	 * across observations. Parallel callers must provide one carrier per worker
+	 * or logical range; sharing a mutable carrier between concurrent calls would
+	 * create a data race.</p>
+	 *
+	 * <p>The winning distance may be positive infinity. This occurs when every
+	 * candidate comparison returns positive infinity. NaN remains invalid and is
+	 * rejected by the distance-dispatch path.</p>
+	 */
+	public void findClosestResolvedNode(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random,
+			int[] selectedDimensions,
+			ClosestBranchResult output
+	) throws IOException, InterruptedException {
+		Objects.requireNonNull(
+				output,
+				"ClosestBranchResult output cannot be null."
+		);
+		findClosestResolvedNodeInternal(
+				resolvedQuery,
+				resolvedExemplars,
+				random,
+				selectedDimensions,
+				output
+		);
+	}
 
-		int tieCount =
-				0;
+	/**
+	 * Shared allocation-free nearest-exemplar implementation.
+	 *
+	 * <p>When output is null, only the selected branch is returned. When output is
+	 * non-null, the same loop also writes the already-computed winning distance.
+	 * No distance is recomputed and no per-observation result object is created.</p>
+	 */
+	private int findClosestResolvedNodeInternal(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random,
+			int[] selectedDimensions,
+			ClosestBranchResult output
+	) throws IOException, InterruptedException {
+		validateNearestNodeInputs(resolvedQuery, resolvedExemplars, random);
 
-		for (int branch = 0;
-			 branch < resolvedExemplars.length;
-			 branch++) {
+		double bestDistance = Double.POSITIVE_INFINITY;
+		int[] tiedBranches = new int[resolvedExemplars.length];
+		int tieCount = 0;
 
-			Object exemplar =
-					resolvedExemplars[branch];
+		for (int branch = 0; branch < resolvedExemplars.length; branch++) {
+			Object exemplar = resolvedExemplars[branch];
+			validateResolvedExemplar(exemplar, branch);
 
-			if (exemplar == null) {
-				throw new IllegalArgumentException(
-						"Resolved exemplar is null at branch "
-								+ branch
-								+ "."
-				);
-			}
-
-			if (exemplar instanceof LazySeriesRef) {
-				throw new IllegalArgumentException(
-						"Resolved exemplar is still a LazySeriesRef at branch "
-								+ branch
-								+ "."
-				);
-			}
-
-			if (AppContext
-					.config_skip_distance_when_exemplar_matches_query
+			if (AppContext.config_skip_distance_when_exemplar_matches_query
 					&& exemplar == resolvedQuery) {
-
+				if (output != null) {
+					output.set(branch, 0.0);
+				}
 				return branch;
 			}
 
-			double currentDistance =
-					distanceResolved(
-							resolvedQuery,
-							exemplar,
-							bestDistance
-					);
+			double currentDistance = distanceResolved(
+					resolvedQuery,
+					exemplar,
+					bestDistance,
+					selectedDimensions
+			);
 
 			if (currentDistance < bestDistance) {
-				bestDistance =
-						currentDistance;
-
-				tiedBranches[0] =
-						branch;
-
-				tieCount =
-						1;
-			} else if (Double.compare(
-					currentDistance,
-					bestDistance
-			) == 0) {
-				tiedBranches[tieCount++] =
-						branch;
+				bestDistance = currentDistance;
+				tiedBranches[0] = branch;
+				tieCount = 1;
+			} else if (Double.compare(currentDistance, bestDistance) == 0) {
+				tiedBranches[tieCount++] = branch;
 			}
 		}
 
 		if (tieCount == 0) {
 			throw new IllegalStateException(
 					"No closest branch was found for distance measure "
-							+ distance_measure
-							+ "."
+							+ distance_measure + "."
 			);
 		}
 
-		if (tieCount == 1) {
-			return tiedBranches[0];
+		int selectedBranch = tieCount == 1
+				? tiedBranches[0]
+				: tiedBranches[random.nextInt(tieCount)];
+		if (output != null) {
+			output.set(selectedBranch, bestDistance);
 		}
+		return selectedBranch;
+	}
 
-		return tiedBranches[
-				random.nextInt(
-						tieCount
-				)
-				];
+	private static void validateNearestNodeInputs(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random
+	) {
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException("Resolved query cannot be null.");
+		}
+		if (resolvedQuery instanceof LazySeriesRef) {
+			throw new IllegalArgumentException(
+					"Resolved query cannot be a LazySeriesRef."
+			);
+		}
+		if (resolvedExemplars == null || resolvedExemplars.length == 0) {
+			throw new IllegalArgumentException(
+					"At least one resolved exemplar is required."
+			);
+		}
+		Objects.requireNonNull(
+				random,
+				"Nearest-node selection requires a Random instance."
+		);
+	}
+
+	private static void validateResolvedExemplar(Object exemplar, int branch) {
+		if (exemplar == null) {
+			throw new IllegalArgumentException(
+					"Resolved exemplar is null at branch " + branch + "."
+			);
+		}
+		if (exemplar instanceof LazySeriesRef) {
+			throw new IllegalArgumentException(
+					"Resolved exemplar is still a LazySeriesRef at branch "
+							+ branch + "."
+			);
+		}
 	}
 
 	// for lazy datasets: resolve before passing to distances

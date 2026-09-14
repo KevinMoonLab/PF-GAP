@@ -7,9 +7,20 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/outlier/IsolationDepthScorer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/outlier/IsolationDepthScorer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ProximityForestResult.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ProximityForestResult.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/EvaluationRepetitionRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/EvaluationRepetitionRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/output/ExperimentResultRecord.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/output/ExperimentResultRecord.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/output/ExperimentResultWriter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/output/ExperimentResultWriter.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
@@ -30,6 +41,14 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="GitSEFilterConfiguration">
+    <file-type-list>
+      <filtered-out-file-type name="LOCAL_BRANCH" />
+      <filtered-out-file-type name="REMOTE_BRANCH" />
+      <filtered-out-file-type name="TAG" />
+      <filtered-out-file-type name="COMMIT_BY_MESSAGE" />
+    </file-type-list>
   </component>
   <component name="MavenImportPreferences">
     <option name="importingSettings">

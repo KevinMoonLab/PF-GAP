@@ -172,7 +172,7 @@ public class PerFileDelimitedSeriesReader
                 featureColumns,
                 isNumeric,
                 hasMissingValues,
-                null,
+                standardizationStats,
                 DEFAULT_INITIAL_TIME_CAPACITY
         );
     }

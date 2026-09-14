@@ -6,7 +6,7 @@ import datasets.ListObjectDataset;
 import de.siegmar.fastcsv.reader.AbstractBaseCsvCallbackHandler;
 import de.siegmar.fastcsv.reader.CsvReader;
 import preprocessing.standardization.StandardizationStats;
-import preprocessing.standardization.Standardizer;
+//import preprocessing.standardization.Standardizer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -96,7 +96,7 @@ public class NumericLongFormatReader
     private final List<String> featureColumns;
     private final List<String> labelColumns;
 
-    private final StandardizationStats standardizationStats;
+    //private final StandardizationStats standardizationStats;
     private final int initialGroupCapacity;
     private final Set<String> missingIndicators;
 
@@ -213,8 +213,16 @@ public class NumericLongFormatReader
                         true
                 );
 
-        this.standardizationStats =
-                standardizationStats;
+        /*
+         * Retain the constructor parameter for source compatibility and early
+         * feature-order validation. This eager reader always returns raw numeric
+         * arrays. StandardizationPipeline transforms the completed eager dataset.
+         */
+        if (standardizationStats != null) {
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns
+            );
+        }
 
         if (initialGroupCapacity < 1) {
             throw new IllegalArgumentException(
@@ -298,9 +306,7 @@ public class NumericLongFormatReader
         }
 
         ListObjectDataset dataset =
-                handler.buildDataset(
-                        standardizationStats
-                );
+                handler.buildDataset();
 
         long end =
                 System.nanoTime();
@@ -361,12 +367,6 @@ public class NumericLongFormatReader
                                 + labelColumn
                 );
             }
-        }
-
-        if (standardizationStats != null) {
-            standardizationStats.validateFeatureCompatibility(
-                    featureColumns
-            );
         }
     }
 
@@ -1342,9 +1342,7 @@ public class NumericLongFormatReader
             );
         }
 
-        private ListObjectDataset buildDataset(
-                StandardizationStats standardizationStats
-        ) {
+        private ListObjectDataset buildDataset() {
             if (!schemaResolved) {
                 throw new IllegalArgumentException(
                         "Numeric long-format file is empty: "
@@ -1388,13 +1386,6 @@ public class NumericLongFormatReader
 
                 Object data =
                         group.toSeries();
-
-                if (standardizationStats != null) {
-                    Standardizer.transformInstanceInPlace(
-                            data,
-                            standardizationStats
-                    );
-                }
 
                 Object label =
                         group.getLabel();

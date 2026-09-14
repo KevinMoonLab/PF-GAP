@@ -29,6 +29,12 @@ import java.util.stream.Stream;
  * <p>Every discovered file is materialized during {@link #read()} by
  * {@link NumericPerFileDelimitedSeriesReader}.</p>
  *
+ * <p>This eager dataset reader always returns raw, unstandardized numeric
+ * arrays. Standardization statistics may be present in {@link ReaderOptions}
+ * because the same option object is also used by lazy readers, but eager
+ * transformation is coordinated after reading. This prevents reader-time
+ * transformation from being applied a second time by the eager workflow.</p>
+ *
  * <p>Returned instance representation:</p>
  *
  * <pre>
@@ -109,7 +115,6 @@ public class NumericPerFileDelimitedReader
     private final String filePattern;
     private final boolean isTest;
     private final boolean isRegression;
-    private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
 
     /**
@@ -241,8 +246,19 @@ public class NumericPerFileDelimitedReader
         this.isRegression =
                 isRegression;
 
-        this.standardizationStats =
-                standardizationStats;
+        /*
+         * Retain this constructor parameter for source compatibility and for
+         * early feature-order validation. The eager reader deliberately does
+         * not retain or apply the statistics. Lazy readers own reader-time
+         * standardization; eager workflows transform the completed dataset.
+         */
+        if (standardizationStats != null
+                && !this.featureColumns.isEmpty()) {
+
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns
+            );
+        }
 
         if (initialTimeCapacity < 1) {
             throw new IllegalArgumentException(
@@ -263,7 +279,8 @@ public class NumericPerFileDelimitedReader
      * Discovers and eagerly materializes every configured numeric
      * per-instance file.
      *
-     * @return eager dataset containing {@code double[][]} instances
+     * @return eager dataset containing raw, unstandardized
+     *         {@code double[][]} instances
      * @throws IOException if files cannot be discovered or materialized
      */
     @Override
@@ -281,7 +298,7 @@ public class NumericPerFileDelimitedReader
                         hasHeader,
                         timeColumn,
                         featureColumns,
-                        standardizationStats,
+                        null,
                         initialTimeCapacity
                 );
 
@@ -433,13 +450,6 @@ public class NumericPerFileDelimitedReader
             }
         }
 
-        if (standardizationStats != null
-                && !featureColumns.isEmpty()) {
-
-            standardizationStats.validateFeatureCompatibility(
-                    featureColumns
-            );
-        }
     }
 
     private void validateReadOptions() {

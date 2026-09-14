@@ -88,7 +88,7 @@ public final class ExperimentResultWriter {
      * Version of the top-level experiment-results JSON format.
      */
     public static final int CURRENT_FORMAT_VERSION =
-            1;
+            2;
 
     public static final String DEFAULT_FILE_NAME =
             "experiment_results.json";
@@ -319,6 +319,7 @@ public final class ExperimentResultWriter {
                 records.size(),
                 new ArrayList<>(records),
                 calculateAggregateMetrics(),
+                calculateAggregateCounts(),
                 calculateAggregateTimings(),
                 calculateAggregateForestStatistics()
         );
@@ -335,6 +336,25 @@ public final class ExperimentResultWriter {
         return calculateAggregateValues(
                 ExperimentResultRecord::getMetrics
         );
+    }
+
+    /** Aggregates named repetition-level counts. */
+    private Map<String, AggregateNumericSummary>
+    calculateAggregateCounts() {
+        Set<String> names = new LinkedHashSet<>();
+        for (ExperimentResultRecord record : records) {
+            names.addAll(record.getCounts().keySet());
+        }
+        Map<String, AggregateNumericSummary> aggregates = new LinkedHashMap<>();
+        for (String name : names) {
+            NumericAccumulator accumulator = new NumericAccumulator();
+            for (ExperimentResultRecord record : records) {
+                Long value = record.getCounts().get(name);
+                if (value != null) accumulator.add(value.doubleValue());
+            }
+            if (!accumulator.isEmpty()) aggregates.put(name, accumulator.toSummary());
+        }
+        return Collections.unmodifiableMap(aggregates);
     }
 
     /**
@@ -428,6 +448,12 @@ public final class ExperimentResultWriter {
         ExperimentResultRecord first =
                 records.get(0);
 
+        if (first.getFormatVersion() != candidate.getFormatVersion()) {
+            throw new IllegalArgumentException(
+                    "Experiment result format-version mismatch."
+            );
+        }
+
         if (!first.getDataset().equals(
                 candidate.getDataset()
         )) {
@@ -512,6 +538,9 @@ public final class ExperimentResultWriter {
                 aggregateMetrics;
 
         private final Map<String, AggregateNumericSummary>
+                aggregateCounts;
+
+        private final Map<String, AggregateNumericSummary>
                 aggregateTimingMilliseconds;
 
         private final Map<String, AggregateNumericSummary>
@@ -525,6 +554,7 @@ public final class ExperimentResultWriter {
                 int numRepeats,
                 List<ExperimentResultRecord> results,
                 Map<String, AggregateNumericSummary> aggregateMetrics,
+                Map<String, AggregateNumericSummary> aggregateCounts,
                 Map<String, AggregateNumericSummary>
                         aggregateTimingMilliseconds,
                 Map<String, AggregateNumericSummary>
@@ -552,6 +582,9 @@ public final class ExperimentResultWriter {
 
             this.aggregateMetrics =
                     aggregateMetrics;
+
+            this.aggregateCounts =
+                    aggregateCounts;
 
             this.aggregateTimingMilliseconds =
                     aggregateTimingMilliseconds;

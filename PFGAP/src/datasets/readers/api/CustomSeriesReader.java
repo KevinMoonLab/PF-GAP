@@ -40,8 +40,29 @@ import java.io.IOException;
  * PFGAP global configuration when the required information can be supplied
  * through the context.</p>
  *
- * <p>The returned object may use any representation understood by the
- * configured distance functions. Common PFGAP representations include:</p>
+ * <p>The returned object must contain raw instance values. Implementations
+ * should not apply PFGAP standardization themselves. When standardization is
+ * enabled and the custom reader is configured as numeric, PFGAP applies the
+ * prepared training statistics after this method returns. This rule is the
+ * same for eager and lazy custom readers and prevents transformation from
+ * being applied twice.</p>
+ *
+ * <p>Built-in standardization currently requires one of these realized
+ * numeric representations:</p>
+ *
+ * <pre>
+ * double[]
+ * Double[]
+ * double[][]
+ * Double[][]
+ * </pre>
+ *
+ * <p>A proprietary representation remains valid when built-in
+ * standardization is disabled and the configured distance functions
+ * understand that representation.</p>
+ *
+ * <p>The returned object may otherwise use any representation understood by
+ * the configured distance functions. Common PFGAP representations include:</p>
  *
  * <pre>
  * double[]
@@ -75,7 +96,8 @@ public interface CustomSeriesReader {
      *
      * @param reference reference identifying the instance to read
      * @param context immutable configuration for this reader
-     * @return non-null instance representation
+     * @return non-null raw instance representation; PFGAP applies any
+     *         configured built-in standardization after return
      * @throws IOException if the underlying data cannot be read
      */
     Object read(

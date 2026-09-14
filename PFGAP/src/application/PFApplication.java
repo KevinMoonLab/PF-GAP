@@ -6,11 +6,13 @@ import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
+import ood.OODScoreType;
 import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationMethod;
 import preprocessing.standardization.StandardizationScope;
 import preprocessing.standardization.VarianceConvention;
-import proximities.ProximityType;
+import proximity.ProximityType;
+import trees.DimensionSelectionStrategy;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -20,14 +22,14 @@ import java.util.*;
 
 /**
  * Main entry point for the Proximity Forest application
- * 
+ *
  * @author shifaz
  * @email ahmed.shifaz@monash.edu
  *
  */
 
 public class PFApplication {
-	
+
 	public static final String UCR_dataset = "GunPoint"; //"ItalyPowerDemand";
 	//TODO test support file paths with a space?
 	public static final String[] test_args = new String[]{
@@ -44,9 +46,9 @@ public class PFApplication {
 //			"-jvmwarmup=true",	//disabled
 			"-export=1",
 			"-verbosity=1",
-			"-csv_has_header=false", 
+			"-csv_has_header=false",
 			"-target_column=first"	//first or last
-            };
+	};
 
 	private static MEASURE[] parseMeasureList(
 			String raw,
@@ -116,6 +118,33 @@ public class PFApplication {
 				|| measure == MEASURE.dtwarow_d;
 	}
 
+	private static Map<String, String> parseCustomReaderParameters(String raw) {
+		Map<String, String> parameters = new LinkedHashMap<>();
+		String normalized = parseNullableString(raw);
+		if (normalized == null || normalized.equals("[]") || normalized.equals("{}")) {
+			return parameters;
+		}
+		for (String assignment : normalized.split(";")) {
+			String item = assignment.trim();
+			if (item.isEmpty()) continue;
+			int separator = item.indexOf('=');
+			if (separator <= 0) {
+				throw new IllegalArgumentException(
+						"Invalid custom_reader_parameters entry: " + item
+								+ ". Expected name=value entries separated by semicolons."
+				);
+			}
+			String name = item.substring(0, separator).trim();
+			String value = item.substring(separator + 1).trim();
+			if (name.isEmpty() || parameters.put(name, value) != null) {
+				throw new IllegalArgumentException(
+						"Duplicate or blank custom-reader parameter: " + name
+				);
+			}
+		}
+		return parameters;
+	}
+
 	private static ReaderType parseReaderType(String raw) {
 
 		if (raw == null || raw.trim().isEmpty()) {
@@ -131,6 +160,123 @@ public class PFApplication {
 							+ ". Valid options are: "
 							+ Arrays.toString(ReaderType.values())
 			);
+		}
+	}
+
+	/** Parses an evaluation-time OOD scoring method. */
+	private static OODScoreType parseOODScoreType(String raw) {
+		try {
+			return OODScoreType.parse(raw);
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException(
+					"Invalid ood_score_type: " + raw + ". Supported values: "
+							+ OODScoreType.supportedValues() + ".",
+					exception
+			);
+		}
+	}
+
+	/**
+	 * Parses a node-level dimension-selection strategy.
+	 */
+	private static DimensionSelectionStrategy parseDimensionSelectionStrategy(
+			String raw
+	) {
+		if (raw == null || raw.isBlank()) {
+			throw new IllegalArgumentException(
+					"dimension_selection_strategy cannot be null or blank."
+			);
+		}
+
+		try {
+			return DimensionSelectionStrategy.valueOf(
+					raw.trim()
+							.toUpperCase(
+									Locale.ROOT
+							)
+			);
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException(
+					"Invalid dimension_selection_strategy: "
+							+ raw
+							+ ". Valid options are: "
+							+ Arrays.toString(
+							DimensionSelectionStrategy.values()
+					),
+					exception
+			);
+		}
+	}
+
+	/**
+	 * Validates node-level dimension-subsampling configuration after all
+	 * command-line arguments have been parsed.
+	 *
+	 * <p>Strategy-specific numeric values are ignored when dimension
+	 * subsampling is disabled or when the ALL strategy is selected.</p>
+	 */
+	private static void validateDimensionSelectionConfiguration() {
+		if (AppContext.dimension_selection_strategy == null) {
+			throw new IllegalArgumentException(
+					"dimension_selection_strategy cannot be null."
+			);
+		}
+
+		if (!AppContext.subsample_dimensions
+				|| AppContext.dimension_selection_strategy
+				== DimensionSelectionStrategy.ALL) {
+
+			return;
+		}
+
+		switch (AppContext.dimension_selection_strategy) {
+			case SQRT:
+			case LOG2:
+				return;
+
+			case FIXED_COUNT:
+				if (AppContext.dimension_selection_count < 1) {
+					throw new IllegalArgumentException(
+							"dimension_selection_count must be positive when "
+									+ "dimension_selection_strategy=FIXED_COUNT, "
+									+ "but received "
+									+ AppContext.dimension_selection_count
+									+ "."
+					);
+				}
+
+				return;
+
+			case PROPORTION:
+				double proportion =
+						AppContext.dimension_selection_proportion;
+
+				if (!Double.isFinite(
+						proportion
+				)
+						|| proportion <= 0.0
+						|| proportion > 1.0) {
+
+					throw new IllegalArgumentException(
+							"dimension_selection_proportion must be finite and "
+									+ "within (0, 1] when "
+									+ "dimension_selection_strategy=PROPORTION, "
+									+ "but received "
+									+ proportion
+									+ "."
+					);
+				}
+
+				return;
+
+			case ALL:
+				return;
+
+			default:
+				throw new IllegalStateException(
+						"Unsupported dimension-selection strategy: "
+								+ AppContext.dimension_selection_strategy
+				);
 		}
 	}
 
@@ -198,7 +344,7 @@ public class PFApplication {
 	public static void main(String[] args) throws IOException {
 		//Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir testdir0"});
 		try {
-			
+
 			//args = test_args;
 			//Integer testint = Integer.parseInt("2 3 3.444"[0]);
 			//some default settings are specified in the AppContext class but here we
@@ -235,129 +381,138 @@ public class PFApplication {
 									+ ". Expected -name=value."
 					);
 				}
-				
+
 				switch(options[0]) {
-				case "-seed":
-					AppContext.setRandomSeed(Long.parseLong(options[1]));
-					break;
-				case "-bootstrap_trees":
-					AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
-					break;
-				case "-eval":
-					AppContext.eval = Boolean.parseBoolean(options[1]);
-					break;
-				case "-train":
-					AppContext.training_file = options[1];
-					break;
-				case "-test":
-					if (Objects.equals(options[1], "None")) {
-						AppContext.testing_file = null;
-					} else {
-						AppContext.testing_file = options[1];
-					}
-					break;
-				case "-train_labels":
-					if (Objects.equals(options[1], "None")) {
-						AppContext.training_labels = null;
-					} else {
-						AppContext.training_labels = options[1];
-					}
-					break;
-				case "-test_labels":
-					if (Objects.equals(options[1], "None")) {
-						AppContext.testing_labels = null;
-					} else {
-						AppContext.testing_labels = options[1];
-						AppContext.exists_testlabels = true;
-					}
-					break;
-				case "-exists_testlabels":
-					if (AppContext.exists_testlabels) {
+					case "-seed":
+						AppContext.setRandomSeed(Long.parseLong(options[1]));
 						break;
-					} else {
-						AppContext.exists_testlabels = Boolean.parseBoolean(options[1]);
+					case "-bootstrap_trees":
+						AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
 						break;
-					}
-				case "-reader_type":
-					AppContext.readerType = parseReaderType(options[1]);
-					break;
-				case "-file_pattern":
-					AppContext.file_pattern = parseNullableString(options[1]);
-					break;
-				case "-train_reader_type":
-					AppContext.trainingReaderType =
-							parseReaderType(options[1]);
-					break;
+					case "-eval":
+						AppContext.eval = Boolean.parseBoolean(options[1]);
+						break;
+					case "-train":
+						AppContext.training_file = options[1];
+						break;
+					case "-test":
+						if (Objects.equals(options[1], "None")) {
+							AppContext.testing_file = null;
+						} else {
+							AppContext.testing_file = options[1];
+						}
+						break;
+					case "-train_labels":
+						if (Objects.equals(options[1], "None")) {
+							AppContext.training_labels = null;
+						} else {
+							AppContext.training_labels = options[1];
+						}
+						break;
+					case "-test_labels":
+						if (Objects.equals(options[1], "None")) {
+							AppContext.testing_labels = null;
+						} else {
+							AppContext.testing_labels = options[1];
+							AppContext.exists_testlabels = true;
+						}
+						break;
+					case "-exists_testlabels":
+						if (AppContext.exists_testlabels) {
+							break;
+						} else {
+							AppContext.exists_testlabels = Boolean.parseBoolean(options[1]);
+							break;
+						}
+					case "-reader_type":
+						AppContext.readerType = parseReaderType(options[1]);
+						break;
+					case "-file_pattern":
+						AppContext.file_pattern = parseNullableString(options[1]);
+						break;
+					case "-custom_reader_descriptor":
+						AppContext.customReaderDescriptor = parseNullableString(options[1]);
+						break;
+					case "-custom_reader_parameters":
+						AppContext.customReaderParameters = parseCustomReaderParameters(options[1]);
+						break;
+					case "-custom_reader_thread_safe":
+						AppContext.customReaderThreadSafe = Boolean.parseBoolean(options[1]);
+						break;
+					case "-train_reader_type":
+						AppContext.trainingReaderType =
+								parseReaderType(options[1]);
+						break;
 
-				case "-test_reader_type":
-					AppContext.testingReaderType =
-							parseReaderType(options[1]);
-					break;
+					case "-test_reader_type":
+						AppContext.testingReaderType =
+								parseReaderType(options[1]);
+						break;
 
-				case "-train_file_pattern":
-					AppContext.trainingFilePattern =
-							parseNullableString(options[1]);
-					break;
+					case "-train_file_pattern":
+						AppContext.trainingFilePattern =
+								parseNullableString(options[1]);
+						break;
 
-				case "-test_file_pattern":
-					AppContext.testingFilePattern =
-							parseNullableString(options[1]);
-					break;
-				case "-id_column":
-					AppContext.id_column = parseNullableString(options[1]);
-					break;
+					case "-test_file_pattern":
+						AppContext.testingFilePattern =
+								parseNullableString(options[1]);
+						break;
+					case "-id_column":
+						AppContext.id_column = parseNullableString(options[1]);
+						break;
 
-				case "-time_column":
-					AppContext.time_column = parseNullableString(options[1]);
-					break;
+					case "-time_column":
+						AppContext.time_column = parseNullableString(options[1]);
+						break;
 
-				case "-feature_columns":
-					AppContext.feature_columns = parseStringList(options[1]);
-					break;
+					case "-feature_columns":
+						AppContext.feature_columns = parseStringList(options[1]);
+						break;
 
-				case "-label_columns":
-					AppContext.label_columns = parseStringList(options[1]);
-					break;
-				case "-hdf5_dataset_path":
-					AppContext.hdf5_dataset_path = parseNullableString(options[1]);
-					break;
-				case "-hdf5_label_dataset_path":
-					AppContext.hdf5_label_dataset_path = parseNullableString(options[1]);
-					break;
-				case "-standardization":
-					standardizationMethod =
-							StandardizationMethod.fromString(
-									options[1]
-							);
-					break;
+					case "-label_columns":
+						AppContext.label_columns = parseStringList(options[1]);
+						break;
+					case "-hdf5_dataset_path":
+						AppContext.hdf5_dataset_path = parseNullableString(options[1]);
+						break;
+					case "-hdf5_label_dataset_path":
+						AppContext.hdf5_label_dataset_path = parseNullableString(options[1]);
+						break;
+					case "-standardization":
+						standardizationMethod =
+								StandardizationMethod.fromString(
+										options[1]
+								);
+						break;
 
-				case "-standardization_scope":
-					standardizationScope =
-							StandardizationScope.fromString(
-									options[1]
-							);
-					break;
+					case "-standardization_scope":
+						standardizationScope =
+								StandardizationScope.fromString(
+										options[1]
+								);
+						break;
 
-				case "-standardization_variance":
-					standardizationVariance =
-							VarianceConvention.fromString(
-									options[1]
-							);
-					break;
+					case "-standardization_variance":
+						standardizationVariance =
+								VarianceConvention.fromString(
+										options[1]
+								);
+						break;
 
-				case "-standardization_stats":
-					standardizationStatsPath =
-							parseNullableString(
-									options[1]
-							);
-					break;
+					case "-standardization_stats":
+						standardizationStatsPath =
+								parseNullableString(
+										options[1]
+								);
+						break;
 
-				case "-save_standardization_stats":
-					saveStandardizationStats =
-							Boolean.parseBoolean(
-									options[1]
-							);
-					break;
+					case "-save_standardization_stats":
+						saveStandardizationStats =
+								Boolean.parseBoolean(
+										options[1]
+								);
+						break;
 
 					case "-standardization_stats_output":
 						standardizationStatsOutput =
@@ -365,150 +520,182 @@ public class PFApplication {
 										options[1]
 								);
 						break;
-				case "-isRegression":
-					AppContext.isRegression = Boolean.parseBoolean(options[1]);
-					break;
-				case "-forest_mode":
-					AppContext.forest_mode = options[1].trim().toLowerCase();
+					case "-isRegression":
+						AppContext.isRegression = Boolean.parseBoolean(options[1]);
+						break;
+					case "-forest_mode":
+						AppContext.forest_mode = options[1].trim().toLowerCase();
 
-					if (AppContext.forest_mode.equals("regression")) {
-						AppContext.isRegression = true;
-					} else if (AppContext.forest_mode.equals("classification")
-							|| AppContext.forest_mode.equals("isolation")) {
-						AppContext.isRegression = false;
-					} else {
-						throw new IllegalArgumentException(
-								"Invalid forest_mode: " + options[1]
-						);
-					}
+						if (AppContext.forest_mode.equals("regression")) {
+							AppContext.isRegression = true;
+						} else if (AppContext.forest_mode.equals("classification")
+								|| AppContext.forest_mode.equals("isolation")) {
+							AppContext.isRegression = false;
+						} else {
+							throw new IllegalArgumentException(
+									"Invalid forest_mode: " + options[1]
+							);
+						}
 
-					break;
-				case "-isolation_num_branches":
-					AppContext.isolation_num_branches = Integer.parseInt(options[1]);
-					break;
+						break;
+					case "-isolation_num_branches":
+						AppContext.isolation_num_branches = Integer.parseInt(options[1]);
+						break;
 
-				case "-regression_num_branches":
-					AppContext.regression_num_branches = Integer.parseInt(options[1]);
-					break;
+					case "-regression_num_branches":
+						AppContext.regression_num_branches = Integer.parseInt(options[1]);
+						break;
 
-				case "-isolation_min_leaf_size":
-					AppContext.isolation_min_leaf_size = Integer.parseInt(options[1]);
-					break;
-				case "-purity_measure":
-					AppContext.purity_measure = options[1];
-					break;
-				case "-voting":
-					AppContext.voting = options[1];
-					break;
-				case "-purity_threshold":
-					AppContext.purity_threshold = Double.parseDouble(options[1]);
-					break;
-				case "-impute_train": // should we *return* imputed training set?
-					AppContext.impute_train = Boolean.parseBoolean(options[1]);
-					break;
-				case "-impute_test": // should we *return* imputed test set?
-					AppContext.impute_test = Boolean.parseBoolean(options[1]);
-					break;
-				case "-perform_train_imputation": // should we impute train data?
-					AppContext.perform_train_imputation =
-							Boolean.parseBoolean(options[1]);
-					break;
-				case "-perform_test_imputation": // should we impute test data?
-					AppContext.perform_test_imputation =
-							Boolean.parseBoolean(options[1]);
-					break;
-				case "-is2D":
-					AppContext.is2D = Boolean.parseBoolean(options[1]);
-					break;
-				case "-isNumeric":
-					AppContext.isNumeric = Boolean.parseBoolean(options[1]);
-					break;
-				case "-hasMissingValues":
-					AppContext.hasMissingValues = Boolean.parseBoolean(options[1]);
-					break;
-				case "-numImputes":
-					AppContext.numImputes = Integer.parseInt(options[1]);
-					break;
-				case "-entry_separator":
-					AppContext.entry_separator = options[1];
-					break;
-				case "-array_separator":
-					AppContext.array_separator = options[1];
-					break;
-				case "-out":
-					AppContext.output_dir = options[1];
-					break;
-				case "-repeats":
-					AppContext.num_repeats = Integer.parseInt(options[1]);
-					break;
-				case "-trees":
-					AppContext.num_trees = Integer.parseInt(options[1]);
-					break;
-				case "-r":
-					AppContext.num_candidates_per_split = Integer.parseInt(options[1]);
-					break;
-				case "-on_tree":
-					AppContext.random_dm_per_node = Boolean.parseBoolean(options[1]);
-					break;
-				case "-max_depth":
-					AppContext.max_depth = Integer.parseInt(options[1]);
-					break;
-				case "-shuffle":
-					AppContext.shuffle_dataset = Boolean.parseBoolean(options[1]);
-					break;
-//				case "-jvmwarmup":	//TODO 
+					case "-isolation_min_leaf_size":
+						AppContext.isolation_min_leaf_size = Integer.parseInt(options[1]);
+						break;
+					case "-purity_measure":
+						AppContext.purity_measure = options[1];
+						break;
+					case "-voting":
+						AppContext.voting = options[1];
+						break;
+					case "-purity_threshold":
+						AppContext.purity_threshold = Double.parseDouble(options[1]);
+						break;
+					case "-impute_train": // should we *return* imputed training set?
+						AppContext.impute_train = Boolean.parseBoolean(options[1]);
+						break;
+					case "-impute_test": // should we *return* imputed test set?
+						AppContext.impute_test = Boolean.parseBoolean(options[1]);
+						break;
+					case "-perform_train_imputation": // should we impute train data?
+						AppContext.perform_train_imputation =
+								Boolean.parseBoolean(options[1]);
+						break;
+					case "-perform_test_imputation": // should we impute test data?
+						AppContext.perform_test_imputation =
+								Boolean.parseBoolean(options[1]);
+						break;
+					case "-is2D":
+						AppContext.is2D = Boolean.parseBoolean(options[1]);
+						break;
+					case "-isNumeric":
+						AppContext.isNumeric = Boolean.parseBoolean(options[1]);
+						break;
+					case "-hasMissingValues":
+						AppContext.hasMissingValues = Boolean.parseBoolean(options[1]);
+						break;
+					case "-numImputes":
+						AppContext.numImputes = Integer.parseInt(options[1]);
+						break;
+					case "-entry_separator":
+						AppContext.entry_separator = options[1];
+						break;
+					case "-array_separator":
+						AppContext.array_separator = options[1];
+						break;
+					case "-out":
+						AppContext.output_dir = options[1];
+						break;
+					case "-repeats":
+						AppContext.num_repeats = Integer.parseInt(options[1]);
+						break;
+					case "-trees":
+						AppContext.num_trees = Integer.parseInt(options[1]);
+						break;
+					case "-r":
+						AppContext.num_candidates_per_split = Integer.parseInt(options[1]);
+						break;
+					case "-on_tree":
+						AppContext.random_dm_per_node = Boolean.parseBoolean(options[1]);
+						break;
+					case "-max_depth":
+						AppContext.max_depth = Integer.parseInt(options[1]);
+						break;
+					case "-shuffle":
+						AppContext.shuffle_dataset = Boolean.parseBoolean(options[1]);
+						break;
+					case "-subsample_dimensions":
+						AppContext.subsample_dimensions = Boolean.parseBoolean(options[1]);
+						break;
+
+					case "-dimension_selection_strategy":
+						AppContext.dimension_selection_strategy = parseDimensionSelectionStrategy(options[1]);
+						break;
+
+					case "-dimension_selection_count":
+						AppContext.dimension_selection_count = Integer.parseInt(options[1]);
+						break;
+
+					case "-dimension_selection_proportion":
+						AppContext.dimension_selection_proportion = Double.parseDouble(options[1]);
+						break;
+//				case "-jvmwarmup":	//TODO
 //					AppContext.warmup_java = Boolean.parseBoolean(options[1]);
 //					break;
-				case "-csv_has_header":
-					AppContext.csv_has_header = Boolean.parseBoolean(options[1]);
-					break;
-				case "-target_column":
-					if (options[1].trim().equals("first")) {
-						AppContext.target_column_is_first = true;
-					}else if (options[1].trim().equals("last")) {
-						AppContext.target_column_is_first = false;
-					}else {
-						throw new Exception("Invalid Commandline Arguments");
-					}
-					break;
-				case "-export":
-					AppContext.export_level =  Integer.parseInt(options[1]);
-					break;
-				case "-verbosity":
-					AppContext.verbosity =  Integer.parseInt(options[1]);
-					break;
-				case "-get_training_outlier_scores":
-					AppContext.get_training_outlier_scores = Boolean.parseBoolean(options[1]);
-					break;
-				case "-getprox":
-					AppContext.getprox = Boolean.parseBoolean(options[1]);
-					break;
-				case "-get_predictions":
-					AppContext.get_predictions = Boolean.parseBoolean(options[1]);
-					break;
-				case "-modelname":
-					AppContext.modelname = options[1];
-					break;
-				case "-savemodel":
-					AppContext.savemodel = Boolean.parseBoolean(options[1]);
-					break;
-				case "-parallelTrees":
-					AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
-					break;
-				case "-parallelProx":
-					AppContext.parallelProx = Boolean.parseBoolean(options[1]);
-					break;
-				case "-parallelPredict":
-					AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
-					break;
-				case "-parallelSplit":
-					AppContext.parallel_split_assignments = Boolean.parseBoolean(options[1]);
-					break;
-				case "-parallelSplitThreshold":
-					AppContext.parallel_split_assignment_threshold = Integer.parseInt(options[1]);
-					break;
-				case "-knn_distances":
-					//String[] distanceNames = options[1].split(",");
+					case "-csv_has_header":
+						AppContext.csv_has_header = Boolean.parseBoolean(options[1]);
+						break;
+					case "-target_column":
+						if (options[1].trim().equals("first")) {
+							AppContext.target_column_is_first = true;
+						}else if (options[1].trim().equals("last")) {
+							AppContext.target_column_is_first = false;
+						}else {
+							throw new Exception("Invalid Commandline Arguments");
+						}
+						break;
+					case "-export":
+						AppContext.export_level =  Integer.parseInt(options[1]);
+						break;
+					case "-verbosity":
+						AppContext.verbosity =  Integer.parseInt(options[1]);
+						break;
+					case "-get_training_outlier_scores":
+						AppContext.get_training_outlier_scores = Boolean.parseBoolean(options[1]);
+						break;
+					case "-getprox":
+						AppContext.getprox = Boolean.parseBoolean(options[1]);
+						break;
+					case "-get_predictions":
+						AppContext.get_predictions = Boolean.parseBoolean(options[1]);
+						break;
+					case "-return_enhanced_outputs":
+						AppContext.return_enhanced_outputs = Boolean.parseBoolean(options[1]);
+						break;
+					case "-return_ood_scores":
+						AppContext.return_ood_scores = Boolean.parseBoolean(options[1]);
+						break;
+					case "-ood_score_type":
+						AppContext.ood_score_type = parseOODScoreType(options[1]);
+						break;
+					case "-collect_split_distance_summaries":
+						AppContext.collect_split_distance_summaries = Boolean.parseBoolean(options[1]);
+						break;
+					case "-modelname":
+						AppContext.modelname = options[1];
+						break;
+					case "-savemodel":
+						AppContext.savemodel = Boolean.parseBoolean(options[1]);
+						break;
+					// parallelization strategy is now being changed
+					// we utilize a single work-stealing strategy.
+					/*case "-parallelTrees":
+						AppContext.parallelTrees = Boolean.parseBoolean(options[1]);
+						break;
+					case "-parallelProx":
+						AppContext.parallelProx = Boolean.parseBoolean(options[1]);
+						break;
+					case "-parallelPredict":
+						AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
+						break;
+					case "-parallelSplit":
+						AppContext.parallel_split_assignments = Boolean.parseBoolean(options[1]);
+						break;
+					case "-parallelSplitThreshold":
+						AppContext.parallel_split_assignment_threshold = Integer.parseInt(options[1]);
+						break;*/
+					case "-num_workers":
+						AppContext.num_workers = Integer.parseInt(options[1]);
+						break;
+					case "-knn_distances":
+						//String[] distanceNames = options[1].split(",");
 					/*MEASURE[] measures = Arrays.stream(distanceNames)
 							.map(String::trim)
 							.map(name -> {
@@ -519,32 +706,32 @@ public class PFApplication {
 							})
 							.toArray(MEASURE[]::new);
 					AppContext.KNNdistances = measures;*/
-					String ktemp = options[1];
-					String ktemp_rm = ktemp.substring(1, ktemp.length() - 1); // Removes '[' and ']'
-					String[] kcontents = ktemp_rm.split(","); // Splits by ","
-					List<String> kcontentsList = Arrays.asList(kcontents);
-					int knumberofdists = kcontentsList.size();
-					MEASURE[] ktoadd = new MEASURE[knumberofdists];
+						String ktemp = options[1];
+						String ktemp_rm = ktemp.substring(1, ktemp.length() - 1); // Removes '[' and ']'
+						String[] kcontents = ktemp_rm.split(","); // Splits by ","
+						List<String> kcontentsList = Arrays.asList(kcontents);
+						int knumberofdists = kcontentsList.size();
+						MEASURE[] ktoadd = new MEASURE[knumberofdists];
 
-					//Map<String, MEASURE> measuresByName = new HashMap<>();
-					Map<String, MEASURE> kmeasuresByName = DistanceRegistry.getAll();
+						//Map<String, MEASURE> measuresByName = new HashMap<>();
+						Map<String, MEASURE> kmeasuresByName = DistanceRegistry.getAll();
 
-					for (int j=0; j < knumberofdists; j++){
-						MEASURE convertedEntry;
-						convertedEntry = kmeasuresByName.get(kcontentsList.get(j));
-						//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
-						ktoadd[j] = convertedEntry;
-					}
+						for (int j=0; j < knumberofdists; j++){
+							MEASURE convertedEntry;
+							convertedEntry = kmeasuresByName.get(kcontentsList.get(j));
+							//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
+							ktoadd[j] = convertedEntry;
+						}
 
-					if (Objects.equals(kcontentsList.get(0), "")){
-						AppContext.KNNdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
-					} else {
-						AppContext.KNNdistances = ktoadd;
-					}
-					break;
-				case "-initial_imputer":
-					//String inputString = options[1];
-					imputerType = options[1];
+						if (Objects.equals(kcontentsList.get(0), "")){
+							AppContext.KNNdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
+						} else {
+							AppContext.KNNdistances = ktoadd;
+						}
+						break;
+					case "-initial_imputer":
+						//String inputString = options[1];
+						imputerType = options[1];
 
 					/*switch (inputString.toLowerCase()) {
 						case "mean":
@@ -577,184 +764,187 @@ public class PFApplication {
 						default:
 							throw new IllegalArgumentException("Unknown imputer: " + options[1]);
 					}*/
-					break;
+						break;
 
-				case "-DTWImpute":
-					AppContext.DTWImpute = Boolean.parseBoolean(options[1]);
+					case "-DTWImpute":
+						AppContext.DTWImpute = Boolean.parseBoolean(options[1]);
 
-					if (AppContext.DTWImpute) {
-						AppContext.gap_update_strategy = "dtw_alignment";
-					} else if (AppContext.gap_update_strategy == null) {
-						AppContext.gap_update_strategy = "standard";
-					}
-
-					break;
-				case "-imputation_initialization":
-					String initStrategy = options[1].trim().toLowerCase();
-
-					if (!initStrategy.equals("impute_first")
-							&& !initStrategy.equals("proximity_first")) {
-						throw new IllegalArgumentException(
-								"Invalid -imputation_initialization value: "
-										+ options[1]
-										+ ". Use impute_first or proximity_first."
-						);
-					}
-
-					AppContext.imputation_initialization_strategy = initStrategy;
-					break;
-				case "-proximity_type":
-					try {
-						AppContext.proximityType =
-								ProximityType.valueOf(
-										options[1].trim().toUpperCase(Locale.ROOT)
-								);
-					} catch (IllegalArgumentException e) {
-						throw new Exception(
-								"Invalid proximity_type: "
-										+ options[1]
-										+ ". Valid options are: "
-										+ Arrays.toString(ProximityType.values())
-						);
-					}
-					break;
-				case "-gap_update":
-					String gapUpdate = options[1].trim().toLowerCase();
-
-					if (!gapUpdate.equals("standard")
-							&& !gapUpdate.equals("dtw_alignment")) {
-						throw new IllegalArgumentException(
-								"Invalid -gap_update value: "
-										+ options[1]
-										+ ". Use standard or dtw_alignment."
-						);
-					}
-
-					AppContext.gap_update_strategy = gapUpdate;
-
-					/*
-					 * Backward compatibility with older boolean flag.
-					 */
-					AppContext.DTWImpute = gapUpdate.equals("dtw_alignment");
-					break;
-
-				case "-missing_proximity_distances":
-					AppContext.missing_proximity_distances =
-							parseMeasureList(options[1], "missing_proximity_distances");
-					break;
-				case "-MissingStrings":
-					String temp_strings = options[1];
-					String temp_strings_rm = temp_strings.substring(1, temp_strings.length() - 1); // Removes '[' and ']'
-					String[] contents_strings = temp_strings_rm.split(","); // Splits by ","
-					AppContext.MissingStrings = new HashSet<>(Arrays.asList(contents_strings));
-					break;
-				case "-distances":
-					String temp = options[1];
-					String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
-					String[] contents = temp_rm.split(","); // Splits by ","
-					List<String> contentsList = Arrays.asList(contents);
-					int numberofdists = contentsList.size();
-					MEASURE[] toadd = new MEASURE[numberofdists];
-
-					//Map<String, MEASURE> measuresByName = new HashMap<>();
-					Map<String, MEASURE> measuresByName = DistanceRegistry.getAll();
-
-					for (int j=0; j < numberofdists; j++){
-						MEASURE convertedEntry;
-						String distanceString = contentsList.get(j);
-						if (distanceString.startsWith("javadistance:")) {
-							// check the format
-							String[] parts = distanceString.split(":");
-							if (parts.length < 2) {
-								throw new IllegalArgumentException("Invalid descriptor format. Use javadistance:path/to/file[:ClassName]");
-							}
-							// check that it's a real file.
-							String path = parts[1];
-							File file = new File(path);
-							if (!file.exists()) {
-								throw new IllegalArgumentException("File not found: " + path);
-							}
-
-							// Save to AppContext so that it can be invoked when initialized.
-							String[] descriptor = new String[]{distanceString};
-							AppContext.Descriptors.add(descriptor);
-							convertedEntry = measuresByName.get("javadistance");
-						} else if (distanceString.startsWith("python:")) {
-							// check the format
-							String[] parts = distanceString.split(":");
-							if (parts.length < 2) {
-								throw new IllegalArgumentException("Invalid descriptor format. Use python:path/to/file[:FunctionName]");
-							}
-							// check that it's a real file.
-							String path = parts[1];
-							File file = new File(path);
-							if (!file.exists()) {
-								throw new IllegalArgumentException("File not found: " + path);
-							}
-
-							// Save to AppContext so that it can be invoked when initialized.
-							String[] descriptor = new String[]{distanceString};
-							AppContext.Descriptors.add(descriptor);
-							convertedEntry = measuresByName.get("python");
-						} else if (distanceString.startsWith("maple:")) {
-							// check the format
-							String[] parts = distanceString.split(":");
-							if (parts.length < 2) {
-								throw new IllegalArgumentException("Invalid descriptor format. Use maple:path/to/file[:FunctionName]");
-							}
-							// check that it's a real file.
-							String path = parts[1];
-							File file = new File(path);
-							if (!file.exists()) {
-								throw new IllegalArgumentException("File not found: " + path);
-							}
-
-							// Save to AppContext so that it can be invoked when initialized.
-							String[] descriptor = new String[]{distanceString};
-							AppContext.Descriptors.add(descriptor);
-							convertedEntry = measuresByName.get("maple");
-						} else if (distanceString.startsWith("meta_")) {
-							// check the format
-							String[] parts = distanceString.split(":");
-							if (parts.length < 2) {
-								throw new IllegalArgumentException("Invalid descriptor format. Use meta_type:path/to/file[:method]");
-							}
-							// check that it's a real file.
-							String path = parts[1];
-							File file = new File(path);
-							if (!file.exists()) {
-								throw new IllegalArgumentException("File not found: " + path);
-							}
-
-							// Save to AppContext so that it can be invoked when initialized.
-							String[] descriptor = new String[]{distanceString};
-							AppContext.Descriptors.add(descriptor);
-
-							// Use the prefix (e.g., "meta_file_classmatch") to get the correct MEASURE
-							String key = distanceString.split(":")[0];
-							convertedEntry = measuresByName.get(key);
-						} else {
-							// we'll just add an empty string list (to keep track of indices).
-							String[] descriptor = new String[]{""};
-							AppContext.Descriptors.add(descriptor);
-							convertedEntry = measuresByName.get(contentsList.get(j));
+						if (AppContext.DTWImpute) {
+							AppContext.gap_update_strategy = "dtw_alignment";
+						} else if (AppContext.gap_update_strategy == null) {
+							AppContext.gap_update_strategy = "standard";
 						}
-						//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
-						toadd[j] = convertedEntry;
-					}
 
-					if (Objects.equals(contentsList.get(0), "")){
-						AppContext.userdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
-					} else {
-						AppContext.userdistances = toadd;
-					}
+						break;
+					case "-imputation_initialization":
+						String initStrategy = options[1].trim().toLowerCase();
 
-					//AppContext.userdistances = toadd;
-					break;
-				default:
-					throw new Exception("Invalid Commandline Arguments");
+						if (!initStrategy.equals("impute_first")
+								&& !initStrategy.equals("proximity_first")) {
+							throw new IllegalArgumentException(
+									"Invalid -imputation_initialization value: "
+											+ options[1]
+											+ ". Use impute_first or proximity_first."
+							);
+						}
+
+						AppContext.imputation_initialization_strategy = initStrategy;
+						break;
+					case "-proximity_type":
+						try {
+							AppContext.proximityType =
+									ProximityType.valueOf(
+											options[1].trim().toUpperCase(Locale.ROOT)
+									);
+						} catch (IllegalArgumentException e) {
+							throw new Exception(
+									"Invalid proximity_type: "
+											+ options[1]
+											+ ". Valid options are: "
+											+ Arrays.toString(ProximityType.values())
+							);
+						}
+						break;
+					case "-gap_update":
+						String gapUpdate = options[1].trim().toLowerCase();
+
+						if (!gapUpdate.equals("standard")
+								&& !gapUpdate.equals("dtw_alignment")) {
+							throw new IllegalArgumentException(
+									"Invalid -gap_update value: "
+											+ options[1]
+											+ ". Use standard or dtw_alignment."
+							);
+						}
+
+						AppContext.gap_update_strategy = gapUpdate;
+
+						/*
+						 * Backward compatibility with older boolean flag.
+						 */
+						AppContext.DTWImpute = gapUpdate.equals("dtw_alignment");
+						break;
+
+					case "-missing_proximity_distances":
+						AppContext.missing_proximity_distances =
+								parseMeasureList(options[1], "missing_proximity_distances");
+						break;
+					case "-MissingStrings":
+						String temp_strings = options[1];
+						String temp_strings_rm = temp_strings.substring(1, temp_strings.length() - 1); // Removes '[' and ']'
+						String[] contents_strings = temp_strings_rm.split(","); // Splits by ","
+						AppContext.MissingStrings = new HashSet<>(Arrays.asList(contents_strings));
+						break;
+					case "-distances":
+						String temp = options[1];
+						String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'
+						String[] contents = temp_rm.split(","); // Splits by ","
+						List<String> contentsList = Arrays.asList(contents);
+						int numberofdists = contentsList.size();
+						MEASURE[] toadd = new MEASURE[numberofdists];
+
+						//Map<String, MEASURE> measuresByName = new HashMap<>();
+						Map<String, MEASURE> measuresByName = DistanceRegistry.getAll();
+
+						for (int j=0; j < numberofdists; j++){
+							MEASURE convertedEntry;
+							String distanceString = contentsList.get(j);
+							if (distanceString.startsWith("javadistance:")) {
+								// check the format
+								String[] parts = distanceString.split(":");
+								if (parts.length < 2) {
+									throw new IllegalArgumentException("Invalid descriptor format. Use javadistance:path/to/file[:ClassName]");
+								}
+								// check that it's a real file.
+								String path = parts[1];
+								File file = new File(path);
+								if (!file.exists()) {
+									throw new IllegalArgumentException("File not found: " + path);
+								}
+
+								// Save to AppContext so that it can be invoked when initialized.
+								String[] descriptor = new String[]{distanceString};
+								AppContext.Descriptors.add(descriptor);
+								convertedEntry = measuresByName.get("javadistance");
+							} else if (distanceString.startsWith("python:")) {
+								// check the format
+								String[] parts = distanceString.split(":");
+								if (parts.length < 2) {
+									throw new IllegalArgumentException("Invalid descriptor format. Use python:path/to/file[:FunctionName]");
+								}
+								// check that it's a real file.
+								String path = parts[1];
+								File file = new File(path);
+								if (!file.exists()) {
+									throw new IllegalArgumentException("File not found: " + path);
+								}
+
+								// Save to AppContext so that it can be invoked when initialized.
+								String[] descriptor = new String[]{distanceString};
+								AppContext.Descriptors.add(descriptor);
+								convertedEntry = measuresByName.get("python");
+							} else if (distanceString.startsWith("maple:")) {
+								// check the format
+								String[] parts = distanceString.split(":");
+								if (parts.length < 2) {
+									throw new IllegalArgumentException("Invalid descriptor format. Use maple:path/to/file[:FunctionName]");
+								}
+								// check that it's a real file.
+								String path = parts[1];
+								File file = new File(path);
+								if (!file.exists()) {
+									throw new IllegalArgumentException("File not found: " + path);
+								}
+
+								// Save to AppContext so that it can be invoked when initialized.
+								String[] descriptor = new String[]{distanceString};
+								AppContext.Descriptors.add(descriptor);
+								convertedEntry = measuresByName.get("maple");
+							} else if (distanceString.startsWith("meta_")) {
+								// check the format
+								String[] parts = distanceString.split(":");
+								if (parts.length < 2) {
+									throw new IllegalArgumentException("Invalid descriptor format. Use meta_type:path/to/file[:method]");
+								}
+								// check that it's a real file.
+								String path = parts[1];
+								File file = new File(path);
+								if (!file.exists()) {
+									throw new IllegalArgumentException("File not found: " + path);
+								}
+
+								// Save to AppContext so that it can be invoked when initialized.
+								String[] descriptor = new String[]{distanceString};
+								AppContext.Descriptors.add(descriptor);
+
+								// Use the prefix (e.g., "meta_file_classmatch") to get the correct MEASURE
+								String key = distanceString.split(":")[0];
+								convertedEntry = measuresByName.get(key);
+							} else {
+								// we'll just add an empty string list (to keep track of indices).
+								String[] descriptor = new String[]{""};
+								AppContext.Descriptors.add(descriptor);
+								convertedEntry = measuresByName.get(contentsList.get(j));
+							}
+							//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
+							toadd[j] = convertedEntry;
+						}
+
+						if (Objects.equals(contentsList.get(0), "")){
+							AppContext.userdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
+						} else {
+							AppContext.userdistances = toadd;
+						}
+
+						//AppContext.userdistances = toadd;
+						break;
+					default:
+						throw new Exception("Invalid Commandline Arguments");
 				}
 			}
+
+			validateDimensionSelectionConfiguration();
+			AppContext.validateEvaluationOutputConfiguration();
 
 			if (imputerType !=null) {
 				switch (imputerType) {
@@ -814,17 +1004,16 @@ public class PFApplication {
 			if (AppContext.warmup_java) {
 				GeneralUtilities.warmUpJavaRuntime();
 			}
-						
+
 			ExperimentRunner experiment = new ExperimentRunner();
 			//experiment.run(false);
 			experiment.run(AppContext.eval);
-			
-		}catch(Exception e) {			
-            PrintUtilities.abort(e);
+
+		}catch(Exception e) {
+			PrintUtilities.abort(e);
 		}
-		
+
 	}
 
 
 }
-

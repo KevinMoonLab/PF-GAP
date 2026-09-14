@@ -6,7 +6,6 @@ import datasets.readers.lazy.LazySeriesRef;
 import de.siegmar.fastcsv.reader.AbstractBaseCsvCallbackHandler;
 import de.siegmar.fastcsv.reader.CsvReader;
 import preprocessing.standardization.StandardizationStats;
-import preprocessing.standardization.Standardizer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -64,6 +63,10 @@ import java.util.Map;
  *
  * <p>The configured field separator must contain exactly one character.
  * Escaped tab separators such as {@code "\\t"} are normalized.</p>
+ *
+ * <p>When prepared statistics are supplied, values are standardized as
+ * FastCSV fields are parsed. Centers and inverse scales are resolved once per
+ * dimension, so lazy materialization needs no post-read traversal.</p>
  *
  * <p>Instances may have unequal time lengths across files. Within one file,
  * however, every selected feature column necessarily receives one value per
@@ -246,6 +249,7 @@ public class NumericPerFileDelimitedSeriesReader
                         hasHeader,
                         timeColumn,
                         featureColumns,
+                        standardizationStats,
                         initialTimeCapacity
                 );
 
@@ -278,17 +282,7 @@ public class NumericPerFileDelimitedSeriesReader
             );
         }
 
-        double[][] series =
-                handler.toSeries();
-
-        if (standardizationStats != null) {
-            Standardizer.transformInstanceInPlace(
-                    series,
-                    standardizationStats
-            );
-        }
-
-        return series;
+        return handler.toSeries();
     }
 
     private void validateFile(
@@ -337,8 +331,8 @@ public class NumericPerFileDelimitedSeriesReader
 
         /*
          * When featureColumns is empty, every non-time column is selected.
-         * In that case the final dimension count is validated when the
-         * realized series is passed to Standardizer.
+         * In that case the final dimension count is validated after column
+         * selection, before standardization parameters are initialized.
          */
         if (!featureColumns.isEmpty()) {
             standardizationStats.validateFeatureCompatibility(
@@ -431,8 +425,11 @@ public class NumericPerFileDelimitedSeriesReader
         private final boolean hasHeader;
         private final String timeColumn;
         private final List<String> featureColumns;
+        private final StandardizationStats standardizationStats;
         private final int initialTimeCapacity;
 
+        private double[] centers;
+        private double[] inverseScales;
         private List<String> firstRecordFields;
         private int[] columnToDimension;
         private PrimitiveDoubleBuffer[] dimensions;
@@ -446,6 +443,7 @@ public class NumericPerFileDelimitedSeriesReader
                 boolean hasHeader,
                 String timeColumn,
                 List<String> featureColumns,
+                StandardizationStats standardizationStats,
                 int initialTimeCapacity
         ) {
             this.file =
@@ -459,6 +457,9 @@ public class NumericPerFileDelimitedSeriesReader
 
             this.featureColumns =
                     featureColumns;
+
+            this.standardizationStats =
+                    standardizationStats;
 
             this.initialTimeCapacity =
                     initialTimeCapacity;
@@ -525,12 +526,15 @@ public class NumericPerFileDelimitedSeriesReader
             }
 
             try {
-                dimensions[dimension].add(
+                double value =
                         JavaDoubleParser.parseDouble(
                                 buffer,
                                 offset,
                                 length
-                        )
+                        );
+
+                dimensions[dimension].add(
+                        standardizeIfConfigured(value, dimension)
                 );
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException(
@@ -670,6 +674,10 @@ public class NumericPerFileDelimitedSeriesReader
                                 initialTimeCapacity
                         );
             }
+
+            initializeStandardizationParameters(
+                    featureIndices.length
+            );
         }
 
         private int resolveTimeColumnIndex(
@@ -900,10 +908,11 @@ public class NumericPerFileDelimitedSeriesReader
                 }
 
                 try {
+                    double value =
+                            JavaDoubleParser.parseDouble(trimmed);
+
                     dimensions[dimension].add(
-                            JavaDoubleParser.parseDouble(
-                                    trimmed
-                            )
+                            standardizeIfConfigured(value, dimension)
                     );
                 } catch (NumberFormatException e) {
                     throw new IllegalArgumentException(
@@ -918,6 +927,57 @@ public class NumericPerFileDelimitedSeriesReader
                     );
                 }
             }
+        }
+
+        private void initializeStandardizationParameters(
+                int dimensionCount
+        ) {
+            if (standardizationStats == null) {
+                return;
+            }
+
+            if (standardizationStats.getScope()
+                    == preprocessing.standardization.StandardizationScope
+                    .PER_DIMENSION
+                    && standardizationStats.getStatisticGroupCount()
+                    != dimensionCount) {
+
+                throw new IllegalArgumentException(
+                        "Numeric delimited series contains "
+                                + dimensionCount
+                                + " dimensions, but PER_DIMENSION "
+                                + "statistics contain "
+                                + standardizationStats.getStatisticGroupCount()
+                                + " groups."
+                );
+            }
+
+            centers = new double[dimensionCount];
+            inverseScales = new double[dimensionCount];
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                centers[dimension] =
+                        standardizationStats.getCenterForDimension(dimension);
+
+                inverseScales[dimension] =
+                        1.0 / standardizationStats
+                                .getScaleForDimension(dimension);
+            }
+        }
+
+        private double standardizeIfConfigured(
+                double value,
+                int dimension
+        ) {
+            if (centers == null) {
+                return value;
+            }
+
+            return (value - centers[dimension])
+                    * inverseScales[dimension];
         }
 
         private int parseColumnIndex(

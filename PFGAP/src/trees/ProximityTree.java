@@ -3,19 +3,23 @@ package trees;
 import core.AppContext;
 import core.TreeStatCollector;
 import core.contracts.ObjectDataset;
+import core.parallel.ParallelRuntime;
+import core.random.SeedMixer;
 import datasets.ListObjectDataset;
+import distance.ClosestBranchResult;
 import distance.DistanceMeasure;
 import distance.MEASURE;
+import ood.SplitDistanceObserver;
 
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 
@@ -33,6 +37,11 @@ public class ProximityTree
 	@Serial
 	private static final long serialVersionUID =
 			1L;
+
+	private static final long ROOT_PATH_IDENTITY = 0L;
+	private static final long OOB_ROUTING_PURPOSE = 0x4F4F42L;
+	private static final int MINIMUM_PARALLEL_SUBTREE_SIZE = 64;
+	private static final int MINIMUM_PARALLEL_CHILD_SIZE = 16;
 
 	protected int forest_id;
 
@@ -162,11 +171,24 @@ public class ProximityTree
 	public void train(
 			ListObjectDataset data
 	) throws Exception {
+		try (ParallelRuntime runtime = new ParallelRuntime(1)) {
+			train(data, runtime);
+		}
+	}
+
+	public void train(
+			ListObjectDataset data,
+			ParallelRuntime runtime
+	) throws Exception {
 
 		if (data == null || data.size() == 0) {
 			throw new IllegalArgumentException(
 					"Cannot train ProximityTree on empty data."
 			);
+		}
+
+		if (runtime == null) {
+			throw new IllegalArgumentException("ParallelRuntime cannot be null.");
 		}
 
 		resetTrainingState();
@@ -177,7 +199,8 @@ public class ProximityTree
 				new Node(
 						null,
 						null,
-						++node_counter,
+						0,
+						ROOT_PATH_IDENTITY,
 						this
 				);
 
@@ -204,8 +227,11 @@ public class ProximityTree
 
 		root.train(
 				inBagData,
-				outOfBagData
+				outOfBagData,
+				runtime
 		);
+
+		finalizeTrainedTopology();
 	}
 
 	private void resetTrainingState() {
@@ -558,6 +584,26 @@ public class ProximityTree
 	}
 
 	/**
+	 * Predicts an already materialized query while exposing split-distance
+	 * evidence to a caller-owned observer.
+	 *
+	 * <p>One reusable branch-plus-distance carrier is used for the entire path.
+	 * This method does not define or aggregate an OOD score.</p>
+	 */
+	public Object predictResolved(
+			Object resolvedQuery,
+			int index,
+			Random predictionRandom,
+			SplitDistanceObserver observer
+	) throws Exception {
+		Node leaf = findLeafResolved(
+				resolvedQuery, predictionRandom, observer
+		);
+		leaf.TestIndices.add(index);
+		return leaf.label();
+	}
+
+	/**
 	 * Pure traversal helper for an already materialized query.
 	 *
 	 * <p>This method does not itself update TestIndices. The overload above
@@ -605,27 +651,125 @@ public class ProximityTree
 		return current;
 	}
 
+	/**
+	 * Traverses an already materialized query while observing every internal-node
+	 * routing decision.
+	 *
+	 * <p>The ordinary two-argument overload remains the zero-observer-overhead
+	 * path. This overload allocates one ClosestBranchResult for the complete
+	 * root-to-leaf traversal and allocates no per-node event objects.</p>
+	 *
+	 * <p>The observer may receive a null training summary when summary collection
+	 * was disabled. A winning distance may be positive infinity.</p>
+	 */
+	public Node findLeafResolved(
+			Object resolvedQuery,
+			Random predictionRandom,
+			SplitDistanceObserver observer
+	) throws Exception {
+		validateResolvedTraversalInputs(resolvedQuery, predictionRandom);
+		Objects.requireNonNull(observer, "SplitDistanceObserver cannot be null.");
+
+		ClosestBranchResult result = new ClosestBranchResult();
+		Node current = root;
+		while (!current.is_leaf()) {
+			current.splitter.findClosestBranchResolved(
+					resolvedQuery, predictionRandom, result
+			);
+			int branch = result.branch();
+			validateTraversalBranch(current, branch);
+			observer.observe(
+					current.node_id,
+					current.pathIdentity,
+					current.node_depth,
+					branch,
+					result.distance(),
+					current.splitter.getSplitDistanceSummary()
+			);
+			current = current.children[branch];
+		}
+		return current;
+	}
+
+	private void validateResolvedTraversalInputs(
+			Object resolvedQuery,
+			Random predictionRandom
+	) {
+		if (root == null) {
+			throw new IllegalStateException("Cannot predict with an untrained tree.");
+		}
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException(
+					"Resolved prediction query cannot be null."
+			);
+		}
+		Objects.requireNonNull(
+				predictionRandom,
+				"Prediction Random cannot be null."
+		);
+	}
+
+	private static void validateTraversalBranch(Node node, int branch) {
+		if (node.children == null || branch < 0 || branch >= node.children.length) {
+			throw new IllegalStateException(
+					"Invalid branch " + branch + " while traversing node "
+							+ node.node_id + "."
+			);
+		}
+	}
+
 	public int getTreeID() {
 		return tree_id;
 	}
 
-	long deriveSeed(
-			int nodeId,
-			int purpose
+	long getTreeSeed() {
+		return treeSeed;
+	}
+
+	long deriveNodeSeed(
+			long nodePathIdentity,
+			long purpose
 	) {
-		long seed =
-				treeSeed;
-
-		seed =
-				mixSeed(
-						seed,
-						nodeId
-				);
-
-		return mixSeed(
-				seed,
+		return SeedMixer.nodePurpose(
+				treeSeed,
+				nodePathIdentity,
 				purpose
 		);
+	}
+
+
+	private void finalizeTrainedTopology() {
+		ArrayList<Node> collectedLeaves = new ArrayList<>();
+		int[] nextNodeId = {1};
+		assignNodeIdsAndCollectLeaves(
+				root,
+				nextNodeId,
+				collectedLeaves
+		);
+		node_counter = nextNodeId[0] - 1;
+		leaves = collectedLeaves;
+	}
+
+	private static void assignNodeIdsAndCollectLeaves(
+			Node node,
+			int[] nextNodeId,
+			ArrayList<Node> collectedLeaves
+	) {
+		if (node == null) {
+			return;
+		}
+		node.node_id = nextNodeId[0]++;
+		if (node.children == null) {
+			collectedLeaves.add(node);
+			return;
+		}
+		for (Node child : node.children) {
+			assignNodeIdsAndCollectLeaves(
+					child,
+					nextNodeId,
+					collectedLeaves
+			);
+		}
 	}
 
 	public TreeStatCollector getTreeStatCollection() {
@@ -844,6 +988,8 @@ public class ProximityTree
 
 		protected int node_id;
 
+		private final long pathIdentity;
+
 		protected int node_depth =
 				0;
 
@@ -860,6 +1006,7 @@ public class ProximityTree
 				Node parent,
 				Integer branchLabel,
 				int nodeId,
+				long pathIdentity,
 				ProximityTree tree
 		) {
 			this.parent =
@@ -867,6 +1014,9 @@ public class ProximityTree
 
 			this.node_id =
 					nodeId;
+
+			this.pathIdentity =
+					pathIdentity;
 
 			this.tree =
 					tree;
@@ -934,6 +1084,14 @@ public class ProximityTree
 					multiplicities;
 		}
 
+		public int getNodeDepth() {
+			return node_depth;
+		}
+
+		public long getPathIdentity() {
+			return pathIdentity;
+		}
+
 		public Map<Integer, Integer> getMultiplicities() {
 			return multiplicities;
 		}
@@ -943,6 +1101,8 @@ public class ProximityTree
 			return "Node{"
 					+ "nodeId="
 					+ node_id
+					+ ", pathIdentity="
+					+ Long.toUnsignedString(pathIdentity)
 					+ ", depth="
 					+ node_depth
 					+ ", leaf="
@@ -1082,13 +1242,18 @@ public class ProximityTree
 		 */
 		public void train(
 				ObjectDataset data,
-				ObjectDataset oobData
+				ObjectDataset oobData,
+				ParallelRuntime runtime
 		) throws Exception {
 
 			if (data == null || data.size() == 0) {
 				throw new IllegalStateException(
 						"Cannot train an empty tree node."
 				);
+			}
+
+			if (runtime == null) {
+				throw new IllegalArgumentException("ParallelRuntime cannot be null.");
 			}
 
 			if (shouldStopForIsolationSize(
@@ -1144,7 +1309,8 @@ public class ProximityTree
 
 			ObjectDataset[] bestSplits =
 					splitter.find_best_split(
-							data
+							data,
+							runtime
 					);
 
 			if (hasEmptySplit(
@@ -1176,15 +1342,98 @@ public class ProximityTree
 					oobSplits
 			);
 
-			for (int branch = 0;
-				 branch < bestSplits.length;
-				 branch++) {
+			trainChildren(
+					bestSplits,
+					oobSplits,
+					runtime
+			);
+		}
 
+		private void trainChildren(
+				ObjectDataset[] bestSplits,
+				ObjectDataset[] oobSplits,
+				ParallelRuntime runtime
+		) throws Exception {
+			int[] branchOrder = branchOrderByDescendingSize(bestSplits);
+			if (!shouldParallelizeChildren(bestSplits, runtime)) {
+				trainChildrenSequentially(bestSplits, oobSplits, branchOrder, runtime);
+				return;
+			}
+
+			runtime.forRange(
+					0,
+					branchOrder.length,
+					1,
+					orderedIndex -> {
+						int branch = branchOrder[orderedIndex];
+						children[branch].train(
+								bestSplits[branch],
+								oobSplits[branch],
+								runtime
+						);
+					}
+			);
+		}
+
+		private void trainChildrenSequentially(
+				ObjectDataset[] bestSplits,
+				ObjectDataset[] oobSplits,
+				int[] branchOrder,
+				ParallelRuntime runtime
+		) throws Exception {
+			for (int branch : branchOrder) {
 				children[branch].train(
 						bestSplits[branch],
-						oobSplits[branch]
+						oobSplits[branch],
+						runtime
 				);
 			}
+		}
+
+		private boolean shouldParallelizeChildren(
+				ObjectDataset[] bestSplits,
+				ParallelRuntime runtime
+		) {
+			if (!runtime.isParallel() || bestSplits.length < 2) {
+				return false;
+			}
+			int substantialChildren = 0;
+			long combinedSize = 0L;
+			for (ObjectDataset split : bestSplits) {
+				int size = split.size();
+				combinedSize += size;
+				if (size >= MINIMUM_PARALLEL_CHILD_SIZE) {
+					substantialChildren++;
+				}
+			}
+			return substantialChildren >= 2
+					&& combinedSize >= MINIMUM_PARALLEL_SUBTREE_SIZE;
+		}
+
+		private static int[] branchOrderByDescendingSize(
+				ObjectDataset[] splits
+		) {
+			Integer[] boxedOrder = new Integer[splits.length];
+			for (int branch = 0; branch < splits.length; branch++) {
+				boxedOrder[branch] = branch;
+			}
+			Arrays.sort(
+					boxedOrder,
+					(first, second) -> {
+						int comparison = Integer.compare(
+								splits[second].size(),
+								splits[first].size()
+						);
+						return comparison != 0
+								? comparison
+								: Integer.compare(first, second);
+					}
+			);
+			int[] order = new int[boxedOrder.length];
+			for (int index = 0; index < boxedOrder.length; index++) {
+				order[index] = boxedOrder[index];
+			}
+			return order;
 		}
 
 		private boolean shouldStopForIsolationSize(
@@ -1251,9 +1500,6 @@ public class ProximityTree
 			children =
 					null;
 
-			tree.leaves.add(
-					this
-			);
 		}
 
 		private boolean hasEmptySplit(
@@ -1290,7 +1536,11 @@ public class ProximityTree
 						new Node(
 								this,
 								branch,
-								++tree.node_counter,
+								0,
+								SeedMixer.childPath(
+										pathIdentity,
+										branch
+								),
 								tree
 						);
 
@@ -1361,10 +1611,10 @@ public class ProximityTree
 			int[] branches =
 					splitter.findClosestBranches(
 							oobData,
-							tree.deriveSeed(
-									node_id,
-									0x4F4F42
-							)
+							tree.deriveNodeSeed(
+								pathIdentity,
+								OOB_ROUTING_PURPOSE
+						)
 					);
 
 			if (branches.length != oobData.size()) {
@@ -1427,28 +1677,4 @@ public class ProximityTree
 		}
 	}
 
-	private static long mixSeed(
-			long seed,
-			int value
-	) {
-		long mixed =
-				seed
-						^ (
-						0x9E3779B97F4A7C15L
-								* (
-								value + 1L
-						)
-				);
-
-		mixed =
-				(mixed ^ (mixed >>> 30))
-						* 0xBF58476D1CE4E5B9L;
-
-		mixed =
-				(mixed ^ (mixed >>> 27))
-						* 0x94D049BB133111EBL;
-
-		return mixed
-				^ (mixed >>> 31);
-	}
 }

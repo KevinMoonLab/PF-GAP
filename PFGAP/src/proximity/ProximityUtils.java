@@ -1,4 +1,4 @@
-package proximities;
+package proximity;
 
 import trees.ProximityTree;
 

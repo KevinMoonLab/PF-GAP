@@ -1,370 +1,468 @@
 package imputation;
 
 import core.AppContext;
+import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import distance.MEASURE;
 import imputation.update.DTWPFImpute;
 import imputation.update.PFImpute;
+import proximity.ProximityMatrixResult;
 import trees.ProximityForest;
 
+import java.util.Objects;
+
+/**
+ * Orchestrates iterative proximity-based numeric imputation.
+ *
+ * <p>This class owns imputation strategy sequencing only. Forest training,
+ * proximity computation, and value updates are delegated to their respective
+ * components, all using the caller-owned {@link ParallelRuntime}.</p>
+ *
+ * <p>Every imputation iteration explicitly invalidates the previously cached
+ * proximity result, computes a fresh typed {@link ProximityMatrixResult}, uses
+ * that result for one update, and invalidates it again after the dataset has
+ * changed. No proximity matrix is read from global application state.</p>
+ */
 public final class ProximityImputation {
 
-    public static final String IMPUTE_FIRST = "impute_first";
-    public static final String PROXIMITY_FIRST = "proximity_first";
+    public static final String IMPUTE_FIRST =
+            "impute_first";
 
-    public static final String GAP_STANDARD = "standard";
-    public static final String GAP_DTW_ALIGNMENT = "dtw_alignment";
+    public static final String PROXIMITY_FIRST =
+            "proximity_first";
 
-    private static final double EPSILON = 1e-6;
+    public static final String GAP_STANDARD =
+            "standard";
+
+    public static final String GAP_DTW_ALIGNMENT =
+            "dtw_alignment";
+
+    private static final int DEFAULT_DTW_WINDOW_SIZE =
+            -1;
 
     private ProximityImputation() {
     }
 
+    /** Computes and returns a train/train proximity result. */
     @FunctionalInterface
     public interface TrainProximityComputer {
-        void compute(ProximityForest forest, ListObjectDataset trainData) throws Exception;
-    }
-
-    @FunctionalInterface
-    public interface TestTrainProximityComputer {
-        void compute(
+        ProximityMatrixResult compute(
                 ProximityForest forest,
-                ListObjectDataset testData,
-                ListObjectDataset trainData
+                ListObjectDataset trainingData
         ) throws Exception;
     }
 
-    public static void imputeTraining(
-            ListObjectDataset trainData,
-            int repetition,
-            TrainProximityComputer trainProximityComputer
-    ) throws Exception {
+    /** Computes and returns a test/train proximity result. */
+    @FunctionalInterface
+    public interface TestTrainProximityComputer {
+        ProximityMatrixResult compute(
+                ProximityForest forest,
+                ListObjectDataset testingData,
+                ListObjectDataset trainingData
+        ) throws Exception;
+    }
 
+    /**
+     * Performs configured iterative training-data imputation.
+     *
+     * @param trainingData mutable training dataset
+     * @param repetition repetition index used for temporary forests
+     * @param proximityComputer typed train/train proximity provider
+     * @param proximityInvalidator clears a cached train/train result
+     * @param runtime repetition-owned parallel runtime
+     */
+    public static void imputeTraining(
+            ListObjectDataset trainingData,
+            int repetition,
+            TrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
+    ) throws Exception {
         if (!AppContext.perform_train_imputation) {
             return;
         }
 
-        if (!shouldRunNumericImputation(trainData)) {
+        if (!shouldRunNumericImputation(trainingData)) {
             return;
         }
 
-        String strategy = getInitializationStrategy();
-
-        if (IMPUTE_FIRST.equals(strategy)) {
-            imputeTrainingImputeFirst(
-                    trainData,
-                    repetition,
-                    trainProximityComputer
-            );
-            return;
-        }
-
-        if (PROXIMITY_FIRST.equals(strategy)) {
-            imputeTrainingProximityFirst(
-                    trainData,
-                    repetition,
-                    trainProximityComputer
-            );
-            return;
-        }
-
-        throw new IllegalArgumentException(
-                "Unknown imputation initialization strategy: " + strategy
+        Objects.requireNonNull(
+                proximityComputer,
+                "Train proximity computer cannot be null."
         );
+        Objects.requireNonNull(
+                proximityInvalidator,
+                "Train proximity invalidator cannot be null."
+        );
+        Objects.requireNonNull(
+                runtime,
+                "ParallelRuntime cannot be null."
+        );
+
+        switch (getInitializationStrategy()) {
+            case IMPUTE_FIRST -> imputeTrainingImputeFirst(
+                    trainingData,
+                    repetition,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
+            case PROXIMITY_FIRST -> imputeTrainingProximityFirst(
+                    trainingData,
+                    repetition,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
+            default -> throw new IllegalArgumentException(
+                    "Unknown imputation initialization strategy: "
+                            + getInitializationStrategy()
+            );
+        }
     }
 
+    /**
+     * Performs configured iterative test-data imputation.
+     *
+     * @param testingData mutable testing dataset
+     * @param trainingData training reference dataset
+     * @param trainedForest final trained forest
+     * @param proximityComputer typed test/train proximity provider
+     * @param proximityInvalidator clears a cached test/train result
+     * @param runtime repetition-owned parallel runtime
+     */
     public static void imputeTesting(
-            ListObjectDataset testData,
-            ListObjectDataset trainData,
+            ListObjectDataset testingData,
+            ListObjectDataset trainingData,
             ProximityForest trainedForest,
-            TestTrainProximityComputer testTrainProximityComputer
+            TestTrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
     ) throws Exception {
-
         if (!AppContext.perform_test_imputation) {
             return;
         }
 
-        if (!shouldRunNumericImputation(testData)) {
+        if (!shouldRunNumericImputation(testingData)) {
             return;
         }
 
-        String strategy = getInitializationStrategy();
-
-        if (IMPUTE_FIRST.equals(strategy)) {
-            imputeTestingImputeFirst(
-                    testData,
-                    trainData,
-                    trainedForest,
-                    testTrainProximityComputer
-            );
-            return;
-        }
-
-        if (PROXIMITY_FIRST.equals(strategy)) {
-            imputeTestingProximityFirst(
-                    testData,
-                    trainData,
-                    trainedForest,
-                    testTrainProximityComputer
-            );
-            return;
-        }
-
-        throw new IllegalArgumentException(
-                "Unknown imputation initialization strategy: " + strategy
+        Objects.requireNonNull(
+                trainingData,
+                "Training data cannot be null."
         );
+        Objects.requireNonNull(
+                trainedForest,
+                "Trained forest cannot be null."
+        );
+        Objects.requireNonNull(
+                proximityComputer,
+                "Test/train proximity computer cannot be null."
+        );
+        Objects.requireNonNull(
+                proximityInvalidator,
+                "Test/train proximity invalidator cannot be null."
+        );
+        Objects.requireNonNull(
+                runtime,
+                "ParallelRuntime cannot be null."
+        );
+
+        switch (getInitializationStrategy()) {
+            case IMPUTE_FIRST -> imputeTestingImputeFirst(
+                    testingData,
+                    trainingData,
+                    trainedForest,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
+            case PROXIMITY_FIRST -> imputeTestingProximityFirst(
+                    testingData,
+                    trainingData,
+                    trainedForest,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
+            default -> throw new IllegalArgumentException(
+                    "Unknown imputation initialization strategy: "
+                            + getInitializationStrategy()
+            );
+        }
     }
 
     private static void imputeTrainingImputeFirst(
-            ListObjectDataset trainData,
+            ListObjectDataset trainingData,
             int repetition,
-            TrainProximityComputer trainProximityComputer
+            TrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
     ) throws Exception {
+        log("Imputing the training set using impute-first strategy...");
+        log("Performing initial imputation...");
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Imputing the training set using impute-first strategy...");
-            System.out.println("Performing initial imputation...");
-        }
+        AppContext.initial_imputer.Impute(
+                trainingData
+        );
 
-        AppContext.initial_imputer.Impute(trainData);
+        for (int iteration = 0;
+             iteration < AppContext.numImputes;
+             iteration++) {
 
-        for (int iteration = 0; iteration < AppContext.numImputes; iteration++) {
-
-            if (AppContext.verbosity > 0) {
-                System.out.println(
-                        "Training imputation iteration "
-                                + (iteration + 1)
-                                + " of "
-                                + AppContext.numImputes
-                                + " using normal model distances..."
-                );
-            }
+            logIteration(
+                    "Training",
+                    iteration,
+                    "using normal model distances..."
+            );
 
             ProximityForest forest = new ProximityForest(
                     repetition,
                     AppContext.userdistances
             );
 
-            forest.train(trainData);
-            trainProximityComputer.compute(forest, trainData);
-            updateTrainingValues(trainData);
+            forest.train(
+                    trainingData,
+                    runtime
+            );
+
+            updateTrainingIteration(
+                    trainingData,
+                    forest,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
         }
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Done imputing the training set.");
-        }
+        log("Done imputing the training set.");
     }
 
     private static void imputeTrainingProximityFirst(
-            ListObjectDataset trainData,
+            ListObjectDataset trainingData,
             int repetition,
-            TrainProximityComputer trainProximityComputer
+            TrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
     ) throws Exception {
-
         requirePositiveIterationsForProximityFirst();
+        log("Imputing the training set using proximity-first strategy...");
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Imputing the training set using proximity-first strategy...");
-        }
-
-        for (int iteration = 0; iteration < AppContext.numImputes; iteration++) {
+        for (int iteration = 0;
+             iteration < AppContext.numImputes;
+             iteration++) {
 
             boolean firstPass = iteration == 0;
-
             MEASURE[] distances = firstPass
                     ? getMissingProximityDistances()
                     : AppContext.userdistances;
 
-            if (AppContext.verbosity > 0) {
-                String distanceMessage = firstPass
-                        ? "using missing-compatible proximity distances..."
-                        : "using normal model distances...";
-
-                System.out.println(
-                        "Training imputation iteration "
-                                + (iteration + 1)
-                                + " of "
-                                + AppContext.numImputes
-                                + " "
-                                + distanceMessage
-                );
-            }
+            logIteration(
+                    "Training",
+                    iteration,
+                    firstPass
+                            ? "using missing-compatible proximity distances..."
+                            : "using normal model distances..."
+            );
 
             ProximityForest forest = new ProximityForest(
                     repetition,
                     distances
             );
 
-            forest.train(trainData);
-            trainProximityComputer.compute(forest, trainData);
-            updateTrainingValues(trainData);
+            forest.train(
+                    trainingData,
+                    runtime
+            );
+
+            updateTrainingIteration(
+                    trainingData,
+                    forest,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
         }
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Done imputing the training set.");
-        }
+        log("Done imputing the training set.");
     }
 
     private static void imputeTestingImputeFirst(
-            ListObjectDataset testData,
-            ListObjectDataset trainData,
+            ListObjectDataset testingData,
+            ListObjectDataset trainingData,
             ProximityForest trainedForest,
-            TestTrainProximityComputer testTrainProximityComputer
+            TestTrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
     ) throws Exception {
+        log("Imputing the testing set using impute-first strategy...");
+        log("Performing initial imputation...");
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Imputing the testing set using impute-first strategy...");
-            System.out.println("Performing initial imputation...");
-        }
+        AppContext.initial_imputer.Impute(
+                testingData
+        );
 
-        AppContext.initial_imputer.Impute(testData);
+        for (int iteration = 0;
+             iteration < AppContext.numImputes;
+             iteration++) {
 
-        for (int iteration = 0; iteration < AppContext.numImputes; iteration++) {
-
-            if (AppContext.verbosity > 0) {
-                System.out.println(
-                        "Testing imputation iteration "
-                                + (iteration + 1)
-                                + " of "
-                                + AppContext.numImputes
-                                + " using normal trained forest..."
-                );
-            }
-
-            testTrainProximityComputer.compute(
-                    trainedForest,
-                    testData,
-                    trainData
+            logIteration(
+                    "Testing",
+                    iteration,
+                    "using normal trained forest..."
             );
 
-            updateTestingValues(testData, trainData);
+            updateTestingIteration(
+                    testingData,
+                    trainingData,
+                    trainedForest,
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
+            );
         }
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Done imputing the testing set.");
-        }
+        log("Done imputing the testing set.");
     }
 
     private static void imputeTestingProximityFirst(
-            ListObjectDataset testData,
-            ListObjectDataset trainData,
+            ListObjectDataset testingData,
+            ListObjectDataset trainingData,
             ProximityForest trainedForest,
-            TestTrainProximityComputer testTrainProximityComputer
+            TestTrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
     ) throws Exception {
-
         requirePositiveIterationsForProximityFirst();
+        log("Imputing the testing set using proximity-first strategy...");
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Imputing the testing set using proximity-first strategy...");
-        }
-
-        for (int iteration = 0; iteration < AppContext.numImputes; iteration++) {
+        for (int iteration = 0;
+             iteration < AppContext.numImputes;
+             iteration++) {
 
             boolean firstPass = iteration == 0;
-
             ProximityForest forestForProximities;
 
             if (firstPass) {
-
-                if (AppContext.verbosity > 0) {
-                    System.out.println(
-                            "Testing imputation iteration "
-                                    + (iteration + 1)
-                                    + " of "
-                                    + AppContext.numImputes
-                                    + " using missing-compatible proximity distances..."
-                    );
-                }
+                logIteration(
+                        "Testing",
+                        iteration,
+                        "using missing-compatible proximity distances..."
+                );
 
                 forestForProximities = new ProximityForest(
                         0,
                         getMissingProximityDistances()
                 );
 
-                forestForProximities.train(trainData);
-
+                forestForProximities.train(
+                        trainingData,
+                        runtime
+                );
             } else {
-
-                if (AppContext.verbosity > 0) {
-                    System.out.println(
-                            "Testing imputation iteration "
-                                    + (iteration + 1)
-                                    + " of "
-                                    + AppContext.numImputes
-                                    + " using normal trained forest..."
-                    );
-                }
+                logIteration(
+                        "Testing",
+                        iteration,
+                        "using normal trained forest..."
+                );
 
                 forestForProximities = trainedForest;
             }
 
-            testTrainProximityComputer.compute(
+            updateTestingIteration(
+                    testingData,
+                    trainingData,
                     forestForProximities,
-                    testData,
-                    trainData
+                    proximityComputer,
+                    proximityInvalidator,
+                    runtime
             );
-
-            updateTestingValues(testData, trainData);
         }
 
-        if (AppContext.verbosity > 0) {
-            System.out.println("Done imputing the testing set.");
+        log("Done imputing the testing set.");
+    }
+
+    private static void updateTrainingIteration(
+            ListObjectDataset trainingData,
+            ProximityForest forest,
+            TrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
+    ) throws Exception {
+        proximityInvalidator.run();
+
+        ProximityMatrixResult proximities =
+                proximityComputer.compute(
+                        forest,
+                        trainingData
+                );
+
+        try {
+            if (usesDTWAlignmentUpdate()) {
+                DTWPFImpute.trainNumericImpute(
+                        trainingData,
+                        proximities,
+                        runtime,
+                        DEFAULT_DTW_WINDOW_SIZE
+                );
+            } else {
+                PFImpute.trainNumericImpute(
+                        trainingData,
+                        proximities,
+                        runtime
+                );
+            }
+        } finally {
+            /*
+             * The dataset may now differ from the one represented by this
+             * matrix, so the cached result must never escape the iteration.
+             */
+            proximityInvalidator.run();
         }
     }
 
-    private static void updateTrainingValues(
-            ListObjectDataset trainData
-    ) {
+    private static void updateTestingIteration(
+            ListObjectDataset testingData,
+            ListObjectDataset trainingData,
+            ProximityForest forest,
+            TestTrainProximityComputer proximityComputer,
+            Runnable proximityInvalidator,
+            ParallelRuntime runtime
+    ) throws Exception {
+        proximityInvalidator.run();
 
-        if (usesDTWAlignmentUpdate()) {
+        ProximityMatrixResult proximities =
+                proximityComputer.compute(
+                        forest,
+                        testingData,
+                        trainingData
+                );
 
-            refreshTrainingSparseProximitiesForAlignment();
-
-            DTWPFImpute.buildAlignmentPathCache(
-                    trainData,
-                    trainData,
-                    AppContext.training_proximities_sparse,
-                    AppContext.is2D,
-                    -1
-            );
-
-            DTWPFImpute.trainNumericImpute(trainData);
-
-        } else {
-
-            PFImpute.trainNumericImpute(trainData);
-        }
-    }
-
-    private static void updateTestingValues(
-            ListObjectDataset testData,
-            ListObjectDataset trainData
-    ) {
-
-        if (usesDTWAlignmentUpdate()) {
-
-            refreshTestingTrainingSparseProximitiesForAlignment();
-
-            DTWPFImpute.buildAlignmentPathCache(
-                    testData,
-                    trainData,
-                    AppContext.testing_training_proximities_sparse,
-                    AppContext.is2D,
-                    -1
-            );
-
-            DTWPFImpute.testNumericImpute(testData, trainData);
-
-        } else {
-
-            PFImpute.testNumericImpute(testData, trainData);
+        try {
+            if (usesDTWAlignmentUpdate()) {
+                DTWPFImpute.testNumericImpute(
+                        testingData,
+                        trainingData,
+                        proximities,
+                        runtime,
+                        DEFAULT_DTW_WINDOW_SIZE
+                );
+            } else {
+                PFImpute.testNumericImpute(
+                        testingData,
+                        trainingData,
+                        proximities,
+                        runtime
+                );
+            }
+        } finally {
+            proximityInvalidator.run();
         }
     }
 
     private static boolean shouldRunNumericImputation(
             ListObjectDataset data
     ) {
-
         return data != null
                 && AppContext.hasMissingValues
                 && AppContext.isNumeric
@@ -372,10 +470,10 @@ public final class ProximityImputation {
     }
 
     private static String getInitializationStrategy() {
+        String strategy =
+                AppContext.imputation_initialization_strategy;
 
-        String strategy = AppContext.imputation_initialization_strategy;
-
-        if (strategy == null || strategy.trim().isEmpty()) {
+        if (strategy == null || strategy.isBlank()) {
             return IMPUTE_FIRST;
         }
 
@@ -383,106 +481,81 @@ public final class ProximityImputation {
     }
 
     private static boolean usesDTWAlignmentUpdate() {
+        String strategy =
+                AppContext.gap_update_strategy;
 
-        String strategy = AppContext.gap_update_strategy;
-
-        if (strategy == null || strategy.trim().isEmpty()) {
+        if (strategy == null || strategy.isBlank()) {
             return AppContext.DTWImpute;
         }
 
-        return GAP_DTW_ALIGNMENT.equals(strategy.trim().toLowerCase());
+        return GAP_DTW_ALIGNMENT.equals(
+                strategy.trim().toLowerCase()
+        );
     }
 
     private static MEASURE[] getMissingProximityDistances() {
-
         if (AppContext.missing_proximity_distances != null
                 && AppContext.missing_proximity_distances.length > 0) {
             return AppContext.missing_proximity_distances;
         }
 
-        if (AppContext.is2D) {
-            return new MEASURE[]{MEASURE.nan_euclidean_i};
-        }
-
-        return new MEASURE[]{MEASURE.nan_euclidean};
+        return AppContext.is2D
+                ? new MEASURE[]{MEASURE.nan_euclidean_i}
+                : new MEASURE[]{MEASURE.nan_euclidean};
     }
 
     private static void requirePositiveIterationsForProximityFirst() {
-
         if (AppContext.numImputes <= 0) {
             throw new IllegalArgumentException(
-                    "proximity_first imputation requires AppContext.numImputes > 0."
+                    "proximity_first imputation requires "
+                            + "AppContext.numImputes > 0."
             );
         }
     }
 
-    private static void refreshTrainingSparseProximitiesForAlignment() {
-
-        if (AppContext.useSparseProximities) {
-
-            if (AppContext.training_proximities_sparse == null) {
-                throw new IllegalStateException(
-                        "Sparse training proximities are not available."
-                );
-            }
-
-            return;
-        }
-
-        if (AppContext.training_proximities == null) {
-            throw new IllegalStateException(
-                    "Dense training proximities are not available."
-            );
-        }
-
-        AppContext.training_proximities_sparse =
-                PFImpute.buildSparseProximityMap(
-                        AppContext.training_proximities,
-                        EPSILON
-                );
+    private static void logIteration(
+            String domain,
+            int iteration,
+            String detail
+    ) {
+        log(
+                domain
+                        + " imputation iteration "
+                        + (iteration + 1)
+                        + " of "
+                        + AppContext.numImputes
+                        + " "
+                        + detail
+        );
     }
 
-    private static void refreshTestingTrainingSparseProximitiesForAlignment() {
-
-        if (AppContext.useSparseProximities) {
-
-            if (AppContext.testing_training_proximities_sparse == null) {
-                throw new IllegalStateException(
-                        "Sparse testing-training proximities are not available."
-                );
-            }
-
-            return;
+    private static void log(
+            String message
+    ) {
+        if (AppContext.verbosity > 0) {
+            System.out.println(message);
         }
-
-        if (AppContext.testing_training_proximities == null) {
-            throw new IllegalStateException(
-                    "Dense testing-training proximities are not available."
-            );
-        }
-
-        AppContext.testing_training_proximities_sparse =
-                PFImpute.buildSparseProximityMap(
-                        AppContext.testing_training_proximities,
-                        EPSILON
-                );
     }
 
     public static String missingProximityDistancesToString() {
+        MEASURE[] distances =
+                getMissingProximityDistances();
 
-        MEASURE[] distances = getMissingProximityDistances();
+        StringBuilder builder =
+                new StringBuilder();
 
-        StringBuilder sb = new StringBuilder();
-
-        for (int i = 0; i < distances.length; i++) {
-
-            if (i > 0) {
-                sb.append(",");
+        for (int index = 0;
+             index < distances.length;
+             index++) {
+            if (index > 0) {
+                builder.append(',');
             }
 
-            sb.append(distances[i]);
+            builder.append(
+                    distances[index]
+            );
         }
 
-        return sb.toString();
+        return builder.toString();
     }
 }

@@ -78,6 +78,7 @@ public final class CustomPerFileReader
     private final String filePattern;
     private final String customReaderDescriptor;
     private final Map<String, String> customReaderParameters;
+    private final List<String> featureColumns;
 
     private final boolean isTest;
     private final boolean isRegression;
@@ -109,6 +110,7 @@ public final class CustomPerFileReader
                 options.getFilePattern(),
                 options.getCustomReaderDescriptor(),
                 options.getCustomReaderParameters(),
+                options.getFeatureColumns(),
                 options.isTest(),
                 options.isRegression(),
                 options.isNumeric(),
@@ -139,6 +141,7 @@ public final class CustomPerFileReader
                 filePattern,
                 customReaderDescriptor,
                 customReaderParameters,
+                List.of(),
                 isTest,
                 isRegression,
                 isNumeric,
@@ -148,25 +151,26 @@ public final class CustomPerFileReader
     }
 
     /**
-     * Full constructor.
+     * Full constructor including ordered feature-column metadata.
      *
-     * @param dataPath                 directory containing instance files, or
-     *                                 one regular instance file
-     * @param filePattern              required for directory input
-     * @param customReaderDescriptor   plugin JAR and implementation class
-     * @param customReaderParameters   plugin-specific configuration
-     * @param isTest                   whether test data is being read
-     * @param isRegression             whether this is a regression task
-     * @param isNumeric                numerical-output hint
-     * @param hasMissingValues         missing-value hint
-     * @param customReaderThreadSafe   whether the plugin supports concurrent
-     *                                 read calls
+     * @param dataPath directory containing instance files, or one regular file
+     * @param filePattern required for directory input
+     * @param customReaderDescriptor plugin JAR and implementation class
+     * @param customReaderParameters plugin-specific configuration
+     * @param featureColumns ordered selected source feature columns
+     * @param isTest whether test data is being read
+     * @param isRegression whether this is a regression task
+     * @param isNumeric numerical-output hint
+     * @param hasMissingValues missing-value hint
+     * @param customReaderThreadSafe whether concurrent plugin invocation is
+     *                               permitted
      */
     public CustomPerFileReader(
             String dataPath,
             String filePattern,
             String customReaderDescriptor,
             Map<String, String> customReaderParameters,
+            List<String> featureColumns,
             boolean isTest,
             boolean isRegression,
             boolean isNumeric,
@@ -197,6 +201,13 @@ public final class CustomPerFileReader
                         customReaderParameters
                 );
 
+        this.featureColumns =
+                featureColumns == null
+                        ? List.of()
+                        : List.copyOf(
+                        featureColumns
+                );
+
         this.isTest =
                 isTest;
 
@@ -211,6 +222,31 @@ public final class CustomPerFileReader
 
         this.customReaderThreadSafe =
                 customReaderThreadSafe;
+    }
+
+    public CustomPerFileReader(
+            String dataPath,
+            String filePattern,
+            String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean isTest,
+            boolean isRegression,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean customReaderThreadSafe
+    ) {
+        this(
+                dataPath,
+                filePattern,
+                customReaderDescriptor,
+                customReaderParameters,
+                List.of(),
+                isTest,
+                isRegression,
+                isNumeric,
+                hasMissingValues,
+                customReaderThreadSafe
+        );
     }
 
     /**
@@ -242,6 +278,7 @@ public final class CustomPerFileReader
                         isRegression,
                         isNumeric,
                         hasMissingValues,
+                        featureColumns,
                         customReaderParameters
                 );
 

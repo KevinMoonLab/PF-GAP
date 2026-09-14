@@ -1,239 +1,320 @@
 package core;
 
-import java.io.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-
-import org.apache.commons.lang3.time.DurationFormatUtils;
-
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-
+import org.apache.commons.lang3.time.DurationFormatUtils;
 import trees.ProximityForest;
 import trees.ProximityTree;
 import util.Statistics;
 
-/**
- * 
- * @author shifaz
- * @email ahmed.shifaz@monash.edu
- *
- */
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 
-//public class ProximityForestResult {
+/**
+ * Forest-wide training and evaluation results.
+ *
+ * <p>The legacy {@link #Predictions} list remains available for callers that
+ * request ordinary prediction output. Structured per-instance output is stored
+ * separately in {@link #PredictionResults} when enhanced prediction, OOD-only,
+ * or combined evaluation is requested.</p>
+ *
+ * <p>The forest reference is transient so JSON and Java serialization do not
+ * embed the complete trained model. Tree statistics should be collated before
+ * exporting a detached result.</p>
+ */
 public class ProximityForestResult implements Serializable {
 
+    @Serial
+    private static final long serialVersionUID = 2L;
+
+    /** Legacy aggregate predictions in test-instance order. */
     public ArrayList<Object> Predictions;
-    //private transient ProximityForest forest;
-	private ProximityForest forest;
-	public boolean results_collated = false;
-	
-	//FILLED BY FOREST CLASS
-	public int forest_id = -1;
-	public int majority_vote_match_count = 0;
 
-	public long startTimeTrain = 0;
-	public long endTimeTrain = 0;
-	public long elapsedTimeTrain = 0;
-	
-	public long startTimeTest = 0;
-	public long endTimeTest = 0;
-	public long elapsedTimeTest = 0;	
-			
-	public int errors = 0, correct = 0;	
-	public double score = 0, error_rate = 0;
-	
-	
-	//FILLED BY STAT COLLECTOR CLASS
+    /**
+     * Optional structured per-instance results in evaluation-instance order.
+     * Empty means that enhanced evaluation has not populated this result.
+     */
+    public ArrayList<ForestPredictionResult> PredictionResults;
 
-	public int total_num_trees = -1;
+    private transient ProximityForest forest;
 
-	//num nodes
-	public double mean_num_nodes_per_tree = -1;
-	public double sd_num_nodes_per_tree = -1;
-//	public int min_num_nodes_per_tree = -1;
-//	public int max_num_nodes_per_tree = -1;
+    public boolean results_collated = false;
 
-	//depth
-	public double mean_depth_per_tree = -1;
-	public double sd_depth_per_tree = -1;
-//	public int min_depth_per_tree = -1;
-//	public int max_depth_per_tree = -1;	
-	
+    // FILLED BY FOREST CLASS
+    public int forest_id = -1;
+    public int majority_vote_match_count = 0;
+    public long startTimeTrain = 0;
+    public long endTimeTrain = 0;
+    public long elapsedTimeTrain = 0;
+    public long startTimeTest = 0;
+    public long endTimeTest = 0;
+    public long elapsedTimeTest = 0;
+    public int errors = 0;
+    public int correct = 0;
+    public double score = 0;
+    public double error_rate = 0;
 
-	//weighted depth //TODO comment add formula
-	public double mean_weighted_depth_per_tree = -1;
-	public double sd_weighted_depth_per_tree = -1;
-//	public int min_weighted_depth_per_tree = -1;
-//	public int max_weighted_depth_per_tree = -1;	
-	
-	//memory
-//	int memory_usage = 0;
-	
-	//distance timings
-//	public long dtw_time;
-//	public long dtwcv_time;
-//	public long ddtw_time;
-//	public long ddtwcv_time;
-//	public long wtw_time;
-//	public long wddtw_time;	
-//	public long euc_time;
-//	public long lcss_time;
-//	public long msm_time;	
-//	public long twe_time;
-//	public long erp_time;	
-	
-	//call counts
-//	public long dtw_count;
-//	public long dtwcv_count;
-//	public long ddtw_count;
-//	public long ddtwcv_count;
-//	public long wtw_count;
-//	public long wddtw_count;	
-//	public long euc_count;
-//	public long lcss_count;
-//	public long msm_count;	
-//	public long twe_count;
-//	public long erp_count;	
-	
-	public ProximityForestResult(ProximityForest forest) {
-		this.forest_id = forest.getForestID();
-		this.forest = forest;
-		this.Predictions = new ArrayList<>();
-	}
-	
-	public void collateResults() {
-		
-		if (results_collated) {
-			return;
-		}		
-		
-		ProximityTree[] trees = forest.getTrees();
-		ProximityTree tree;
-		TreeStatCollector tree_stats;
-		
-		total_num_trees = trees.length;
-		
-		int nodes[] = new int[total_num_trees];
-		double depths[] = new double[total_num_trees];
-		double weighted_depths[] = new double[total_num_trees];
-				
-		for (int i = 0; i < total_num_trees; i++) {
-			tree = trees[i];
-			tree_stats = tree.getTreeStatCollection();
-			
-			nodes[i] = tree_stats.num_nodes;
-			depths[i] = tree_stats.depth;
-			weighted_depths[i] = tree_stats.weighted_depth;
-			
-		}
-		mean_num_nodes_per_tree = Statistics.mean(nodes);
-		sd_num_nodes_per_tree = Statistics.standard_deviation_population(nodes);
-		
-		mean_depth_per_tree = Statistics.mean(depths);
-		sd_depth_per_tree = Statistics.standard_deviation_population(depths);
-		
-		mean_weighted_depth_per_tree = Statistics.mean(weighted_depths);
-		sd_weighted_depth_per_tree = Statistics.standard_deviation_population(weighted_depths);
-		
-		
-		results_collated = true;
-	}
+    // FILLED BY STAT COLLECTOR CLASS
+    public int total_num_trees = -1;
+    public double mean_num_nodes_per_tree = -1;
+    public double sd_num_nodes_per_tree = -1;
+    public double mean_depth_per_tree = -1;
+    public double sd_depth_per_tree = -1;
+    public double mean_weighted_depth_per_tree = -1;
+    public double sd_weighted_depth_per_tree = -1;
 
-	private void updateDerivedMetrics() {
+    public ProximityForestResult(ProximityForest forest) {
+        attachForest(forest);
+        this.Predictions = new ArrayList<>();
+        this.PredictionResults = new ArrayList<>();
+    }
 
-		/*
-		 * For classification, score should be accuracy and error_rate should be
-		 * the fraction of incorrect predictions.
-		 *
-		 * We compute these from correct/errors because those are the quantities
-		 * actually populated during testing.
-		 */
-		if (AppContext.isClassificationMode()) {
+    /**
+     * Reattaches a runtime forest after deserialization when further topology
+     * collation is required.
+     */
+    public final void attachForest(ProximityForest forest) {
+        this.forest = Objects.requireNonNull(
+                forest,
+                "ProximityForestResult requires a non-null forest."
+        );
+        this.forest_id = forest.getForestID();
+    }
 
-			int total = correct + errors;
+    /** Replaces the legacy prediction output with a defensive list copy. */
+    public void setPredictions(List<?> predictions) {
+        Objects.requireNonNull(predictions, "Predictions cannot be null.");
+        this.Predictions = new ArrayList<>(predictions.size());
+        this.Predictions.addAll(predictions);
+        validatePredictionAlignmentIfBothPopulated();
+    }
 
-			if (total > 0) {
-				score = (double) correct / total;
-				error_rate = (double) errors / total;
-			} else {
-				score = Double.NaN;
-				error_rate = Double.NaN;
-			}
-		}
-	}
-	
-	public void printResults(String datasetName, int experiment_id, String prefix) {
-		
-//		System.out.println(prefix+ "-----------------Experiment No: " 
-//				+ experiment_id + " (" +datasetName+ "), Forest No: " 
-//				+ (this.forest_id) +"  -----------------");
-		
-		updateDerivedMetrics();
+    /** Replaces structured enhanced results with a defensive list copy. */
+    public void setPredictionResults(
+            List<ForestPredictionResult> predictionResults
+    ) {
+        Objects.requireNonNull(
+                predictionResults,
+                "Structured prediction results cannot be null."
+        );
+        this.PredictionResults = new ArrayList<>(predictionResults.size());
+        for (int index = 0; index < predictionResults.size(); index++) {
+            this.PredictionResults.add(
+                    Objects.requireNonNull(
+                            predictionResults.get(index),
+                            "Structured prediction result cannot be null at index "
+                                    + index + "."
+                    )
+            );
+        }
+        validatePredictionAlignmentIfBothPopulated();
+    }
 
-		if (AppContext.verbosity > 0) {
-			String time_duration = DurationFormatUtils.formatDuration((long) (elapsedTimeTrain/1e6), "H:m:s.SSS");
-	        System.out.format("%sTraining Time: %fms (%s)\n",prefix, elapsedTimeTrain/1e6, time_duration);
-			time_duration = DurationFormatUtils.formatDuration((long) (elapsedTimeTest/1e6), "H:m:s.SSS");		
-	        System.out.format("%sPrediction Time: %fms (%s)\n",prefix, elapsedTimeTest/1e6, time_duration);
-	
-	        
-	        System.out.format("%sCorrect(TP+TN): %d vs Incorrect(FP+FN): %d\n",prefix,  correct, errors);
-	        System.out.println(prefix+"Score: " + score);
-	        System.out.println(prefix+"Error Rate: "+ error_rate);			
-		}
+    /** Clears structured output without changing legacy predictions. */
+    public void clearPredictionResults() {
+        PredictionResults = new ArrayList<>();
+    }
 
-        
-        this.collateResults();
-        
-        //this is just the same info in a single line, used to grep from output and save to a csv, use the #: marker to find the line easily
-       
-        //the prefix REPEAT is added to this comma separated line easily use grep from command line to filter outputs to a csv file
-        //just a quick method to filter important info while in command line
-        
-        String pre = "REPEAT:" + (experiment_id+1) +" ,";
-		System.out.print(pre + datasetName);        
-		System.out.print(", " + score);
-		System.out.print(", " + elapsedTimeTrain /1e6);
-		System.out.print(", " + elapsedTimeTest /1e6);
-		System.out.print(", " + mean_depth_per_tree);
-//		System.out.print(", " + mean_weighted_depth_per_tree);
-		System.out.println();
-	}
-	
-	public String exportJSON(String datasetName, int experiment_id) throws Exception {
-		String file = "";
-		String timestamp = LocalDateTime.now()
-			       .format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS"));		
-		
-		file = AppContext.output_dir + File.separator + forest_id + timestamp;
-		
-		File fileObj = new File(file);
-		
-		fileObj.getParentFile().mkdirs();
-		fileObj.createNewFile();		
-		
-		try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))){		
-		
-			Gson gson;
-			GsonBuilder gb = new GsonBuilder();
-			gb.serializeSpecialFloatingPointValues();
-			gb.serializeNulls();
-			gson = gb.create();
-			
-//			SerializableResultSet object = new SerializableResultSet(this.forests);
-			
-			bw.write(gson.toJson(this));
-			bw.close();
-			
-		} catch (IOException e) {
-			e.printStackTrace();
-		}finally {
-//			bw.close();
-		}
-					
-		return file;
-	}
-	
+    public boolean hasPredictionResults() {
+        return PredictionResults != null && !PredictionResults.isEmpty();
+    }
+
+    /**
+     * Validates that structured prediction-bearing entries reproduce the legacy
+     * prediction list when both representations are populated.
+     */
+    public void validatePredictionAlignment() {
+        if (Predictions == null) {
+            throw new IllegalStateException("Legacy Predictions list is null.");
+        }
+        if (PredictionResults == null) {
+            throw new IllegalStateException(
+                    "Structured PredictionResults list is null."
+            );
+        }
+        validatePredictionAlignmentIfBothPopulated();
+    }
+
+    private void validatePredictionAlignmentIfBothPopulated() {
+        if (Predictions == null || PredictionResults == null
+                || Predictions.isEmpty() || PredictionResults.isEmpty()) {
+            return;
+        }
+        if (Predictions.size() != PredictionResults.size()) {
+            throw new IllegalStateException(
+                    "Legacy and structured prediction counts differ: "
+                            + Predictions.size() + " versus "
+                            + PredictionResults.size() + "."
+            );
+        }
+        for (int index = 0; index < Predictions.size(); index++) {
+            ForestPredictionResult structured = PredictionResults.get(index);
+            if (!structured.hasPrediction()) {
+                throw new IllegalStateException(
+                        "Structured result at index " + index
+                                + " omits prediction output while legacy "
+                                + "Predictions is populated."
+                );
+            }
+            if (!Objects.equals(
+                    Predictions.get(index),
+                    structured.prediction()
+            )) {
+                throw new IllegalStateException(
+                        "Legacy and structured predictions differ at index "
+                                + index + "."
+                );
+            }
+        }
+    }
+
+    public void collateResults() {
+        if (results_collated) {
+            return;
+        }
+        if (forest == null) {
+            throw new IllegalStateException(
+                    "Cannot collate tree statistics because the transient forest "
+                            + "reference is unavailable. Collate before export or "
+                            + "reattach the forest first."
+            );
+        }
+
+        ProximityTree[] trees = forest.getTrees();
+        total_num_trees = trees.length;
+
+        int[] nodes = new int[total_num_trees];
+        double[] depths = new double[total_num_trees];
+        double[] weightedDepths = new double[total_num_trees];
+
+        for (int index = 0; index < total_num_trees; index++) {
+            TreeStatCollector treeStats =
+                    trees[index].getTreeStatCollection();
+            nodes[index] = treeStats.num_nodes;
+            depths[index] = treeStats.depth;
+            weightedDepths[index] = treeStats.weighted_depth;
+        }
+
+        mean_num_nodes_per_tree = Statistics.mean(nodes);
+        sd_num_nodes_per_tree =
+                Statistics.standard_deviation_population(nodes);
+        mean_depth_per_tree = Statistics.mean(depths);
+        sd_depth_per_tree =
+                Statistics.standard_deviation_population(depths);
+        mean_weighted_depth_per_tree = Statistics.mean(weightedDepths);
+        sd_weighted_depth_per_tree =
+                Statistics.standard_deviation_population(weightedDepths);
+
+        results_collated = true;
+    }
+
+    private void updateDerivedMetrics() {
+        if (AppContext.isClassificationMode()) {
+            int total = correct + errors;
+            if (total > 0) {
+                score = (double) correct / total;
+                error_rate = (double) errors / total;
+            } else {
+                score = Double.NaN;
+                error_rate = Double.NaN;
+            }
+        }
+    }
+
+    public void printResults(
+            String datasetName,
+            int experiment_id,
+            String prefix
+    ) {
+        updateDerivedMetrics();
+
+        if (AppContext.verbosity > 0) {
+            String duration = DurationFormatUtils.formatDuration(
+                    (long) (elapsedTimeTrain / 1e6),
+                    "H:m:s.SSS"
+            );
+            System.out.format(
+                    "%sTraining Time: %fms (%s)%n",
+                    prefix,
+                    elapsedTimeTrain / 1e6,
+                    duration
+            );
+
+            duration = DurationFormatUtils.formatDuration(
+                    (long) (elapsedTimeTest / 1e6),
+                    "H:m:s.SSS"
+            );
+            System.out.format(
+                    "%sPrediction Time: %fms (%s)%n",
+                    prefix,
+                    elapsedTimeTest / 1e6,
+                    duration
+            );
+            System.out.format(
+                    "%sCorrect(TP+TN): %d vs Incorrect(FP+FN): %d%n",
+                    prefix,
+                    correct,
+                    errors
+            );
+            System.out.println(prefix + "Score: " + score);
+            System.out.println(prefix + "Error Rate: " + error_rate);
+        }
+
+        collateResults();
+
+        String pre = "REPEAT:" + (experiment_id + 1) + " ,";
+        System.out.print(pre + datasetName);
+        System.out.print(", " + score);
+        System.out.print(", " + elapsedTimeTrain / 1e6);
+        System.out.print(", " + elapsedTimeTest / 1e6);
+        System.out.print(", " + mean_depth_per_tree);
+        System.out.println();
+    }
+
+    public String exportJSON(
+            String datasetName,
+            int experiment_id
+    ) throws Exception {
+        if (!results_collated && forest != null) {
+            collateResults();
+        }
+        validatePredictionAlignmentIfBothPopulated();
+
+        String timestamp = LocalDateTime.now().format(
+                DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")
+        );
+        String file = AppContext.output_dir
+                + File.separator
+                + forest_id
+                + timestamp;
+
+        File fileObject = new File(file);
+        File parent = fileObject.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException(
+                    "Unable to create result directory: " + parent
+            );
+        }
+
+        Gson gson = new GsonBuilder()
+                .serializeSpecialFloatingPointValues()
+                .serializeNulls()
+                .create();
+
+        try (BufferedWriter writer =
+                     new BufferedWriter(new FileWriter(fileObject))) {
+            writer.write(gson.toJson(this));
+        }
+
+        return file;
+    }
 }

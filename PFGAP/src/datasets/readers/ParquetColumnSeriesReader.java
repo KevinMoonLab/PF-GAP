@@ -10,7 +10,7 @@ import dev.hardwood.reader.RowReader;
 import dev.hardwood.reader.Validity;
 import dev.hardwood.schema.ColumnProjection;
 import preprocessing.standardization.StandardizationStats;
-import preprocessing.standardization.Standardizer;
+//import preprocessing.standardization.Standardizer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -90,7 +90,7 @@ public class ParquetColumnSeriesReader
     private final List<String> featureColumns;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
-    private final StandardizationStats standardizationStats;
+    //private final StandardizationStats standardizationStats;
     private final int initialSeriesCapacity;
 
     private final ColumnProjection projection;
@@ -181,8 +181,13 @@ public class ParquetColumnSeriesReader
         this.hasMissingValues =
                 hasMissingValues;
 
-        this.standardizationStats =
-                standardizationStats;
+        /*
+         * Retain the constructor parameter for source compatibility and
+         * standardization-configuration validation. This eager reader always
+         * returns raw arrays. StandardizationPipeline transforms the completed
+         * eager dataset exactly once.
+         */
+        validateStandardizationConfiguration(standardizationStats);
 
         if (initialSeriesCapacity < 1) {
             throw new IllegalArgumentException(
@@ -199,7 +204,7 @@ public class ParquetColumnSeriesReader
         this.missingIndicators =
                 snapshotMissingIndicators();
 
-        validateStandardizationConfiguration();
+        validateStandardizationConfiguration(standardizationStats);
 
         this.projection =
                 ColumnProjection.columns(
@@ -376,13 +381,6 @@ public class ParquetColumnSeriesReader
             } else {
                 series =
                         valueBuffers[columnIndex].toArray();
-            }
-
-            if (standardizationStats != null) {
-                Standardizer.transformInstanceInPlace(
-                        series,
-                        standardizationStats
-                );
             }
 
             dataset.add(
@@ -741,15 +739,15 @@ public class ParquetColumnSeriesReader
      * meaningful here because the column names identify instances rather than
      * dimensions.</p>
      */
-    private void validateStandardizationConfiguration() {
+    private void validateStandardizationConfiguration(StandardizationStats standardizationStats) {
         if (standardizationStats == null) {
             return;
         }
 
         if (!isNumeric) {
             throw new IllegalArgumentException(
-                    "Standardization statistics cannot be applied by "
-                            + "ParquetFileReader when isNumeric=false."
+                    "Standardization statistics cannot be used with "
+                            + "ParquetColumnSeriesReader when isNumeric=false."
             );
         }
 
