@@ -111,6 +111,7 @@ public final class EvaluationRepetitionRunner {
         );
 
         int repetition = context.getRepetition();
+        AppContext.validateEvaluationOutputConfiguration();
 
         performTestingImputationWhenRequested(
                 testingData,
@@ -169,22 +170,28 @@ public final class EvaluationRepetitionRunner {
             ExperimentRepetitionContext context,
             ExperimentScoringCoordinator scoringCoordinator
     ) throws Exception {
+        /* Isolation path-length scores and branch-distance OOD scores are
+         * independent and may both be requested. */
         ExperimentScoringCoordinator.ScoreArtifact scoreArtifact =
                 scoringCoordinator.computeTestIsolationScores(
-                        forest,
-                        testingData,
-                        trainingData.size(),
-                        repetition
+                        forest, testingData, trainingData.size(), repetition
                 );
-
         scoringCoordinator.recordArtifact(
-                "testOutlierScores",
-                scoreArtifact,
-                "testIsolationScore",
-                "testIsolationScoringMilliseconds",
-                context
+                "testOutlierScores", scoreArtifact,
+                "testIsolationScore", "testIsolationScoringMilliseconds", context
         );
-
+        if (AppContext.shouldUseStructuredEvaluation()) {
+            forest.evaluateEnhanced(
+                    testingData,
+                    createStructuredEvaluationOptions(),
+                    context.getParallelRuntime()
+            );
+            outputCoordinator.writeTestStructuredOutputWhenRequested(
+                    forest.getResultSet(),
+                    testingData,
+                    context
+            );
+        }
         return forest.getResultSet();
     }
 
@@ -197,39 +204,63 @@ public final class EvaluationRepetitionRunner {
             ExperimentRepetitionContext context,
             ExperimentProximityCoordinator proximityCoordinator
     ) throws Exception {
-        ProximityForestResult result = forest.test(
-                testingData,
-                context.getParallelRuntime()
-        );
+        boolean structured = AppContext.shouldUseStructuredEvaluation();
+        boolean predictionsProduced;
+        ProximityForestResult result;
 
-        if (!AppContext.perform_test_imputation) {
-            result.printResults(
-                    datasetName,
-                    repetition,
-                    ""
+        if (!structured) {
+            result = forest.test(testingData, context.getParallelRuntime());
+            predictionsProduced = true;
+        } else {
+            forest.evaluateEnhanced(
+                    testingData,
+                    createStructuredEvaluationOptions(),
+                    context.getParallelRuntime()
             );
+            result = forest.getResultSet();
+            predictionsProduced = AppContext.shouldReturnEnhancedOutputs();
         }
 
-        outputCoordinator.writeTestingDataWhenRequested(
-                testingData
-        );
-
-        outputCoordinator.writeTestPredictionsWhenRequested(
-                result,
-                testingData,
-                context
-        );
-
+        if (predictionsProduced && !AppContext.perform_test_imputation) {
+            result.printResults(datasetName, repetition, "");
+        }
+        outputCoordinator.writeTestingDataWhenRequested(testingData);
+        if (predictionsProduced) {
+            outputCoordinator.writeTestPredictionsWhenRequested(
+                    result, testingData, context
+            );
+        } else if (AppContext.shouldReturnOODScores()) {
+            outputCoordinator.writeTestStructuredOutputWhenRequested(
+                    result,
+                    testingData,
+                    context
+            );
+        }
         writeTestTrainProximitiesWhenRequested(
-                forest,
-                testingData,
-                trainingData,
-                repetition,
-                context,
-                proximityCoordinator
+                forest, testingData, trainingData, repetition,
+                context, proximityCoordinator
         );
-
         return result;
+    }
+
+    private static ProximityForest.EnhancedEvaluationOptions
+    createStructuredEvaluationOptions() {
+        boolean predictions = AppContext.shouldReturnEnhancedOutputs();
+        boolean ood = AppContext.shouldReturnOODScores();
+        if (predictions && ood) {
+            return ProximityForest.EnhancedEvaluationOptions
+                    .predictionsAndOOD(AppContext.ood_score_type);
+        }
+        if (predictions) {
+            return ProximityForest.EnhancedEvaluationOptions.predictionsOnly();
+        }
+        if (ood) {
+            return ProximityForest.EnhancedEvaluationOptions
+                    .oodOnly(AppContext.ood_score_type);
+        }
+        throw new IllegalStateException(
+                "Structured evaluation requires enhanced predictions, OOD scores, or both."
+        );
     }
 
     private void performTestingImputationWhenRequested(

@@ -1318,17 +1318,15 @@ public class DistanceMeasure implements Serializable {
 	/**
 	 * Finds the closest exemplar when every input has already been materialized.
 	 *
-	 * <p>All mutable nearest-node state is method-local, so separate calls may
-	 * execute concurrently when they use independent DistanceMeasure instances.
-	 * The current best distance is passed through to compatible distances for
-	 * early abandoning.</p>
+	 * <p>This branch-only fast path allocates no result carrier. Mutable routing
+	 * state is method-local, so separate calls may execute concurrently when they
+	 * use independent DistanceMeasure instances.</p>
 	 */
 	public int findClosestResolvedNode(
 			Object resolvedQuery,
 			Object[] resolvedExemplars,
 			Random random
 	) throws IOException, InterruptedException {
-
 		return findClosestResolvedNode(
 				resolvedQuery,
 				resolvedExemplars,
@@ -1342,7 +1340,8 @@ public class DistanceMeasure implements Serializable {
 	 * of realized dimensions.
 	 *
 	 * <p>The selected-dimension array is shared read-only throughout the
-	 * comparison loop and is not copied.</p>
+	 * comparison loop and is not copied. This branch-only path does not allocate
+	 * a ClosestBranchResult.</p>
 	 */
 	public int findClosestResolvedNode(
 			Object resolvedQuery,
@@ -1350,116 +1349,148 @@ public class DistanceMeasure implements Serializable {
 			Random random,
 			int[] selectedDimensions
 	) throws IOException, InterruptedException {
-
-		if (resolvedQuery == null) {
-			throw new IllegalArgumentException(
-					"Resolved query cannot be null."
-			);
-		}
-
-		if (resolvedQuery instanceof LazySeriesRef) {
-			throw new IllegalArgumentException(
-					"Resolved query cannot be a LazySeriesRef."
-			);
-		}
-
-		if (resolvedExemplars == null
-				|| resolvedExemplars.length == 0) {
-
-			throw new IllegalArgumentException(
-					"At least one resolved exemplar is required."
-			);
-		}
-
-		Objects.requireNonNull(
+		return findClosestResolvedNodeInternal(
+				resolvedQuery,
+				resolvedExemplars,
 				random,
-				"Nearest-node selection requires a Random instance."
+				selectedDimensions,
+				null
 		);
+	}
 
-		double bestDistance =
-				Double.POSITIVE_INFINITY;
+	/**
+	 * Finds the closest materialized exemplar and writes both the selected branch
+	 * and its winning distance to a reusable output carrier.
+	 *
+	 * <p>The caller owns the carrier. Sequential callers should reuse one carrier
+	 * across observations. Parallel callers must provide one carrier per worker
+	 * or logical range; sharing a mutable carrier between concurrent calls would
+	 * create a data race.</p>
+	 *
+	 * <p>The winning distance may be positive infinity. This occurs when every
+	 * candidate comparison returns positive infinity. NaN remains invalid and is
+	 * rejected by the distance-dispatch path.</p>
+	 */
+	public void findClosestResolvedNode(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random,
+			int[] selectedDimensions,
+			ClosestBranchResult output
+	) throws IOException, InterruptedException {
+		Objects.requireNonNull(
+				output,
+				"ClosestBranchResult output cannot be null."
+		);
+		findClosestResolvedNodeInternal(
+				resolvedQuery,
+				resolvedExemplars,
+				random,
+				selectedDimensions,
+				output
+		);
+	}
 
-		int[] tiedBranches =
-				new int[resolvedExemplars.length];
+	/**
+	 * Shared allocation-free nearest-exemplar implementation.
+	 *
+	 * <p>When output is null, only the selected branch is returned. When output is
+	 * non-null, the same loop also writes the already-computed winning distance.
+	 * No distance is recomputed and no per-observation result object is created.</p>
+	 */
+	private int findClosestResolvedNodeInternal(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random,
+			int[] selectedDimensions,
+			ClosestBranchResult output
+	) throws IOException, InterruptedException {
+		validateNearestNodeInputs(resolvedQuery, resolvedExemplars, random);
 
-		int tieCount =
-				0;
+		double bestDistance = Double.POSITIVE_INFINITY;
+		int[] tiedBranches = new int[resolvedExemplars.length];
+		int tieCount = 0;
 
-		for (int branch = 0;
-			 branch < resolvedExemplars.length;
-			 branch++) {
+		for (int branch = 0; branch < resolvedExemplars.length; branch++) {
+			Object exemplar = resolvedExemplars[branch];
+			validateResolvedExemplar(exemplar, branch);
 
-			Object exemplar =
-					resolvedExemplars[branch];
-
-			if (exemplar == null) {
-				throw new IllegalArgumentException(
-						"Resolved exemplar is null at branch "
-								+ branch
-								+ "."
-				);
-			}
-
-			if (exemplar instanceof LazySeriesRef) {
-				throw new IllegalArgumentException(
-						"Resolved exemplar is still a LazySeriesRef at branch "
-								+ branch
-								+ "."
-				);
-			}
-
-			if (AppContext
-					.config_skip_distance_when_exemplar_matches_query
+			if (AppContext.config_skip_distance_when_exemplar_matches_query
 					&& exemplar == resolvedQuery) {
-
+				if (output != null) {
+					output.set(branch, 0.0);
+				}
 				return branch;
 			}
 
-			double currentDistance =
-					distanceResolved(
-							resolvedQuery,
-							exemplar,
-							bestDistance,
-							selectedDimensions
-					);
+			double currentDistance = distanceResolved(
+					resolvedQuery,
+					exemplar,
+					bestDistance,
+					selectedDimensions
+			);
 
 			if (currentDistance < bestDistance) {
-				bestDistance =
-						currentDistance;
-
-				tiedBranches[0] =
-						branch;
-
-				tieCount =
-						1;
-
-			} else if (Double.compare(
-					currentDistance,
-					bestDistance
-			) == 0) {
-
-				tiedBranches[tieCount++] =
-						branch;
+				bestDistance = currentDistance;
+				tiedBranches[0] = branch;
+				tieCount = 1;
+			} else if (Double.compare(currentDistance, bestDistance) == 0) {
+				tiedBranches[tieCount++] = branch;
 			}
 		}
 
 		if (tieCount == 0) {
 			throw new IllegalStateException(
 					"No closest branch was found for distance measure "
-							+ distance_measure
-							+ "."
+							+ distance_measure + "."
 			);
 		}
 
-		if (tieCount == 1) {
-			return tiedBranches[0];
+		int selectedBranch = tieCount == 1
+				? tiedBranches[0]
+				: tiedBranches[random.nextInt(tieCount)];
+		if (output != null) {
+			output.set(selectedBranch, bestDistance);
 		}
+		return selectedBranch;
+	}
 
-		return tiedBranches[
-				random.nextInt(
-						tieCount
-				)
-				];
+	private static void validateNearestNodeInputs(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random
+	) {
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException("Resolved query cannot be null.");
+		}
+		if (resolvedQuery instanceof LazySeriesRef) {
+			throw new IllegalArgumentException(
+					"Resolved query cannot be a LazySeriesRef."
+			);
+		}
+		if (resolvedExemplars == null || resolvedExemplars.length == 0) {
+			throw new IllegalArgumentException(
+					"At least one resolved exemplar is required."
+			);
+		}
+		Objects.requireNonNull(
+				random,
+				"Nearest-node selection requires a Random instance."
+		);
+	}
+
+	private static void validateResolvedExemplar(Object exemplar, int branch) {
+		if (exemplar == null) {
+			throw new IllegalArgumentException(
+					"Resolved exemplar is null at branch " + branch + "."
+			);
+		}
+		if (exemplar instanceof LazySeriesRef) {
+			throw new IllegalArgumentException(
+					"Resolved exemplar is still a LazySeriesRef at branch "
+							+ branch + "."
+			);
+		}
 	}
 
 	// for lazy datasets: resolve before passing to distances

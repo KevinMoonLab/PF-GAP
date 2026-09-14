@@ -6,8 +6,10 @@ import core.contracts.ObjectDataset;
 import core.parallel.ParallelRuntime;
 import core.random.SeedMixer;
 import datasets.ListObjectDataset;
+import distance.ClosestBranchResult;
 import distance.DistanceMeasure;
 import distance.MEASURE;
+import ood.SplitDistanceObserver;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -17,6 +19,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 
@@ -581,6 +584,26 @@ public class ProximityTree
 	}
 
 	/**
+	 * Predicts an already materialized query while exposing split-distance
+	 * evidence to a caller-owned observer.
+	 *
+	 * <p>One reusable branch-plus-distance carrier is used for the entire path.
+	 * This method does not define or aggregate an OOD score.</p>
+	 */
+	public Object predictResolved(
+			Object resolvedQuery,
+			int index,
+			Random predictionRandom,
+			SplitDistanceObserver observer
+	) throws Exception {
+		Node leaf = findLeafResolved(
+				resolvedQuery, predictionRandom, observer
+		);
+		leaf.TestIndices.add(index);
+		return leaf.label();
+	}
+
+	/**
 	 * Pure traversal helper for an already materialized query.
 	 *
 	 * <p>This method does not itself update TestIndices. The overload above
@@ -626,6 +649,73 @@ public class ProximityTree
 		}
 
 		return current;
+	}
+
+	/**
+	 * Traverses an already materialized query while observing every internal-node
+	 * routing decision.
+	 *
+	 * <p>The ordinary two-argument overload remains the zero-observer-overhead
+	 * path. This overload allocates one ClosestBranchResult for the complete
+	 * root-to-leaf traversal and allocates no per-node event objects.</p>
+	 *
+	 * <p>The observer may receive a null training summary when summary collection
+	 * was disabled. A winning distance may be positive infinity.</p>
+	 */
+	public Node findLeafResolved(
+			Object resolvedQuery,
+			Random predictionRandom,
+			SplitDistanceObserver observer
+	) throws Exception {
+		validateResolvedTraversalInputs(resolvedQuery, predictionRandom);
+		Objects.requireNonNull(observer, "SplitDistanceObserver cannot be null.");
+
+		ClosestBranchResult result = new ClosestBranchResult();
+		Node current = root;
+		while (!current.is_leaf()) {
+			current.splitter.findClosestBranchResolved(
+					resolvedQuery, predictionRandom, result
+			);
+			int branch = result.branch();
+			validateTraversalBranch(current, branch);
+			observer.observe(
+					current.node_id,
+					current.pathIdentity,
+					current.node_depth,
+					branch,
+					result.distance(),
+					current.splitter.getSplitDistanceSummary()
+			);
+			current = current.children[branch];
+		}
+		return current;
+	}
+
+	private void validateResolvedTraversalInputs(
+			Object resolvedQuery,
+			Random predictionRandom
+	) {
+		if (root == null) {
+			throw new IllegalStateException("Cannot predict with an untrained tree.");
+		}
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException(
+					"Resolved prediction query cannot be null."
+			);
+		}
+		Objects.requireNonNull(
+				predictionRandom,
+				"Prediction Random cannot be null."
+		);
+	}
+
+	private static void validateTraversalBranch(Node node, int branch) {
+		if (node.children == null || branch < 0 || branch >= node.children.length) {
+			throw new IllegalStateException(
+					"Invalid branch " + branch + " while traversing node "
+							+ node.node_id + "."
+			);
+		}
 	}
 
 	public int getTreeID() {

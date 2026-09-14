@@ -2,6 +2,7 @@ import subprocess
 import numpy as np
 import os
 import ast
+import csv
 
 
 def _bool(value):
@@ -78,6 +79,19 @@ def _proximity_type_arg(value):
             )
             
     return value
+
+def _ood_score_type_arg(value):
+    if value is None:
+        return "relative_support_exceedance"
+    normalized = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    valid = {
+        "relative_support_exceedance",
+    }
+    if normalized not in valid:
+        raise ValueError(
+            "ood_score_type must be one of: " + ", ".join(sorted(valid))
+        )
+    return normalized
 
 def _dimension_selection_strategy_arg(value):
     if value is None:
@@ -219,6 +233,10 @@ def train(
     test_labels=None,
     exists_testlabels=False,
     return_predictions=False,
+    return_enhanced_outputs=False,
+    return_ood_scores=False,
+    ood_score_type="relative_support_exceedance",
+    collect_split_distance_summaries=False,
     return_proximities=False,
     proximity_type="PFGAP",
     save_model=True,
@@ -303,6 +321,19 @@ def train(
     purity_threshold=1e-6,
     regressor_aggregation="mean"
 ):
+    for name, value in (
+        ("return_predictions", return_predictions),
+        ("return_enhanced_outputs", return_enhanced_outputs),
+        ("return_ood_scores", return_ood_scores),
+        ("collect_split_distance_summaries", collect_split_distance_summaries),
+    ):
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a boolean.")
+    normalized_ood_score_type = _ood_score_type_arg(ood_score_type)
+    if return_ood_scores:
+        # Same-run validation needs summaries while the forest is trained.
+        collect_split_distance_summaries = True
+
     if data_dimension not in [1, 2]:
         raise ValueError("Keyword argument 'data_dimension' must be 1 or 2.")
 
@@ -398,6 +429,11 @@ def train(
         "-getprox=" + _bool(return_proximities),
         "-proximity_type=" + _proximity_type_arg(proximity_type),
         "-get_predictions=" + _bool(return_predictions),
+        "-return_enhanced_outputs=" + _bool(return_enhanced_outputs),
+        "-return_ood_scores=" + _bool(return_ood_scores),
+        "-ood_score_type=" + normalized_ood_score_type,
+        "-collect_split_distance_summaries="
+        + _bool(collect_split_distance_summaries),
         "-savemodel=" + _bool(save_model),
         "-modelname=" + model_name,
 
@@ -486,6 +522,9 @@ def predict(
     test_labels=None,
     exists_testlabels=False,
     return_predictions=False,
+    return_enhanced_outputs=False,
+    return_ood_scores=False,
+    ood_score_type="relative_support_exceedance",
     return_proximities=False,
     proximity_type="PFGAP",
     output_directory="",
@@ -542,6 +581,15 @@ def predict(
     # Optional runtime distances
     distances=None
 ):
+    for name, value in (
+        ("return_predictions", return_predictions),
+        ("return_enhanced_outputs", return_enhanced_outputs),
+        ("return_ood_scores", return_ood_scores),
+    ):
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a boolean.")
+    normalized_ood_score_type = _ood_score_type_arg(ood_score_type)
+
     if data_dimension not in [1, 2]:
         raise ValueError("Keyword argument 'data_dimension' must be 1 or 2.")
 
@@ -589,6 +637,9 @@ def predict(
         "-getprox=" + _bool(return_proximities),
         "-proximity_type=" + _proximity_type_arg(proximity_type),
         "-get_predictions=" + _bool(return_predictions),
+        "-return_enhanced_outputs=" + _bool(return_enhanced_outputs),
+        "-return_ood_scores=" + _bool(return_ood_scores),
+        "-ood_score_type=" + normalized_ood_score_type,
         "-modelname=" + model_name,
 
         #"-parallelTrees=" + _bool(parallel_trees),
@@ -643,6 +694,47 @@ def predict(
     return subprocess.call(msgList)
 
 
+
+def read_enhanced_output(filename):
+    """Read validation_enhanced.csv or test_enhanced.csv as row dictionaries.
+
+    Numeric fields are converted to int or float when present. The
+    class_vote_probabilities field is converted from ``label=value`` pairs to a
+    dictionary. Empty fields remain ``None``.
+    """
+    integer_fields = {
+        "instance_index",
+        "prediction_tree_count",
+        "ood_available_tree_count",
+        "ood_total_tree_count",
+    }
+    float_fields = {
+        "prediction_mean",
+        "prediction_standard_deviation",
+        "ood_mean",
+        "ood_standard_deviation",
+    }
+    rows = []
+    with open(filename, newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            parsed = {}
+            for name, value in row.items():
+                if value == "":
+                    parsed[name] = None
+                elif name in integer_fields:
+                    parsed[name] = int(value)
+                elif name in float_fields:
+                    parsed[name] = float(value)
+                elif name == "class_vote_probabilities":
+                    probabilities = {}
+                    for entry in value.split(";"):
+                        label, probability = entry.rsplit("=", 1)
+                        probabilities[label] = float(probability)
+                    parsed[name] = probabilities
+                else:
+                    parsed[name] = value
+            rows.append(parsed)
+    return rows
 
 def getArray(filename):
     with open(filename) as f:

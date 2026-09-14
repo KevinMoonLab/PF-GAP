@@ -5,8 +5,12 @@ import core.contracts.ObjectDataset;
 import core.parallel.ParallelRuntime;
 import core.random.SeedMixer;
 import datasets.ListObjectDataset;
+import distance.ClosestBranchResult;
 import distance.DistanceMeasure;
 import distance.MEASURE;
+import ood.DistanceDistributionSummary;
+import ood.SplitDistanceSummary;
+import ood.WeightedDistanceAccumulator;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -73,6 +77,9 @@ public class Splitter
 
 
 	protected ListObjectDataset[] best_split;
+
+	/** Winning-candidate distance summaries, or null when collection is disabled. */
+	private SplitDistanceSummary splitDistanceSummary;
 
 	protected ProximityTree.Node node;
 
@@ -155,8 +162,13 @@ public class Splitter
 		if (selectedDimensions == null) {
 			initializeNodeDimensionSelection(sample);
 		}
+		NodeObservationMultiplicity observationMultiplicity =
+				NodeObservationMultiplicity.from(sample);
+		boolean collectDistanceSummaries =
+				AppContext.collect_split_distance_summaries;
 		CandidateSplitResult result = evaluateCandidate(
-				0, sample, dataPerClass, runtime, false
+				0, sample, dataPerClass, observationMultiplicity,
+				collectDistanceSummaries, runtime, false
 		);
 		return result == null ? null : result.splits();
 	}
@@ -165,6 +177,8 @@ public class Splitter
 			int candidateIndex,
 			ObjectDataset sample,
 			Map<Object, ListObjectDataset> dataPerClass,
+			NodeObservationMultiplicity observationMultiplicity,
+			boolean collectDistanceSummaries,
 			ParallelRuntime runtime,
 			boolean candidatesAreParallel
 	) throws Exception {
@@ -177,7 +191,7 @@ public class Splitter
 		Random random = new Random(candidateSeed);
 		DistanceMeasure candidateDistance = selectDistanceMeasure(sample, random);
 		CandidateInitialization initialization = initializeCandidate(
-				sample, dataPerClass, random
+				sample, dataPerClass, observationMultiplicity, random
 		);
 		if (initialization == null || initialization.exemplars().length < 2) {
 			return null;
@@ -185,55 +199,82 @@ public class Splitter
 		Object[] storedExemplars = initialization.exemplars();
 		Object[] resolvedExemplars = candidateDistance.resolveSeriesArray(storedExemplars);
 		long assignmentSeed = SeedMixer.derive(candidateSeed, ASSIGNMENT_PURPOSE);
-		int[] assignments;
-		if (!candidatesAreParallel && shouldUseParallelAssignments(sample, runtime)) {
-			assignments = assignBranchesParallel(
-					sample, storedExemplars, candidateDistance, resolvedExemplars,
-					assignmentSeed, runtime
+		CandidateAssignmentResult assignmentResult;
+		if (!candidatesAreParallel
+				&& shouldUseParallelAssignments(observationMultiplicity, runtime)) {
+			assignmentResult = assignDistinctBranchesParallel(
+					sample, observationMultiplicity, storedExemplars,
+					candidateDistance, resolvedExemplars, assignmentSeed,
+					collectDistanceSummaries, runtime
 			);
 		} else {
-			assignments = assignBranchesSequential(
-					sample, storedExemplars, candidateDistance, resolvedExemplars,
-					assignmentSeed
+			assignmentResult = assignDistinctBranchesSequential(
+					sample, observationMultiplicity, storedExemplars,
+					candidateDistance, resolvedExemplars, assignmentSeed,
+					collectDistanceSummaries
 			);
 		}
 		ListObjectDataset[] splits = initialization.splits();
-		assembleSplits(sample, assignments, splits);
+		assembleSplits(
+				sample, observationMultiplicity,
+				assignmentResult.distinctAssignments(), splits
+		);
 		double weightedPurity = weighted_purity(sample.size(), splits);
 		if (!Double.isFinite(weightedPurity)) {
 			return null;
 		}
 		return new CandidateSplitResult(
-				candidateIndex, candidateDistance, storedExemplars, splits, weightedPurity
+				candidateIndex, candidateDistance, storedExemplars, splits,
+				weightedPurity, assignmentResult.distanceSummary()
 		);
 	}
 
 	private CandidateInitialization initializeCandidate(
 			ObjectDataset sample,
 			Map<Object, ListObjectDataset> dataPerClass,
+			NodeObservationMultiplicity observationMultiplicity,
 			Random random
 	) {
 		if (AppContext.isIsolationMode()) {
-			int branches = Math.min(Math.max(2, AppContext.isolation_num_branches), sample.size());
-			return initializeUnsupervisedCandidate(sample, branches, random);
+			int branches = Math.min(
+					Math.max(2, AppContext.isolation_num_branches),
+					observationMultiplicity.distinctCount()
+			);
+			return initializeUnsupervisedCandidate(
+					sample, observationMultiplicity, branches, random
+			);
 		}
 		if (AppContext.isRegressionMode()) {
-			int branches = Math.min(Math.max(2, AppContext.regression_num_branches), sample.size());
-			return initializeUnsupervisedCandidate(sample, branches, random);
+			int branches = Math.min(
+					Math.max(2, AppContext.regression_num_branches),
+					observationMultiplicity.distinctCount()
+			);
+			return initializeUnsupervisedCandidate(
+					sample, observationMultiplicity, branches, random
+			);
 		}
 		return initializeClassificationCandidate(sample, dataPerClass, random);
 	}
 
 	private CandidateInitialization initializeUnsupervisedCandidate(
-			ObjectDataset sample, int branches, Random random
+			ObjectDataset sample,
+			NodeObservationMultiplicity observationMultiplicity,
+			int branches,
+			Random random
 	) {
-		if (branches < 2) {
+		if (branches < 2 || observationMultiplicity.distinctCount() < 2) {
 			return null;
 		}
+		int[] selectedDistinctOrdinals = sampleWeightedDistinctOrdinals(
+				observationMultiplicity.multiplicitiesUnsafe(), branches, random
+		);
+		int[] representativePositions =
+				observationMultiplicity.representativeLocalPositionsUnsafe();
 		Object[] candidateExemplars = new Object[branches];
-		int[] indices = sampleDistinctIndices(sample.size(), branches, random);
 		for (int branch = 0; branch < branches; branch++) {
-			candidateExemplars[branch] = sample.get_series(indices[branch]);
+			candidateExemplars[branch] = sample.get_series(
+					representativePositions[selectedDistinctOrdinals[branch]]
+			);
 		}
 		return new CandidateInitialization(
 				candidateExemplars, createEmptySplits(sample.size(), branches)
@@ -263,18 +304,22 @@ public class Splitter
 	}
 
 	private static void assembleSplits(
-			ObjectDataset sample, int[] assignments, ListObjectDataset[] splits
+			ObjectDataset sample,
+			NodeObservationMultiplicity observationMultiplicity,
+			int[] distinctAssignments,
+			ListObjectDataset[] splits
 	) {
-		for (int index = 0; index < sample.size(); index++) {
-			int branch = assignments[index];
+		int[] occurrenceToDistinct = observationMultiplicity.occurrenceToDistinctUnsafe();
+		for (int occurrence = 0; occurrence < sample.size(); occurrence++) {
+			int branch = distinctAssignments[occurrenceToDistinct[occurrence]];
 			if (branch < 0 || branch >= splits.length) {
 				throw new IllegalStateException(
-						"Invalid branch assignment " + branch + " for instance " + index
-								+ ". Candidate branch count: " + splits.length + "."
+						"Invalid branch assignment " + branch + " for occurrence " + occurrence
 				);
 			}
 			splits[branch].add(
-					sample.get_class(index), sample.get_series(index), sample.get_index(index)
+					sample.get_class(occurrence), sample.get_series(occurrence),
+					sample.get_index(occurrence)
 			);
 		}
 	}
@@ -313,81 +358,170 @@ public class Splitter
 		return splits;
 	}
 
-	/**
-	 * Sequential bounded-memory branch assignment.
-	 *
-	 * <p>Only one query and the candidate exemplars are materialized at a
-	 * time.</p>
-	 */
-	private int[] assignBranchesSequential(
+	private CandidateAssignmentResult assignDistinctBranchesSequential(
 			ObjectDataset sample,
+			NodeObservationMultiplicity multiplicity,
 			Object[] storedExemplars,
 			DistanceMeasure evaluator,
 			Object[] resolvedExemplars,
-			long assignmentSeed
+			long assignmentSeed,
+			boolean collectDistanceSummaries
 	) throws IOException, InterruptedException {
-		int[] assignments = new int[sample.size()];
-		for (int index = 0; index < sample.size(); index++) {
-			assignments[index] = assignOne(
-					sample, index, sample.get_series(index), storedExemplars, evaluator,
-					resolvedExemplars, assignmentSeed
+		int distinctCount = multiplicity.distinctCount();
+		int[] assignments = new int[distinctCount];
+		int[] positions = multiplicity.representativeLocalPositionsUnsafe();
+		int[] identities = multiplicity.stableIdentitiesUnsafe();
+		int[] weights = multiplicity.multiplicitiesUnsafe();
+		SummaryAccumulators summaries = collectDistanceSummaries
+				? new SummaryAccumulators(storedExemplars.length)
+				: null;
+		ClosestBranchResult result = collectDistanceSummaries
+				? new ClosestBranchResult()
+				: null;
+
+		for (int ordinal = 0; ordinal < distinctCount; ordinal++) {
+			Object storedQuery = sample.get_series(positions[ordinal]);
+			int match = findStoredExemplarMatch(storedQuery, storedExemplars);
+			if (match >= 0
+					&& AppContext.config_skip_distance_when_exemplar_matches_query) {
+				assignments[ordinal] = match;
+				if (summaries != null) {
+					summaries.add(match, 0.0, weights[ordinal]);
+				}
+				continue;
+			}
+
+			assignments[ordinal] = assignOneDistinctObservation(
+					storedQuery, identities[ordinal], evaluator,
+					resolvedExemplars, assignmentSeed, result
 			);
+			if (summaries != null) {
+				summaries.add(
+						assignments[ordinal], result.distance(), weights[ordinal]
+				);
+			}
 		}
-		return assignments;
+
+		return new CandidateAssignmentResult(
+				assignments,
+				summaries == null ? null : summaries.finish()
+		);
 	}
 
-	private int[] assignBranchesParallel(
+	private CandidateAssignmentResult assignDistinctBranchesParallel(
 			ObjectDataset sample,
+			NodeObservationMultiplicity multiplicity,
 			Object[] storedExemplars,
 			DistanceMeasure candidateDistance,
 			Object[] resolvedExemplars,
 			long assignmentSeed,
+			boolean collectDistanceSummaries,
 			ParallelRuntime runtime
 	) throws Exception {
-		int count = sample.size();
-		int[] assignments = new int[count];
+		int distinctCount = multiplicity.distinctCount();
+		int[] assignments = new int[distinctCount];
+		int[] positions = multiplicity.representativeLocalPositionsUnsafe();
+		int[] identities = multiplicity.stableIdentitiesUnsafe();
+		int[] weights = multiplicity.multiplicitiesUnsafe();
 		Object[] storedQueries = sample._internal_data_list().toArray();
-		if (storedQueries.length != count) {
-			throw new IllegalStateException("Dataset size changed during split assignment.");
+
+		if (storedQueries.length != sample.size()) {
+			throw new IllegalStateException(
+					"Dataset size changed during split assignment."
+			);
 		}
-		runtime.forRanges(
-				0, count, MINIMUM_ASSIGNMENT_RANGE_SIZE,
-				(start, end) -> {
-					DistanceMeasure workerDistance = candidateDistance.copyForEvaluation();
-					for (int index = start; index < end; index++) {
-						assignments[index] = assignOne(
-								sample, index, storedQueries[index], storedExemplars, workerDistance,
-								resolvedExemplars, assignmentSeed
-						);
+
+		int rangeCount = (distinctCount + MINIMUM_ASSIGNMENT_RANGE_SIZE - 1)
+				/ MINIMUM_ASSIGNMENT_RANGE_SIZE;
+		SummaryAccumulators[] rangeSummaries = collectDistanceSummaries
+				? new SummaryAccumulators[rangeCount]
+				: null;
+
+		runtime.forRange(0, rangeCount, 1, rangeIndex -> {
+			int start = rangeIndex * MINIMUM_ASSIGNMENT_RANGE_SIZE;
+			int end = Math.min(
+					distinctCount,
+					start + MINIMUM_ASSIGNMENT_RANGE_SIZE
+			);
+			DistanceMeasure workerDistance = candidateDistance.copyForEvaluation();
+			SummaryAccumulators localSummaries = collectDistanceSummaries
+					? new SummaryAccumulators(storedExemplars.length)
+					: null;
+			ClosestBranchResult result = collectDistanceSummaries
+					? new ClosestBranchResult()
+					: null;
+
+			for (int ordinal = start; ordinal < end; ordinal++) {
+				Object storedQuery = storedQueries[positions[ordinal]];
+				int match = findStoredExemplarMatch(storedQuery, storedExemplars);
+				if (match >= 0
+						&& AppContext.config_skip_distance_when_exemplar_matches_query) {
+					assignments[ordinal] = match;
+					if (localSummaries != null) {
+						localSummaries.add(match, 0.0, weights[ordinal]);
 					}
+					continue;
 				}
-		);
-		return assignments;
+
+				assignments[ordinal] = assignOneDistinctObservation(
+						storedQuery, identities[ordinal], workerDistance,
+						resolvedExemplars, assignmentSeed, result
+				);
+				if (localSummaries != null) {
+					localSummaries.add(
+							assignments[ordinal], result.distance(), weights[ordinal]
+					);
+				}
+			}
+
+			if (rangeSummaries != null) {
+				rangeSummaries[rangeIndex] = localSummaries;
+			}
+		});
+
+		if (rangeSummaries == null) {
+			return new CandidateAssignmentResult(assignments, null);
+		}
+
+		SummaryAccumulators merged =
+				new SummaryAccumulators(storedExemplars.length);
+		for (SummaryAccumulators rangeSummary : rangeSummaries) {
+			merged.merge(rangeSummary);
+		}
+		return new CandidateAssignmentResult(assignments, merged.finish());
 	}
 
-	private int assignOne(
-			ObjectDataset sample, int index, Object storedQuery,
-			Object[] storedExemplars, DistanceMeasure evaluator,
-			Object[] resolvedExemplars, long assignmentSeed
+	private int assignOneDistinctObservation(
+			Object storedQuery,
+			int stableIdentity,
+			DistanceMeasure evaluator,
+			Object[] resolvedExemplars,
+			long assignmentSeed,
+			ClosestBranchResult result
 	) throws IOException, InterruptedException {
-		int exemplarMatch = findStoredExemplarMatch(storedQuery, storedExemplars);
-		if (exemplarMatch >= 0 && AppContext.config_skip_distance_when_exemplar_matches_query) {
-			return exemplarMatch;
-		}
 		Object resolvedQuery = evaluator.resolveSeries(storedQuery);
 		Random random = new Random(
-				SeedMixer.instance(assignmentSeed, stableInstanceIdentity(sample, index))
+				SeedMixer.instance(assignmentSeed, stableIdentity)
 		);
-		return evaluator.findClosestResolvedNode(
-				resolvedQuery, resolvedExemplars, random, selectedDimensions
+		if (result == null) {
+			return evaluator.findClosestResolvedNode(
+					resolvedQuery, resolvedExemplars, random, selectedDimensions
+			);
+		}
+		evaluator.findClosestResolvedNode(
+				resolvedQuery, resolvedExemplars, random,
+				selectedDimensions, result
 		);
+		return result.branch();
 	}
 
 	private boolean shouldUseParallelAssignments(
-			ObjectDataset sample, ParallelRuntime runtime
+			NodeObservationMultiplicity multiplicity,
+			ParallelRuntime runtime
 	) {
 		return runtime.isParallel()
-				&& sample.size() >= MINIMUM_PARALLEL_ASSIGNMENT_SIZE;
+				&& multiplicity.distinctCount()
+				>= MINIMUM_PARALLEL_ASSIGNMENT_SIZE;
 	}
 
 	/**
@@ -514,7 +648,59 @@ public class Splitter
 			Object resolvedQuery,
 			Random random
 	) throws IOException, InterruptedException {
+		validateSelectedSplit();
 
+		Object[] resolvedExemplars =
+				distance_measure.resolveSeriesArray(exemplars);
+
+		return distance_measure.findClosestResolvedNode(
+				resolvedQuery,
+				resolvedExemplars,
+				random,
+				selectedDimensions
+		);
+	}
+
+	/**
+	 * Routes an already materialized query and writes both the selected branch
+	 * and winning distance to a caller-owned reusable carrier.
+	 *
+	 * <p>This method exists for distance-observing traversal. It performs the
+	 * same routing and tie-breaking as the branch-only overload, but does not
+	 * allocate a result object and does not recompute the winning distance. The
+	 * caller must not share {@code output} between concurrent traversals.</p>
+	 *
+	 * <p>The reported distance may be positive infinity. NaN and negative
+	 * infinity remain invalid under the DistanceMeasure contract.</p>
+	 *
+	 * @param resolvedQuery already materialized query
+	 * @param random deterministic tie-breaking source owned by the traversal
+	 * @param output reusable branch-plus-distance result carrier
+	 */
+	public void findClosestBranchResolved(
+			Object resolvedQuery,
+			Random random,
+			ClosestBranchResult output
+	) throws IOException, InterruptedException {
+		validateSelectedSplit();
+		Objects.requireNonNull(
+				output,
+				"ClosestBranchResult output cannot be null."
+		);
+
+		Object[] resolvedExemplars =
+				distance_measure.resolveSeriesArray(exemplars);
+
+		distance_measure.findClosestResolvedNode(
+				resolvedQuery,
+				resolvedExemplars,
+				random,
+				selectedDimensions,
+				output
+		);
+	}
+
+	private void validateSelectedSplit() {
 		if (distance_measure == null) {
 			throw new IllegalStateException(
 					"Splitter has no selected distance measure."
@@ -526,18 +712,6 @@ public class Splitter
 					"Splitter has no selected exemplars."
 			);
 		}
-
-		Object[] resolvedExemplars =
-				distance_measure.resolveSeriesArray(
-						exemplars
-				);
-
-		return distance_measure.findClosestResolvedNode(
-				resolvedQuery,
-				resolvedExemplars,
-				random,
-				selectedDimensions
-		);
 	}
 
 	/**
@@ -656,11 +830,16 @@ public class Splitter
 		distance_measure = null;
 		exemplars = null;
 		selectedDimensions = null;
+		splitDistanceSummary = null;
 		num_children = 0;
 		if (data == null || data.size() < 2) {
 			return null;
 		}
 		initializeNodeDimensionSelection(data);
+		NodeObservationMultiplicity observationMultiplicity =
+				NodeObservationMultiplicity.from(data);
+		boolean collectDistanceSummaries =
+				AppContext.collect_split_distance_summaries;
 		Map<Object, ListObjectDataset> dataPerClass =
 				AppContext.isRegressionMode() || AppContext.isIsolationMode()
 						? null : data.split_classes();
@@ -671,15 +850,22 @@ public class Splitter
 		CandidateSplitResult[] results = new CandidateSplitResult[count];
 		boolean parallelCandidates = runtime.isParallel()
 				&& count >= MINIMUM_PARALLEL_CANDIDATE_COUNT
-				&& data.size() >= MINIMUM_PARALLEL_CANDIDATE_SAMPLE_SIZE;
+				&& observationMultiplicity.distinctCount()
+				>= MINIMUM_PARALLEL_CANDIDATE_SAMPLE_SIZE;
 		if (parallelCandidates) {
 			runtime.forRange(
 					0, count, 1,
-					i -> results[i] = evaluateCandidate(i, data, dataPerClass, runtime, true)
+					i -> results[i] = evaluateCandidate(
+						i, data, dataPerClass, observationMultiplicity,
+						collectDistanceSummaries, runtime, true
+				)
 			);
 		} else {
 			for (int i = 0; i < count; i++) {
-				results[i] = evaluateCandidate(i, data, dataPerClass, runtime, false);
+				results[i] = evaluateCandidate(
+						i, data, dataPerClass, observationMultiplicity,
+						collectDistanceSummaries, runtime, false
+				);
 			}
 		}
 		CandidateSplitResult winner = null;
@@ -700,6 +886,7 @@ public class Splitter
 		best_split = winner.splits();
 		distance_measure = winner.distanceMeasure();
 		exemplars = winner.exemplars().clone();
+		splitDistanceSummary = winner.distanceSummary();
 		num_children = best_split.length;
 		return best_split;
 	}
@@ -815,79 +1002,74 @@ public class Splitter
 		);
 	}
 
-	/**
-	 * Samples distinct indices without allocating and shuffling N boxed
-	 * Integer objects.
-	 *
-	 * <p>This performs a partial Fisher-Yates shuffle using an int array.</p>
-	 */
-	private int[] sampleDistinctIndices(
-			int sampleSize, int count, Random random
+	private static int[] sampleWeightedDistinctOrdinals(
+			int[] multiplicities, int count, Random random
 	) {
-		Objects.requireNonNull(random, "Random cannot be null.");
-		if (sampleSize < 0) {
-			throw new IllegalArgumentException(
-					"sampleSize cannot be negative."
-			);
+		WeightedOrdinalSampler sampler = new WeightedOrdinalSampler(multiplicities);
+		int[] selected = new int[count];
+		for (int i = 0; i < count; i++) {
+			selected[i] = sampler.sampleAndRemove(random);
 		}
-
-		count =
-				Math.min(
-						count,
-						sampleSize
-				);
-
-		if (count < 0) {
-			throw new IllegalArgumentException(
-					"count cannot be negative."
-			);
-		}
-
-		int[] indices =
-				new int[sampleSize];
-
-		for (int index = 0;
-			 index < sampleSize;
-			 index++) {
-
-			indices[index] =
-					index;
-		}
-
-
-		for (int selectedIndex = 0;
-			 selectedIndex < count;
-			 selectedIndex++) {
-
-			int swapIndex =
-					selectedIndex
-							+ random.nextInt(
-							sampleSize
-									- selectedIndex
-					);
-
-			int temporary =
-					indices[selectedIndex];
-
-			indices[selectedIndex] =
-					indices[swapIndex];
-
-			indices[swapIndex] =
-					temporary;
-		}
-
-		int[] selected =
-				new int[count];
-
-		System.arraycopy(
-				indices,
-				0,
-				selected,
-				0,
-				count
-		);
-
 		return selected;
+	}
+
+	private static final class WeightedOrdinalSampler {
+		private final long[] tree;
+		private final int[] weights;
+		private long totalWeight;
+
+		private WeightedOrdinalSampler(int[] sourceWeights) {
+			tree = new long[sourceWeights.length + 1];
+			weights = sourceWeights.clone();
+			for (int ordinal = 0; ordinal < weights.length; ordinal++) {
+				if (weights[ordinal] <= 0) {
+					throw new IllegalArgumentException("Multiplicity must be positive.");
+				}
+				add(ordinal, weights[ordinal]);
+				totalWeight += weights[ordinal];
+			}
+		}
+
+		private int sampleAndRemove(Random random) {
+			long target = nextLong(random, totalWeight) + 1L;
+			int ordinal = findByCumulativeWeight(target);
+			int weight = weights[ordinal];
+			weights[ordinal] = 0;
+			add(ordinal, -weight);
+			totalWeight -= weight;
+			return ordinal;
+		}
+
+		private void add(int ordinal, long delta) {
+			for (int i = ordinal + 1; i < tree.length; i += i & -i) tree[i] += delta;
+		}
+
+		private int findByCumulativeWeight(long target) {
+			int index = 0;
+			long prefix = 0L;
+			for (int step = Integer.highestOneBit(tree.length - 1); step != 0; step >>>= 1) {
+				int next = index + step;
+				if (next < tree.length && prefix + tree[next] < target) {
+					index = next;
+					prefix += tree[next];
+				}
+			}
+			return index;
+		}
+
+		private static long nextLong(Random random, long bound) {
+			if (bound <= 0L) throw new IllegalStateException("No weighted item remains.");
+			long mask = bound - 1L;
+			long value = random.nextLong();
+			if ((bound & mask) == 0L) return value & mask;
+			long candidate = value >>> 1;
+			long result = candidate % bound;
+			while (candidate + mask - result < 0L) {
+				candidate = random.nextLong() >>> 1;
+				result = candidate % bound;
+			}
+			return result;
+		}
 	}
 
 	/**
@@ -1325,6 +1507,72 @@ public class Splitter
 		return selected;
 	}
 
+	/**
+	 * Worker-local branch summary accumulators.
+	 *
+	 * <p>No pooled splitter-wide accumulator is retained. Each winning distance
+	 * contributes only to the summary for its selected exemplar branch.</p>
+	 */
+	private static final class SummaryAccumulators {
+		private final WeightedDistanceAccumulator[] branches;
+
+		private SummaryAccumulators(int branchCount) {
+			if (branchCount < 1) {
+				throw new IllegalArgumentException(
+						"Summary accumulation requires at least one branch."
+				);
+			}
+			branches = new WeightedDistanceAccumulator[branchCount];
+			for (int branch = 0; branch < branchCount; branch++) {
+				branches[branch] = new WeightedDistanceAccumulator();
+			}
+		}
+
+		private void add(int branch, double distance, int weight) {
+			checkBranchIndex(branch);
+			branches[branch].add(distance, weight);
+		}
+
+		private void merge(SummaryAccumulators other) {
+			Objects.requireNonNull(
+					other,
+					"Summary accumulators to merge cannot be null."
+			);
+			if (branches.length != other.branches.length) {
+				throw new IllegalArgumentException(
+						"Cannot merge branch summaries with different branch counts."
+				);
+			}
+			for (int branch = 0; branch < branches.length; branch++) {
+				branches[branch].merge(other.branches[branch]);
+			}
+		}
+
+		private SplitDistanceSummary finish() {
+			DistanceDistributionSummary[] branchSummaries =
+					new DistanceDistributionSummary[branches.length];
+			for (int branch = 0; branch < branches.length; branch++) {
+				branchSummaries[branch] = branches[branch].finish();
+			}
+			return new SplitDistanceSummary(branchSummaries);
+		}
+
+		private void checkBranchIndex(int branch) {
+			if (branch < 0 || branch >= branches.length) {
+				throw new IllegalArgumentException(
+						"Invalid summary branch " + branch + " for "
+								+ branches.length + " branches."
+				);
+			}
+		}
+	}
+
+	private record CandidateAssignmentResult(
+			int[] distinctAssignments,
+			SplitDistanceSummary distanceSummary
+	) {
+	}
+
 	private record CandidateInitialization(
 			Object[] exemplars, ListObjectDataset[] splits
 	) {
@@ -1335,7 +1583,8 @@ public class Splitter
 			DistanceMeasure distanceMeasure,
 			Object[] exemplars,
 			ListObjectDataset[] splits,
-			double weightedPurity
+			double weightedPurity,
+			SplitDistanceSummary distanceSummary
 	) {
 	}
 
@@ -1345,6 +1594,11 @@ public class Splitter
 	 * @return a defensive copy of the sorted selected indices, or null when the
 	 *         splitter uses every available dimension
 	 */
+	/** Returns the winning split summary, or null when collection was disabled. */
+	public SplitDistanceSummary getSplitDistanceSummary() {
+		return splitDistanceSummary;
+	}
+
 	public int[] getSelectedDimensions() {
 		return selectedDimensions == null
 				? null

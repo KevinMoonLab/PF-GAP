@@ -99,6 +99,13 @@ public final class TrainingRepetitionRunner {
 
         int repetition = context.getRepetition();
 
+        /*
+         * Apply same-run validation requirements before forest construction.
+         * Evaluation-output choices remain invocation-local and are not saved
+         * in the model snapshot.
+         */
+        AppContext.prepareTrainingOutputConfiguration();
+
         performTrainingImputationWhenRequested(
                 trainingData,
                 repetition,
@@ -249,24 +256,77 @@ public final class TrainingRepetitionRunner {
                 testingData
         );
 
-        ProximityForestResult result = forest.test(
-                testingData,
-                context.getParallelRuntime()
-        );
+        boolean enhancedPredictions =
+                AppContext.shouldReturnEnhancedOutputs();
+        boolean oodScores =
+                AppContext.shouldReturnOODScores();
 
-        outputCoordinator.writeValidationPredictionsWhenRequested(
-                result,
-                testingData,
-                context
-        );
+        ProximityForestResult result;
+        boolean predictionsProduced;
 
-        result.printResults(
-                datasetName,
-                repetition,
-                ""
-        );
+        if (!enhancedPredictions && !oodScores) {
+            result = forest.test(
+                    testingData,
+                    context.getParallelRuntime()
+            );
+            predictionsProduced = true;
+        } else {
+            ProximityForest.EnhancedEvaluationOptions options =
+                    createStructuredEvaluationOptions(
+                            enhancedPredictions,
+                            oodScores
+                    );
+            forest.evaluateEnhanced(
+                    testingData,
+                    options,
+                    context.getParallelRuntime()
+            );
+            result = forest.getResultSet();
+            predictionsProduced = enhancedPredictions;
+        }
+
+        if (predictionsProduced) {
+            outputCoordinator.writeValidationPredictionsWhenRequested(
+                    result,
+                    testingData,
+                    context
+            );
+            result.printResults(
+                    datasetName,
+                    repetition,
+                    ""
+            );
+        } else if (oodScores) {
+            outputCoordinator.writeValidationStructuredOutputWhenRequested(
+                    result,
+                    testingData,
+                    context
+            );
+        }
 
         return result;
+    }
+
+    private static ProximityForest.EnhancedEvaluationOptions
+    createStructuredEvaluationOptions(
+            boolean enhancedPredictions,
+            boolean oodScores
+    ) {
+        if (enhancedPredictions && oodScores) {
+            return ProximityForest.EnhancedEvaluationOptions
+                    .predictionsAndOOD(AppContext.ood_score_type);
+        }
+        if (enhancedPredictions) {
+            return ProximityForest.EnhancedEvaluationOptions.predictionsOnly();
+        }
+        if (oodScores) {
+            return ProximityForest.EnhancedEvaluationOptions
+                    .oodOnly(AppContext.ood_score_type);
+        }
+        throw new IllegalArgumentException(
+                "Structured evaluation requires enhanced predictions, OOD "
+                        + "scores, or both."
+        );
     }
 
     private void performTestingImputationWhenRequested(

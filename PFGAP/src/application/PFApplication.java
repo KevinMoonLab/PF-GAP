@@ -6,6 +6,7 @@ import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
+import ood.OODScoreType;
 import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationMethod;
 import preprocessing.standardization.StandardizationScope;
@@ -158,6 +159,19 @@ public class PFApplication {
 							+ raw
 							+ ". Valid options are: "
 							+ Arrays.toString(ReaderType.values())
+			);
+		}
+	}
+
+	/** Parses an evaluation-time OOD scoring method. */
+	private static OODScoreType parseOODScoreType(String raw) {
+		try {
+			return OODScoreType.parse(raw);
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException(
+					"Invalid ood_score_type: " + raw + ". Supported values: "
+							+ OODScoreType.supportedValues() + ".",
+					exception
 			);
 		}
 	}
@@ -642,6 +656,18 @@ public class PFApplication {
 					case "-get_predictions":
 						AppContext.get_predictions = Boolean.parseBoolean(options[1]);
 						break;
+					case "-return_enhanced_outputs":
+						AppContext.return_enhanced_outputs = Boolean.parseBoolean(options[1]);
+						break;
+					case "-return_ood_scores":
+						AppContext.return_ood_scores = Boolean.parseBoolean(options[1]);
+						break;
+					case "-ood_score_type":
+						AppContext.ood_score_type = parseOODScoreType(options[1]);
+						break;
+					case "-collect_split_distance_summaries":
+						AppContext.collect_split_distance_summaries = Boolean.parseBoolean(options[1]);
+						break;
 					case "-modelname":
 						AppContext.modelname = options[1];
 						break;
@@ -918,6 +944,7 @@ public class PFApplication {
 			}
 
 			validateDimensionSelectionConfiguration();
+			AppContext.validateEvaluationOutputConfiguration();
 
 			if (imputerType !=null) {
 				switch (imputerType) {

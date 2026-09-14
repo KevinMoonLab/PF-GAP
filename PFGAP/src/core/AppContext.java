@@ -14,6 +14,7 @@ import datasets.readers.lazy.LazySeriesRef;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
+import ood.OODScoreType;
 import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationStats;
 import proximity.ProximityType;
@@ -37,7 +38,7 @@ public class AppContext {
 
 
 	//********************************************************************
-	//DEVELOPMENT and TESTING AREA -- 
+	//DEVELOPMENT and TESTING AREA --
 	public static boolean config_majority_vote_tie_break_randomly = true;
 	public static boolean config_skip_distance_when_exemplar_matches_query = true;
 	public static boolean config_use_random_choice_when_min_distance_is_equal = true;
@@ -47,8 +48,8 @@ public class AppContext {
 	//public static long rand_seed;	//TODO set seed to reproduce results
 	//public static Random rand;
 
-	public static int verbosity = 0; //0, 1, 2 
-	public static int export_level = 1; //0, 1, 2 
+	public static int verbosity = 0; //0, 1, 2
+	public static int export_level = 1; //0, 1, 2
 
 	public static String training_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TRAIN.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TRAIN.csv";
 	public static String testing_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TEST.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
@@ -140,17 +141,11 @@ public class AppContext {
 	public static boolean savemodel;
 	public static boolean getprox;
 	public static boolean get_training_outlier_scores;
-	public static boolean get_predictions = false;
+	public static boolean get_predictions = false; // write aggregate prediction artifacts
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
 	public static MEASURE[] KNNdistances; //only used in KNN initial imputation.
 	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
-	public static boolean parallelTrees = false; //false;
-	public static boolean parallelProx = false; //false;
-	public static boolean parallelPredict = false; // if parallelTrees=true, predictions will be made in parallel across trees.
-	public static boolean parallel_split_assignments = false; // not currently compatible with parallelTrees
-	public static int parallel_split_assignment_threshold = 128;
-	// parallelPredict refers to parallelization across data instances (will not happen if parallelTrees=true).
 	/**
 	 * Maximum number of PFGAP worker threads.
 	 *
@@ -211,8 +206,80 @@ public class AppContext {
 	//	rand = new Random();
 	//}
 
+	// Evaluation-output controls. These are invocation-level choices and are
+	// intentionally not part of the saved AppContextSnapshot.
+	//
+	// get_predictions retains its existing meaning for writing ordinary
+	// prediction artifacts. return_enhanced_outputs requests structured
+	// prediction details such as vote proportions or regression dispersion.
+	// return_ood_scores independently requests OOD output.
+	public static boolean return_ood_scores = false;
+	public static boolean return_enhanced_outputs = false;
+
+	// The evaluation invocation may select any scorer supported by the loaded
+	// model's retained statistics. This choice is not a training snapshot value.
+	public static OODScoreType ood_score_type =
+			OODScoreType.RELATIVE_SUPPORT_EXCEEDANCE;
+
+	/**
+	 * Training-time model capability. When true, winning splitters retain the
+	 * branch-local distance summaries required by distance-based OOD scorers.
+	 * The trained forest itself is the authority on whether this capability is
+	 * present after model loading.
+	 */
+	public static boolean collect_split_distance_summaries = false;
 	public static Long rand_seed = null;
 	private static Random rand = new Random();
+
+	/**
+	 * Validates invocation-level output settings.
+	 *
+	 * <p>Predictions, enhanced prediction details, and OOD scores are independent
+	 * requests. In particular, OOD-only evaluation is valid and OOD does not
+	 * require enhanced prediction output.</p>
+	 */
+	public static void validateEvaluationOutputConfiguration() {
+		if (return_ood_scores && ood_score_type == null) {
+			throw new IllegalArgumentException(
+					"ood_score_type cannot be null when OOD scores are requested."
+			);
+		}
+	}
+
+	/**
+	 * Applies training requirements implied by same-run validation output.
+	 *
+	 * <p>If validation in the current training invocation requests OOD scores,
+	 * the forest must retain branch summaries while it is being trained. Explicit
+	 * collection remains available for saving an OOD-capable model even when the
+	 * current invocation does not request OOD output.</p>
+	 */
+	public static void prepareTrainingOutputConfiguration() {
+		validateEvaluationOutputConfiguration();
+		if (return_ood_scores) {
+			collect_split_distance_summaries = true;
+		}
+	}
+
+	/** Returns whether structured per-instance prediction details are requested. */
+	public static boolean shouldReturnEnhancedOutputs() {
+		return return_enhanced_outputs;
+	}
+
+	/** Returns whether OOD output is requested for the current evaluation. */
+	public static boolean shouldReturnOODScores() {
+		return return_ood_scores;
+	}
+
+	/** Returns whether either structured prediction or OOD output is requested. */
+	public static boolean shouldUseStructuredEvaluation() {
+		return return_enhanced_outputs || return_ood_scores;
+	}
+
+	/** Returns whether training must retain branch-local distance summaries. */
+	public static boolean shouldCollectSplitDistanceSummaries() {
+		return collect_split_distance_summaries;
+	}
 
 	public static void setRandomSeed(long seed) {
 		rand_seed = seed;

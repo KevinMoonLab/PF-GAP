@@ -1,11 +1,16 @@
 package trees;
 
 import core.AppContext;
+import core.ForestPredictionResult;
 import core.ProximityForestResult;
 import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import datasets.readers.lazy.LazySeriesRef;
 import distance.MEASURE;
+import ood.OODScoreResult;
+import ood.OODScoreType;
+import ood.PathOODScorer;
+import ood.RelativeSupportExceedanceOODScorer;
 import util.PrintUtilities;
 
 import java.io.Serial;
@@ -13,6 +18,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -254,10 +260,9 @@ public class ProximityForest implements Serializable {
          */
         recordReachedLeaves(reachedLeaves);
 
-        result.Predictions =
-                new ArrayList<>(Arrays.asList(predictedLabels));
-        predictions =
-                result.Predictions;
+        result.clearPredictionResults();
+        result.setPredictions(Arrays.asList(predictedLabels));
+        predictions = result.Predictions;
 
         calculateEvaluationMetrics(
                 actualLabels,
@@ -427,6 +432,801 @@ public class ProximityForest implements Serializable {
         );
 
         return combineTreePredictions(treePredictions);
+    }
+
+    /**
+     * Calculates OOD scores for a dataset using the default parameters of the
+     * selected scoring method.
+     *
+     * <p>This operation is independent of ordinary prediction output and does
+     * not modify leaf TestIndices. Queries are materialized once at the forest
+     * boundary and reused across every tree traversal.</p>
+     */
+    public ForestOODScore[] scoreOOD(
+            ListObjectDataset data,
+            OODScoreType scoreType
+    ) throws Exception {
+        try (ParallelRuntime runtime =
+                     new ParallelRuntime(AppContext.num_workers)) {
+            return scoreOOD(
+                    data,
+                    scoreType,
+                    RelativeSupportExceedanceOODScorer
+                            .DEFAULT_RELATIVE_SCALE_FLOOR,
+                    RelativeSupportExceedanceOODScorer
+                            .DEFAULT_INFINITY_SIGMA_MULTIPLIER,
+                    runtime
+            );
+        }
+    }
+
+    /**
+     * Calculates OOD scores for every supplied query.
+     *
+     * <p>For multiple queries, query indices are exposed as parallel work and
+     * each resolved query traverses all trees sequentially. For one query, tree
+     * indices are exposed as parallel work. This mirrors ordinary forest
+     * evaluation and avoids nested parallel traversal.</p>
+     */
+    public ForestOODScore[] scoreOOD(
+            ListObjectDataset data,
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier,
+            ParallelRuntime runtime
+    ) throws Exception {
+        Objects.requireNonNull(data, "OOD evaluation data cannot be null.");
+        Objects.requireNonNull(scoreType, "OOD score type cannot be null.");
+        Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
+        validateOODParameters(
+                scoreType,
+                relativeScaleFloor,
+                infinitySigmaMultiplier
+        );
+
+        requireSplitDistanceOODSupport();
+        ForestOODScore[] scores = new ForestOODScore[data.size()];
+        if (data.size() > 1 && runtime.isParallel()) {
+            runtime.forRange(
+                    0,
+                    data.size(),
+                    MINIMUM_PREDICTION_RANGE_SIZE,
+                    testIndex -> scores[testIndex] = scoreOneOODSequentialTrees(
+                            resolvePredictionQuery(data.get_series(testIndex)),
+                            testIndex,
+                            scoreType,
+                            relativeScaleFloor,
+                            infinitySigmaMultiplier
+                    )
+            );
+            return scores;
+        }
+
+        for (int testIndex = 0; testIndex < data.size(); testIndex++) {
+            Object resolvedQuery = resolvePredictionQuery(
+                    data.get_series(testIndex)
+            );
+            scores[testIndex] = scoreOneOOD(
+                    resolvedQuery,
+                    testIndex,
+                    scoreType,
+                    relativeScaleFloor,
+                    infinitySigmaMultiplier,
+                    runtime
+            );
+        }
+        return scores;
+    }
+
+    /** Calculates one forest OOD score with default scorer parameters. */
+    public ForestOODScore scoreOOD(
+            Object query,
+            int index,
+            OODScoreType scoreType
+    ) throws Exception {
+        Object resolvedQuery = resolvePredictionQuery(query);
+        requireSplitDistanceOODSupport();
+        return scoreOneOODSequentialTrees(
+                resolvedQuery,
+                index,
+                Objects.requireNonNull(
+                        scoreType,
+                        "OOD score type cannot be null."
+                ),
+                RelativeSupportExceedanceOODScorer
+                        .DEFAULT_RELATIVE_SCALE_FLOOR,
+                RelativeSupportExceedanceOODScorer
+                        .DEFAULT_INFINITY_SIGMA_MULTIPLIER
+        );
+    }
+
+    private ForestOODScore scoreOneOODSequentialTrees(
+            Object resolvedQuery,
+            int testIndex,
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier
+    ) throws Exception {
+        OODScoreResult[] treeScores = new OODScoreResult[trees.length];
+        for (int treeIndex = 0; treeIndex < trees.length; treeIndex++) {
+            treeScores[treeIndex] = scoreTreeOOD(
+                    resolvedQuery,
+                    testIndex,
+                    treeIndex,
+                    scoreType,
+                    relativeScaleFloor,
+                    infinitySigmaMultiplier
+            );
+        }
+        return aggregateTreeOODScores(scoreType, treeScores);
+    }
+
+    private ForestOODScore scoreOneOOD(
+            Object resolvedQuery,
+            int testIndex,
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier,
+            ParallelRuntime runtime
+    ) throws Exception {
+        OODScoreResult[] treeScores = new OODScoreResult[trees.length];
+        runtime.forRange(
+                0,
+                trees.length,
+                MINIMUM_TREE_RANGE_SIZE,
+                treeIndex -> treeScores[treeIndex] = scoreTreeOOD(
+                        resolvedQuery,
+                        testIndex,
+                        treeIndex,
+                        scoreType,
+                        relativeScaleFloor,
+                        infinitySigmaMultiplier
+                )
+        );
+        return aggregateTreeOODScores(scoreType, treeScores);
+    }
+
+    private OODScoreResult scoreTreeOOD(
+            Object resolvedQuery,
+            int testIndex,
+            int treeIndex,
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier
+    ) throws Exception {
+        PathOODScorer scorer = createOODScorer(
+                scoreType,
+                relativeScaleFloor,
+                infinitySigmaMultiplier
+        );
+        trees[treeIndex].findLeafResolved(
+                resolvedQuery,
+                predictionRandom(testIndex, treeIndex),
+                scorer
+        );
+        return scorer.finish();
+    }
+
+    private static PathOODScorer createOODScorer(
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier
+    ) {
+        return switch (scoreType) {
+            case RELATIVE_SUPPORT_EXCEEDANCE ->
+                    new RelativeSupportExceedanceOODScorer(
+                            relativeScaleFloor,
+                            infinitySigmaMultiplier
+                    );
+        };
+    }
+
+    private static void validateOODParameters(
+            OODScoreType scoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier
+    ) {
+        createOODScorer(
+                scoreType,
+                relativeScaleFloor,
+                infinitySigmaMultiplier
+        );
+    }
+
+    private static ForestOODScore aggregateTreeOODScores(
+            OODScoreType scoreType,
+            OODScoreResult[] treeScores
+    ) {
+        RunningMoments moments = new RunningMoments();
+        for (OODScoreResult treeScore : treeScores) {
+            if (treeScore != null && treeScore.isAvailable()) {
+                if (treeScore.scoreType() != scoreType) {
+                    throw new IllegalStateException(
+                            "Tree OOD score type does not match forest request."
+                    );
+                }
+                moments.add(treeScore.score());
+            }
+        }
+        return moments.finish(scoreType, treeScores.length);
+    }
+
+    /**
+     * Immutable forest-level OOD result for one query.
+     *
+     * <p>The standard deviation is the population standard deviation across
+     * available tree scores. Mean and standard deviation are NaN when no tree
+     * produced an available score.</p>
+     */
+    public record ForestOODScore(
+            OODScoreType scoreType,
+            double mean,
+            double standardDeviation,
+            int availableTreeCount,
+            int totalTreeCount
+    ) implements Serializable {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        public ForestOODScore {
+            Objects.requireNonNull(scoreType, "OOD score type cannot be null.");
+            if (availableTreeCount < 0 || totalTreeCount < 0
+                    || availableTreeCount > totalTreeCount) {
+                throw new IllegalArgumentException(
+                        "Invalid available and total OOD tree counts."
+                );
+            }
+            if (availableTreeCount == 0) {
+                if (!Double.isNaN(mean) || !Double.isNaN(standardDeviation)) {
+                    throw new IllegalArgumentException(
+                            "Unavailable forest OOD statistics must be NaN."
+                    );
+                }
+            } else if (!Double.isFinite(mean)
+                    || !Double.isFinite(standardDeviation)
+                    || mean < 0.0
+                    || standardDeviation < 0.0) {
+                throw new IllegalArgumentException(
+                        "Available forest OOD statistics must be finite and nonnegative."
+                );
+            }
+        }
+
+        public boolean isAvailable() {
+            return availableTreeCount > 0;
+        }
+    }
+
+    private static final class RunningMoments {
+        private int count;
+        private double mean;
+        private double m2;
+
+        private void add(double value) {
+            if (!Double.isFinite(value) || value < 0.0) {
+                throw new IllegalArgumentException(
+                        "Tree OOD score must be finite and nonnegative."
+                );
+            }
+            addSigned(value);
+        }
+
+        private void addSigned(double value) {
+            if (!Double.isFinite(value)) {
+                throw new IllegalArgumentException(
+                        "Moment value must be finite."
+                );
+            }
+            count++;
+            double delta = value - mean;
+            mean += delta / count;
+            double delta2 = value - mean;
+            m2 += delta * delta2;
+        }
+
+        private int count() {
+            return count;
+        }
+
+        private double mean() {
+            return canonicalizeZero(mean);
+        }
+
+        private double standardDeviation() {
+            if (count == 0) {
+                return Double.NaN;
+            }
+            return canonicalizeZero(Math.sqrt(Math.max(0.0, m2 / count)));
+        }
+
+        private ForestOODScore finish(
+                OODScoreType scoreType,
+                int totalTreeCount
+        ) {
+            if (count == 0) {
+                return new ForestOODScore(
+                        scoreType,
+                        Double.NaN,
+                        Double.NaN,
+                        0,
+                        totalTreeCount
+                );
+            }
+            double variance = Math.max(0.0, m2 / count);
+            return new ForestOODScore(
+                    scoreType,
+                    canonicalizeZero(mean),
+                    canonicalizeZero(Math.sqrt(variance)),
+                    count,
+                    totalTreeCount
+            );
+        }
+
+        private static double canonicalizeZero(double value) {
+            return value == 0.0 ? 0.0 : value;
+        }
+    }
+
+    /**
+     * Produces structured per-instance output with independently selectable
+     * prediction and OOD components.
+     *
+     * <p>When both components are requested, each tree is traversed once and
+     * the reached leaf supplies the tree prediction while the scorer observes
+     * the same routing decisions. When only one component is requested, no
+     * arrays, maps, scorers, or leaf-membership state required solely by the
+     * omitted component are created.</p>
+     *
+     * <p>This method does not replace {@link #test(ListObjectDataset)}. Ordinary
+     * callers that need only legacy predictions and evaluation metrics may keep
+     * using {@code test}. Call this method only when structured enhanced output,
+     * OOD output, or both are required.</p>
+     */
+    public ForestPredictionResult[] evaluateEnhanced(
+            ListObjectDataset data,
+            EnhancedEvaluationOptions options
+    ) throws Exception {
+        try (ParallelRuntime runtime =
+                     new ParallelRuntime(AppContext.num_workers)) {
+            return evaluateEnhanced(data, options, runtime);
+        }
+    }
+
+    /**
+     * Runtime-aware structured evaluation entry point.
+     */
+    public ForestPredictionResult[] evaluateEnhanced(
+            ListObjectDataset data,
+            EnhancedEvaluationOptions options,
+            ParallelRuntime runtime
+    ) throws Exception {
+        Objects.requireNonNull(data, "Evaluation data cannot be null.");
+        Objects.requireNonNull(options, "Enhanced evaluation options cannot be null.");
+        Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
+        options.validate();
+        if (options.includeOOD()) {
+            requireSplitDistanceOODSupport();
+        }
+
+        result.startTimeTest = System.nanoTime();
+        try {
+            ForestPredictionResult[] outputs = new ForestPredictionResult[data.size()];
+            Object[] actualLabels = options.includePredictions()
+                    ? new Object[data.size()] : null;
+            ProximityTree.Node[][] reachedLeaves = options.includePredictions()
+                    ? new ProximityTree.Node[data.size()][trees.length] : null;
+
+            if (data.size() > 1 && runtime.isParallel()) {
+                runtime.forRange(0, data.size(), MINIMUM_PREDICTION_RANGE_SIZE, index -> {
+                    if (actualLabels != null) actualLabels[index] = data.get_class(index);
+                    outputs[index] = evaluateEnhancedInstanceSequentialTrees(
+                            resolvePredictionQuery(data.get_series(index)), index, options,
+                            reachedLeaves == null ? null : reachedLeaves[index]
+                    );
+                    reportTestProgress(index);
+                });
+            } else {
+                for (int index = 0; index < data.size(); index++) {
+                    if (actualLabels != null) actualLabels[index] = data.get_class(index);
+                    outputs[index] = evaluateEnhancedInstance(
+                            resolvePredictionQuery(data.get_series(index)), index, options,
+                            reachedLeaves == null ? null : reachedLeaves[index], runtime
+                    );
+                    reportTestProgress(index);
+                }
+            }
+
+            if (reachedLeaves != null) recordReachedLeaves(reachedLeaves);
+            storeEnhancedResults(outputs, options.includePredictions());
+            if (options.includePredictions()) {
+                calculateEvaluationMetrics(actualLabels, extractPredictedLabels(outputs));
+            } else {
+                clearPredictionMetrics();
+            }
+            return outputs;
+        } finally {
+            result.endTimeTest = System.nanoTime();
+            result.elapsedTimeTest = result.endTimeTest - result.startTimeTest;
+            if (AppContext.verbosity > 0) System.out.println();
+        }
+    }
+
+    private static Object[] extractPredictedLabels(ForestPredictionResult[] outputs) {
+        Object[] labels = new Object[outputs.length];
+        for (int index = 0; index < outputs.length; index++) {
+            ForestPredictionResult output = Objects.requireNonNull(
+                    outputs[index], "Enhanced result cannot be null at index " + index + "."
+            );
+            if (!output.hasPrediction()) {
+                throw new IllegalStateException("Requested prediction missing at index " + index + ".");
+            }
+            labels[index] = output.prediction();
+        }
+        return labels;
+    }
+
+    private void clearPredictionMetrics() {
+        result.correct = 0;
+        result.errors = 0;
+        result.score = Double.NaN;
+        result.error_rate = Double.NaN;
+    }
+
+    /**
+     * Stores structured output in the forest result and keeps the legacy
+     * prediction list aligned whenever prediction output was requested.
+     *
+     * <p>OOD-only evaluation clears the legacy prediction list rather than
+     * filling it with null placeholders. Structured results remain available
+     * through {@link ProximityForestResult#PredictionResults}.</p>
+     */
+    private void storeEnhancedResults(
+            ForestPredictionResult[] outputs,
+            boolean predictionsIncluded
+    ) {
+        result.setPredictionResults(Arrays.asList(outputs));
+
+        if (!predictionsIncluded) {
+            result.setPredictions(List.of());
+            predictions = result.Predictions;
+            return;
+        }
+
+        ArrayList<Object> legacyPredictions =
+                new ArrayList<>(outputs.length);
+        for (int index = 0; index < outputs.length; index++) {
+            ForestPredictionResult output = Objects.requireNonNull(
+                    outputs[index],
+                    "Enhanced evaluation result cannot be null at index "
+                            + index + "."
+            );
+            if (!output.hasPrediction()) {
+                throw new IllegalStateException(
+                        "Enhanced result at index " + index
+                                + " omits a requested prediction."
+                );
+            }
+            legacyPredictions.add(output.prediction());
+        }
+
+        result.setPredictions(legacyPredictions);
+        predictions = result.Predictions;
+        result.validatePredictionAlignment();
+    }
+
+    private ForestPredictionResult evaluateEnhancedInstanceSequentialTrees(
+            Object resolvedQuery,
+            int instanceIndex,
+            EnhancedEvaluationOptions options,
+            ProximityTree.Node[] reachedLeaves
+    ) throws Exception {
+        Object[] treePredictions = options.includePredictions()
+                ? new Object[trees.length]
+                : null;
+        OODScoreResult[] treeOODScores = options.includeOOD()
+                ? new OODScoreResult[trees.length]
+                : null;
+
+        for (int treeIndex = 0; treeIndex < trees.length; treeIndex++) {
+            evaluateEnhancedTree(
+                    resolvedQuery,
+                    instanceIndex,
+                    treeIndex,
+                    options,
+                    treePredictions,
+                    treeOODScores,
+                    reachedLeaves
+            );
+        }
+        return buildEnhancedResult(options, treePredictions, treeOODScores);
+    }
+
+    private ForestPredictionResult evaluateEnhancedInstance(
+            Object resolvedQuery,
+            int instanceIndex,
+            EnhancedEvaluationOptions options,
+            ProximityTree.Node[] reachedLeaves,
+            ParallelRuntime runtime
+    ) throws Exception {
+        Object[] treePredictions = options.includePredictions()
+                ? new Object[trees.length]
+                : null;
+        OODScoreResult[] treeOODScores = options.includeOOD()
+                ? new OODScoreResult[trees.length]
+                : null;
+
+        runtime.forRange(
+                0,
+                trees.length,
+                MINIMUM_TREE_RANGE_SIZE,
+                treeIndex -> evaluateEnhancedTree(
+                        resolvedQuery,
+                        instanceIndex,
+                        treeIndex,
+                        options,
+                        treePredictions,
+                        treeOODScores,
+                        reachedLeaves
+                )
+        );
+        return buildEnhancedResult(options, treePredictions, treeOODScores);
+    }
+
+    private void evaluateEnhancedTree(
+            Object resolvedQuery,
+            int instanceIndex,
+            int treeIndex,
+            EnhancedEvaluationOptions options,
+            Object[] treePredictions,
+            OODScoreResult[] treeOODScores,
+            ProximityTree.Node[] reachedLeaves
+    ) throws Exception {
+        Random random = predictionRandom(instanceIndex, treeIndex);
+        ProximityTree.Node leaf;
+
+        if (options.includeOOD()) {
+            PathOODScorer scorer = createOODScorer(
+                    options.oodScoreType(),
+                    options.relativeScaleFloor(),
+                    options.infinitySigmaMultiplier()
+            );
+            leaf = trees[treeIndex].findLeafResolved(
+                    resolvedQuery,
+                    random,
+                    scorer
+            );
+            treeOODScores[treeIndex] = scorer.finish();
+        } else {
+            leaf = trees[treeIndex].findLeafResolved(
+                    resolvedQuery,
+                    random
+            );
+        }
+
+        if (options.includePredictions()) {
+            reachedLeaves[treeIndex] = leaf;
+            treePredictions[treeIndex] = leaf.label();
+        }
+    }
+
+    private ForestPredictionResult buildEnhancedResult(
+            EnhancedEvaluationOptions options,
+            Object[] treePredictions,
+            OODScoreResult[] treeOODScores
+    ) {
+        ForestOODScore ood = options.includeOOD()
+                ? aggregateTreeOODScores(options.oodScoreType(), treeOODScores)
+                : null;
+
+        if (!options.includePredictions()) {
+            return ForestPredictionResult.oodOnly(
+                    ood.scoreType(),
+                    ood.mean(),
+                    ood.standardDeviation(),
+                    ood.availableTreeCount(),
+                    ood.totalTreeCount()
+            );
+        }
+
+        Object prediction = combineTreePredictions(treePredictions);
+        if (AppContext.isRegressionMode()) {
+            NumericPredictionSummary summary =
+                    summarizeNumericPredictions(treePredictions);
+            return options.includeOOD()
+                    ? ForestPredictionResult.regressionWithOOD(
+                            prediction,
+                            summary.mean(),
+                            summary.standardDeviation(),
+                            summary.count(),
+                            ood.scoreType(),
+                            ood.mean(),
+                            ood.standardDeviation(),
+                            ood.availableTreeCount(),
+                            ood.totalTreeCount()
+                    )
+                    : ForestPredictionResult.regression(
+                            prediction,
+                            summary.mean(),
+                            summary.standardDeviation(),
+                            summary.count()
+                    );
+        }
+
+        if (AppContext.isIsolationMode()) {
+            return options.includeOOD()
+                    ? ForestPredictionResult.isolationWithOOD(
+                            prediction,
+                            trees.length,
+                            ood.scoreType(),
+                            ood.mean(),
+                            ood.standardDeviation(),
+                            ood.availableTreeCount(),
+                            ood.totalTreeCount()
+                    )
+                    : ForestPredictionResult.isolation(
+                            prediction,
+                            trees.length
+                    );
+        }
+
+        Map<Object, Double> probabilities =
+                calculateClassVoteProbabilities(treePredictions);
+        return options.includeOOD()
+                ? ForestPredictionResult.classificationWithOOD(
+                        prediction,
+                        probabilities,
+                        treePredictions.length,
+                        ood.scoreType(),
+                        ood.mean(),
+                        ood.standardDeviation(),
+                        ood.availableTreeCount(),
+                        ood.totalTreeCount()
+                )
+                : ForestPredictionResult.classification(
+                        prediction,
+                        probabilities,
+                        treePredictions.length
+                );
+    }
+
+    private static NumericPredictionSummary summarizeNumericPredictions(
+            Object[] treePredictions
+    ) {
+        RunningMoments moments = new RunningMoments();
+        for (Object prediction : treePredictions) {
+            if (prediction instanceof Number number) {
+                double value = number.doubleValue();
+                if (!Double.isFinite(value)) {
+                    throw new IllegalStateException(
+                            "Regression tree prediction must be finite, but was "
+                                    + value + "."
+                    );
+                }
+                moments.addSigned(value);
+            }
+        }
+        if (moments.count() == 0) {
+            throw new IllegalStateException(
+                    "No numeric tree prediction was available."
+            );
+        }
+        return new NumericPredictionSummary(
+                moments.mean(),
+                moments.standardDeviation(),
+                moments.count()
+        );
+    }
+
+    private static Map<Object, Double> calculateClassVoteProbabilities(
+            Object[] treePredictions
+    ) {
+        LinkedHashMap<Object, Integer> counts = new LinkedHashMap<>();
+        for (Object prediction : treePredictions) {
+            counts.merge(prediction, 1, Integer::sum);
+        }
+        LinkedHashMap<Object, Double> probabilities = new LinkedHashMap<>();
+        for (Map.Entry<Object, Integer> entry : counts.entrySet()) {
+            probabilities.put(
+                    entry.getKey(),
+                    (double) entry.getValue() / treePredictions.length
+            );
+        }
+        return probabilities;
+    }
+
+    /**
+     * Explicit controls for structured forest evaluation.
+     *
+     * <p>Use {@link #predictionsOnly()}, {@link #oodOnly(OODScoreType)}, or
+     * {@link #predictionsAndOOD(OODScoreType)} for the common cases. The full
+     * constructor permits scorer parameter overrides.</p>
+     */
+    public record EnhancedEvaluationOptions(
+            boolean includePredictions,
+            boolean includeOOD,
+            OODScoreType oodScoreType,
+            double relativeScaleFloor,
+            double infinitySigmaMultiplier
+    ) implements Serializable {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        public static EnhancedEvaluationOptions predictionsOnly() {
+            return new EnhancedEvaluationOptions(
+                    true,
+                    false,
+                    null,
+                    Double.NaN,
+                    Double.NaN
+            );
+        }
+
+        public static EnhancedEvaluationOptions oodOnly(
+                OODScoreType scoreType
+        ) {
+            return predictionsAndOrOOD(false, true, scoreType);
+        }
+
+        public static EnhancedEvaluationOptions predictionsAndOOD(
+                OODScoreType scoreType
+        ) {
+            return predictionsAndOrOOD(true, true, scoreType);
+        }
+
+        private static EnhancedEvaluationOptions predictionsAndOrOOD(
+                boolean predictions,
+                boolean ood,
+                OODScoreType scoreType
+        ) {
+            return new EnhancedEvaluationOptions(
+                    predictions,
+                    ood,
+                    Objects.requireNonNull(
+                            scoreType,
+                            "OOD score type cannot be null."
+                    ),
+                    RelativeSupportExceedanceOODScorer
+                            .DEFAULT_RELATIVE_SCALE_FLOOR,
+                    RelativeSupportExceedanceOODScorer
+                            .DEFAULT_INFINITY_SIGMA_MULTIPLIER
+            );
+        }
+
+        private void validate() {
+            if (!includePredictions && !includeOOD) {
+                throw new IllegalArgumentException(
+                        "Enhanced evaluation must request predictions, OOD scores, or both."
+                );
+            }
+            if (!includeOOD) {
+                if (oodScoreType != null
+                        || !Double.isNaN(relativeScaleFloor)
+                        || !Double.isNaN(infinitySigmaMultiplier)) {
+                    throw new IllegalArgumentException(
+                            "Prediction-only evaluation must not specify OOD settings."
+                    );
+                }
+                return;
+            }
+            Objects.requireNonNull(
+                    oodScoreType,
+                    "OOD score type cannot be null when OOD output is requested."
+            );
+            validateOODParameters(
+                    oodScoreType,
+                    relativeScaleFloor,
+                    infinitySigmaMultiplier
+            );
+        }
+    }
+
+    private record NumericPredictionSummary(
+            double mean,
+            double standardDeviation,
+            int count
+    ) {
     }
 
     private Object combineTreePredictions(
@@ -720,6 +1520,38 @@ public class ProximityForest implements Serializable {
                 (mixed ^ (mixed >>> 27))
                         * 0x94D049BB133111EBL;
         return mixed ^ (mixed >>> 31);
+    }
+
+    /** Returns whether every trained internal splitter retains OOD summaries. */
+    public boolean supportsSplitDistanceOOD() {
+        if (trees == null || trees.length == 0) return false;
+        for (ProximityTree tree : trees) {
+            if (tree == null || tree.getRootNode() == null
+                    || !nodeSupportsSplitDistanceOOD(tree.getRootNode())) return false;
+        }
+        return true;
+    }
+
+    /** Throws when this trained forest cannot support split-distance OOD scoring. */
+    public void requireSplitDistanceOODSupport() {
+        if (!supportsSplitDistanceOOD()) {
+            throw new IllegalStateException(
+                    "The forest lacks branch-local split-distance summaries. "
+                            + "Train with collect_split_distance_summaries=true."
+            );
+        }
+    }
+
+    private static boolean nodeSupportsSplitDistanceOOD(ProximityTree.Node node) {
+        if (node.is_leaf()) return true;
+        Splitter splitter = node.getSplitter();
+        if (splitter == null || splitter.getSplitDistanceSummary() == null) return false;
+        ProximityTree.Node[] children = node.get_children();
+        if (children == null || children.length == 0) return false;
+        for (ProximityTree.Node child : children) {
+            if (child == null || !nodeSupportsSplitDistanceOOD(child)) return false;
+        }
+        return true;
     }
 
     public ProximityTree[] getTrees() {

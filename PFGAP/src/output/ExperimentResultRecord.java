@@ -15,8 +15,9 @@ import java.util.Objects;
  *     ProximityForest
  *     ProximityTree
  *     ListObjectDataset
- *     prediction arrays
- *     outlier-score arrays
+ *     per-instance prediction arrays
+ *     per-instance enhanced prediction details
+ *     per-instance OOD or outlier-score arrays
  *     proximity matrices
  *
  * Those objects are either too large, implementation-specific, or written
@@ -30,8 +31,9 @@ import java.util.Objects;
  *     evaluation metrics
  *     timing information
  *     aggregate forest-structure statistics
- *     preprocessing metadata
- *     paths to separately written artifacts
+ *     preprocessing and evaluation-output metadata
+ *     aggregate enhanced-prediction and OOD summaries
+ *     paths to separately written per-instance artifacts
  *
  * Maps use LinkedHashMap internally so Gson produces deterministic and
  * readable field ordering.
@@ -48,7 +50,7 @@ public final class ExperimentResultRecord {
      * primarily for JSON output.
      */
     public static final int CURRENT_FORMAT_VERSION =
-            1;
+            2;
 
     private final int formatVersion;
 
@@ -76,6 +78,9 @@ public final class ExperimentResultRecord {
      *     rmse
      *     mae
      *     r2
+     *     meanOODScore
+     *     standardDeviationOODScore
+     *     meanPredictionStandardDeviation
      *
      * Isolation runs may have an empty metrics map when scores are written
      * as a separate per-instance artifact.
@@ -92,6 +97,9 @@ public final class ExperimentResultRecord {
      *     predictionCount
      *     trainingInstanceCount
      *     testingInstanceCount
+     *     structuredResultCount
+     *     oodAvailableResultCount
+     *     oodAvailableTreeCount
      */
     private final Map<String, Long> counts;
 
@@ -133,6 +141,9 @@ public final class ExperimentResultRecord {
      *     proximityType
      *     trainingReaderType
      *     testingReaderType
+     *     enhancedOutputsRequested
+     *     oodScoresRequested
+     *     oodScoreType
      *
      * Values are strings so enum values and concise descriptive metadata can
      * be represented without coupling this DTO to application classes.
@@ -150,6 +161,8 @@ public final class ExperimentResultRecord {
      *     testTrainProximities
      *     model
      *     standardizationStatistics
+     *     validationEnhancedOutput
+     *     testEnhancedOutput
      *
      * Paths should preferably be relative to the experiment output
      * directory when possible.
@@ -305,6 +318,26 @@ public final class ExperimentResultRecord {
         return metrics.containsKey(
                 metricName
         );
+    }
+
+    /** Returns a named count or null when it is not present. */
+    public Long getCount(String countName) {
+        return counts.get(countName);
+    }
+
+    /** Returns whether this record contains a named count. */
+    public boolean hasCount(String countName) {
+        return counts.containsKey(countName);
+    }
+
+    /** Returns a named configuration value or null when absent. */
+    public String getConfigurationValue(String configurationName) {
+        return configuration.get(configurationName);
+    }
+
+    /** Returns whether this record contains a named configuration value. */
+    public boolean hasConfigurationValue(String configurationName) {
+        return configuration.containsKey(configurationName);
     }
 
     /**

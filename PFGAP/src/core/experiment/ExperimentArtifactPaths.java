@@ -28,6 +28,10 @@ public final class ExperimentArtifactPaths {
 
     public static final String TEST_PREDICTIONS =
             "test_predictions.csv";
+    public static final String VALIDATION_ENHANCED_OUTPUT =
+            "validation_enhanced.csv";
+    public static final String TEST_ENHANCED_OUTPUT =
+            "test_enhanced.csv";
 
     public static final String TRAINING_PROXIMITIES_SPARSE =
             "training_proximities.mtx";
@@ -224,6 +228,28 @@ public final class ExperimentArtifactPaths {
     public Path testPredictions(int repetition) {
         return resolveRepeated(
                 TEST_PREDICTIONS,
+                repetition
+        );
+    }
+
+    /**
+     * Returns the structured validation output path used for enhanced
+     * predictions, OOD-only output, or their combined result.
+     */
+    public Path validationEnhancedOutput(int repetition) {
+        return resolveRepeated(
+                VALIDATION_ENHANCED_OUTPUT,
+                repetition
+        );
+    }
+
+    /**
+     * Returns the structured test output path used for enhanced predictions,
+     * OOD-only output, or their combined result.
+     */
+    public Path testEnhancedOutput(int repetition) {
+        return resolveRepeated(
+                TEST_ENHANCED_OUTPUT,
                 repetition
         );
     }
