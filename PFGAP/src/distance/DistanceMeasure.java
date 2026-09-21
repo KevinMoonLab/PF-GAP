@@ -1625,48 +1625,58 @@ public class DistanceMeasure implements Serializable {
 	}*/
 
 
-	private int timeLengthOf(Object series) {
-		if (series instanceof double[] x) {
-			return x.length;
+	private int timeLengthOf(
+			Object series
+	) {
+		if (series instanceof double[] values) {
+			return values.length;
 		}
 
-		if (series instanceof Double[] x) {
-			return x.length;
+		if (series instanceof float[] values) {
+			return values.length;
 		}
 
-		if (series instanceof double[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof double[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Double[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof float[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Object[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof Object[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Object[] x) {
-			return x.length;
+		if (series instanceof Object[] values) {
+			return values.length;
 		}
 
 		throw new IllegalArgumentException(
 				"Cannot infer time length from series type: "
-						+ series.getClass().getName()
+						+ series.getClass().getTypeName()
 		);
 	}
 
-	private int dimensionCountOf(Object series) {
-		if (series instanceof double[][] x) {
-			return x.length;
+	private int dimensionCountOf(
+			Object series
+	) {
+		if (series instanceof double[][] matrix) {
+			return matrix.length;
 		}
 
-		if (series instanceof Double[][] x) {
-			return x.length;
+		if (series instanceof float[][] matrix) {
+			return matrix.length;
 		}
 
-		if (series instanceof Object[][] x) {
-			return x.length;
+		if (series instanceof Object[][] matrix) {
+			return matrix.length;
 		}
 
 		return 1;

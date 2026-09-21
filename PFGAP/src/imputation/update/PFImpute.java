@@ -27,10 +27,11 @@ import java.util.Objects;
  * makes source-row parallelism deterministic and prevents one row from reading
  * another row's partially updated values.</p>
  *
- * <p>This integration version preserves support for primitive {@code double[]}
- * and {@code double[][]} as well as boxed numeric arrays. Updated numeric rows
- * are emitted as primitive arrays. A later representation overhaul can remove
- * the boxed compatibility paths and optimize missing-position lookup.</p>
+ * <p>Numeric updates preserve primitive feature storage. Supported numeric
+ * observations are {@code double[]}, {@code float[]}, {@code double[][]}, and
+ * {@code float[][]}. Weighted sums and fallback means use double precision;
+ * float results are narrowed once when written. Boxed numeric arrays are not
+ * supported.</p>
  */
 public final class PFImpute {
 
@@ -201,26 +202,29 @@ public final class PFImpute {
             NeighborRows neighbors,
             ParallelRuntime runtime
     ) throws Exception {
+        MissingIndices retainedMissing = data.getMissingIndices();
         List<Object> rawData = data.getData();
-        List<List<Integer>> missing = data.getMissingIndices().indices1D;
-        double[] fallbackMeans = computeObservedMeans1D(rawData, missing);
+        double[] fallbackMeans = computeObservedMeans1D(
+                rawData,
+                null
+        );
         Object[] updated = new Object[rawData.size()];
 
         forRanges(rawData.size(), runtime, (start, end) -> {
             for (int target = start; target < end; target++) {
-                double[] row = copySeries1DToPrimitive(rawData.get(target));
-                List<Integer> targetMissing = missing.get(target);
-
-                for (int feature : targetMissing) {
-                    ensureFeatureIndex(row.length, feature, target, -1);
+                Object row = copySeries1D(rawData.get(target));
+                int missingStart = retainedMissing.start1D(target);
+                int missingEnd = retainedMissing.end1D(target);
+                for (int missingOffset = missingStart;
+                        missingOffset < missingEnd;
+                        missingOffset++) {
+                    int feature = retainedMissing.positionAt(missingOffset);
+                    ensureFeatureIndex(length1D(row), feature, target, -1);
                     NumericAccumulator accumulator = new NumericAccumulator();
 
                     int finalTarget = target;
                     neighbors.forEach(target, (neighbor, weight) -> {
                         if (neighbor == finalTarget || weight <= 0.0) {
-                            return;
-                        }
-                        if (isMissing1D(missing, neighbor, feature)) {
                             return;
                         }
 
@@ -235,9 +239,17 @@ public final class PFImpute {
                         }
                     });
 
-                    row[feature] = accumulator.hasWeight()
-                            ? accumulator.mean()
-                            : fallbackValue1D(row, feature, fallbackMeans);
+                    setNumericValue1D(
+                            row,
+                            feature,
+                            accumulator.hasWeight()
+                                    ? accumulator.mean()
+                                    : fallbackValue1D(
+                                            row,
+                                            feature,
+                                            fallbackMeans
+                                    )
+                    );
                 }
 
                 updated[target] = row;
@@ -245,6 +257,7 @@ public final class PFImpute {
         });
 
         data.setData(asObjectList(updated));
+        data.setMissingIndices(retainedMissing);
     }
 
     private static void trainNumericImpute2D(
@@ -252,27 +265,40 @@ public final class PFImpute {
             NeighborRows neighbors,
             ParallelRuntime runtime
     ) throws Exception {
+        MissingIndices retainedMissing = data.getMissingIndices();
         List<Object> rawData = data.getData();
-        List<List<List<Integer>>> missing = data.getMissingIndices().indices2D;
-        double[][] fallbackMeans = computeObservedMeans2D(rawData, missing);
+        double[][] fallbackMeans = computeObservedMeans2D(
+                rawData,
+                null
+        );
         Object[] updated = new Object[rawData.size()];
 
         forRanges(rawData.size(), runtime, (start, end) -> {
             for (int target = start; target < end; target++) {
-                double[][] matrix = copySeries2DToPrimitive(rawData.get(target));
-                List<List<Integer>> targetMissing = missing.get(target);
-
+                Object matrix = copySeries2D(rawData.get(target));
+                int missingDimensions = retainedMissing.dimensionCount(target);
                 for (int dimension = 0;
-                     dimension < targetMissing.size();
-                     dimension++) {
-                    if (dimension >= matrix.length) {
+                        dimension < missingDimensions;
+                        dimension++) {
+                    if (dimension >= dimensions2D(matrix)) {
                         continue;
                     }
 
                     final int selectedDimension = dimension;
-                    for (int feature : targetMissing.get(dimension)) {
+                    int missingStart = retainedMissing.start2D(
+                            target,
+                            dimension
+                    );
+                    int missingEnd = retainedMissing.end2D(
+                            target,
+                            dimension
+                    );
+                    for (int missingOffset = missingStart;
+                            missingOffset < missingEnd;
+                            missingOffset++) {
+                        int feature = retainedMissing.positionAt(missingOffset);
                         ensureFeatureIndex(
-                                matrix[dimension].length,
+                                length2D(matrix, dimension),
                                 feature,
                                 target,
                                 dimension
@@ -283,14 +309,6 @@ public final class PFImpute {
                         int finalTarget = target;
                         neighbors.forEach(target, (neighbor, weight) -> {
                             if (neighbor == finalTarget || weight <= 0.0) {
-                                return;
-                            }
-                            if (isMissing2D(
-                                    missing,
-                                    neighbor,
-                                    selectedDimension,
-                                    feature
-                            )) {
                                 return;
                             }
 
@@ -313,13 +331,18 @@ public final class PFImpute {
                             }
                         });
 
-                        matrix[dimension][feature] = accumulator.hasWeight()
-                                ? accumulator.mean()
-                                : fallbackValue2D(
+                        setNumericValue2D(
                                 matrix,
                                 dimension,
                                 feature,
-                                fallbackMeans
+                                accumulator.hasWeight()
+                                        ? accumulator.mean()
+                                        : fallbackValue2D(
+                                                matrix,
+                                                dimension,
+                                                feature,
+                                                fallbackMeans
+                                        )
                         );
                     }
                 }
@@ -329,6 +352,7 @@ public final class PFImpute {
         });
 
         data.setData(asObjectList(updated));
+        data.setMissingIndices(retainedMissing);
     }
 
     private static void testNumericImpute1D(
@@ -337,13 +361,10 @@ public final class PFImpute {
             NeighborRows neighbors,
             ParallelRuntime runtime
     ) throws Exception {
+        MissingIndices retainedMissing = testData.getMissingIndices();
         List<Object> testRaw = testData.getData();
         List<Object> trainRaw = trainData.getData();
-        List<List<Integer>> testMissing =
-                testData.getMissingIndices().indices1D;
-        List<List<Integer>> trainMissing = trainData.getMissingIndices() == null
-                ? null
-                : trainData.getMissingIndices().indices1D;
+        MissingIndices trainMissing = trainData.getMissingIndices();
 
         double[] fallbackMeans = computeObservedMeans1D(
                 trainRaw,
@@ -353,19 +374,19 @@ public final class PFImpute {
 
         forRanges(testRaw.size(), runtime, (start, end) -> {
             for (int testIndex = start; testIndex < end; testIndex++) {
-                double[] row = copySeries1DToPrimitive(testRaw.get(testIndex));
+                Object row = copySeries1D(testRaw.get(testIndex));
 
-                for (int feature : testMissing.get(testIndex)) {
-                    ensureFeatureIndex(row.length, feature, testIndex, -1);
+                int missingStart = retainedMissing.start1D(testIndex);
+                int missingEnd = retainedMissing.end1D(testIndex);
+                for (int missingOffset = missingStart;
+                        missingOffset < missingEnd;
+                        missingOffset++) {
+                    int feature = retainedMissing.positionAt(missingOffset);
+                    ensureFeatureIndex(length1D(row), feature, testIndex, -1);
                     NumericAccumulator accumulator = new NumericAccumulator();
 
                     neighbors.forEach(testIndex, (trainIndex, weight) -> {
-                        if (weight <= 0.0
-                                || isMissing1D(
-                                trainMissing,
-                                trainIndex,
-                                feature
-                        )) {
+                        if (weight <= 0.0) {
                             return;
                         }
 
@@ -380,9 +401,17 @@ public final class PFImpute {
                         }
                     });
 
-                    row[feature] = accumulator.hasWeight()
-                            ? accumulator.mean()
-                            : fallbackValue1D(row, feature, fallbackMeans);
+                    setNumericValue1D(
+                            row,
+                            feature,
+                            accumulator.hasWeight()
+                                    ? accumulator.mean()
+                                    : fallbackValue1D(
+                                            row,
+                                            feature,
+                                            fallbackMeans
+                                    )
+                    );
                 }
 
                 updated[testIndex] = row;
@@ -390,6 +419,7 @@ public final class PFImpute {
         });
 
         testData.setData(asObjectList(updated));
+        testData.setMissingIndices(retainedMissing);
     }
 
     private static void testNumericImpute2D(
@@ -398,14 +428,10 @@ public final class PFImpute {
             NeighborRows neighbors,
             ParallelRuntime runtime
     ) throws Exception {
+        MissingIndices retainedMissing = testData.getMissingIndices();
         List<Object> testRaw = testData.getData();
         List<Object> trainRaw = trainData.getData();
-        List<List<List<Integer>>> testMissing =
-                testData.getMissingIndices().indices2D;
-        List<List<List<Integer>>> trainMissing =
-                trainData.getMissingIndices() == null
-                        ? null
-                        : trainData.getMissingIndices().indices2D;
+        MissingIndices trainMissing = trainData.getMissingIndices();
 
         double[][] fallbackMeans = computeObservedMeans2D(
                 trainRaw,
@@ -415,22 +441,32 @@ public final class PFImpute {
 
         forRanges(testRaw.size(), runtime, (start, end) -> {
             for (int testIndex = start; testIndex < end; testIndex++) {
-                double[][] matrix = copySeries2DToPrimitive(
+                Object matrix = copySeries2D(
                         testRaw.get(testIndex)
                 );
-                List<List<Integer>> targetMissing = testMissing.get(testIndex);
-
+                int missingDimensions = retainedMissing.dimensionCount(testIndex);
                 for (int dimension = 0;
-                     dimension < targetMissing.size();
-                     dimension++) {
-                    if (dimension >= matrix.length) {
+                        dimension < missingDimensions;
+                        dimension++) {
+                    if (dimension >= dimensions2D(matrix)) {
                         continue;
                     }
 
                     final int selectedDimension = dimension;
-                    for (int feature : targetMissing.get(dimension)) {
+                    int missingStart = retainedMissing.start2D(
+                            testIndex,
+                            dimension
+                    );
+                    int missingEnd = retainedMissing.end2D(
+                            testIndex,
+                            dimension
+                    );
+                    for (int missingOffset = missingStart;
+                            missingOffset < missingEnd;
+                            missingOffset++) {
+                        int feature = retainedMissing.positionAt(missingOffset);
                         ensureFeatureIndex(
-                                matrix[dimension].length,
+                                length2D(matrix, dimension),
                                 feature,
                                 testIndex,
                                 dimension
@@ -439,13 +475,7 @@ public final class PFImpute {
                         NumericAccumulator accumulator = new NumericAccumulator();
 
                         neighbors.forEach(testIndex, (trainIndex, weight) -> {
-                            if (weight <= 0.0
-                                    || isMissing2D(
-                                    trainMissing,
-                                    trainIndex,
-                                    selectedDimension,
-                                    feature
-                            )) {
+                            if (weight <= 0.0) {
                                 return;
                             }
 
@@ -468,13 +498,18 @@ public final class PFImpute {
                             }
                         });
 
-                        matrix[dimension][feature] = accumulator.hasWeight()
-                                ? accumulator.mean()
-                                : fallbackValue2D(
+                        setNumericValue2D(
                                 matrix,
                                 dimension,
                                 feature,
-                                fallbackMeans
+                                accumulator.hasWeight()
+                                        ? accumulator.mean()
+                                        : fallbackValue2D(
+                                                matrix,
+                                                dimension,
+                                                feature,
+                                                fallbackMeans
+                                        )
                         );
                     }
                 }
@@ -484,6 +519,7 @@ public final class PFImpute {
         });
 
         testData.setData(asObjectList(updated));
+        testData.setMissingIndices(retainedMissing);
     }
 
     private static void updateCategorical(
@@ -502,19 +538,30 @@ public final class PFImpute {
             for (int target = start; target < end; target++) {
                 if (missing.is2D()) {
                     Object[][] matrix = copyObjectMatrix(targetData.get(target));
-                    List<List<Integer>> targetMissing = missing.indices2D.get(target);
+                    int missingDimensions = missing.dimensionCount(target);
 
                     for (int dimension = 0;
-                         dimension < targetMissing.size();
+                         dimension < missingDimensions;
                          dimension++) {
-                        if (dimension >= matrix.length) {
+                        if (dimension >= dimensions2D(matrix)) {
                             continue;
                         }
 
                         final int selectedDimension = dimension;
-                        for (int feature : targetMissing.get(dimension)) {
+                        int missingStart = missing.start2D(
+                                target,
+                                dimension
+                        );
+                        int missingEnd = missing.end2D(
+                                target,
+                                dimension
+                        );
+                        for (int missingOffset = missingStart;
+                                missingOffset < missingEnd;
+                                missingOffset++) {
+                            int feature = missing.positionAt(missingOffset);
                             ensureFeatureIndex(
-                                    matrix[dimension].length,
+                                    length2D(matrix, dimension),
                                     feature,
                                     target,
                                     dimension
@@ -536,8 +583,13 @@ public final class PFImpute {
                 } else {
                     Object[] row = copyObjectRow(targetData.get(target));
 
-                    for (int feature : missing.indices1D.get(target)) {
-                        ensureFeatureIndex(row.length, feature, target, -1);
+                    int missingStart = missing.start1D(target);
+                    int missingEnd = missing.end1D(target);
+                    for (int missingOffset = missingStart;
+                            missingOffset < missingEnd;
+                            missingOffset++) {
+                        int feature = missing.positionAt(missingOffset);
+                        ensureFeatureIndex(length1D(row), feature, target, -1);
                         row[feature] = weightedMode(
                                 target,
                                 -1,
@@ -555,6 +607,7 @@ public final class PFImpute {
         });
 
         targets.setData(asObjectList(updated));
+        targets.setMissingIndices(missing);
     }
 
     private static Object weightedMode(
@@ -684,23 +737,23 @@ public final class PFImpute {
     }
 
     private static boolean isMissing1D(
-            List<List<Integer>> missingIndices,
+            MissingIndices missingIndices,
             int seriesIndex,
             int featureIndex
     ) {
         if (missingIndices == null) {
             return false;
         }
-        if (seriesIndex < 0 || seriesIndex >= missingIndices.size()) {
+        if (!missingIndices.is1D()
+                || seriesIndex < 0
+                || seriesIndex >= missingIndices.instanceCount()) {
             return true;
         }
-
-        List<Integer> missing = missingIndices.get(seriesIndex);
-        return missing != null && missing.contains(featureIndex);
+        return missingIndices.contains1D(seriesIndex, featureIndex);
     }
 
     private static boolean isMissing2D(
-            List<List<List<Integer>>> missingIndices,
+            MissingIndices missingIndices,
             int seriesIndex,
             int dimension,
             int featureIndex
@@ -708,19 +761,18 @@ public final class PFImpute {
         if (missingIndices == null) {
             return false;
         }
-        if (seriesIndex < 0 || seriesIndex >= missingIndices.size()) {
-            return true;
-        }
-
-        List<List<Integer>> instanceMissing = missingIndices.get(seriesIndex);
-        if (instanceMissing == null
+        if (!missingIndices.is2D()
+                || seriesIndex < 0
+                || seriesIndex >= missingIndices.instanceCount()
                 || dimension < 0
-                || dimension >= instanceMissing.size()) {
+                || dimension >= missingIndices.dimensionCount(seriesIndex)) {
             return true;
         }
-
-        List<Integer> missing = instanceMissing.get(dimension);
-        return missing != null && missing.contains(featureIndex);
+        return missingIndices.contains2D(
+                seriesIndex,
+                dimension,
+                featureIndex
+        );
     }
 
     private static boolean hasIndex1D(
@@ -728,6 +780,9 @@ public final class PFImpute {
             int featureIndex
     ) {
         if (series instanceof double[] values) {
+            return featureIndex >= 0 && featureIndex < values.length;
+        }
+        if (series instanceof float[] values) {
             return featureIndex >= 0 && featureIndex < values.length;
         }
         if (series instanceof Object[] values) {
@@ -742,6 +797,12 @@ public final class PFImpute {
             int featureIndex
     ) {
         if (series instanceof double[][] values) {
+            return dimension >= 0
+                    && dimension < values.length
+                    && featureIndex >= 0
+                    && featureIndex < values[dimension].length;
+        }
+        if (series instanceof float[][] values) {
             return dimension >= 0
                     && dimension < values.length
                     && featureIndex >= 0
@@ -763,6 +824,9 @@ public final class PFImpute {
         if (series instanceof double[] values) {
             return values[featureIndex];
         }
+        if (series instanceof float[] values) {
+            return values[featureIndex];
+        }
         if (series instanceof Object[] values) {
             return objectToDouble(values[featureIndex]);
         }
@@ -775,6 +839,9 @@ public final class PFImpute {
             int featureIndex
     ) {
         if (series instanceof double[][] values) {
+            return values[dimension][featureIndex];
+        }
+        if (series instanceof float[][] values) {
             return values[dimension][featureIndex];
         }
         if (series instanceof Object[][] values) {
@@ -799,23 +866,19 @@ public final class PFImpute {
         return number.doubleValue();
     }
 
-    private static double[] copySeries1DToPrimitive(
+    private static Object copySeries1D(
             Object series
     ) {
         if (series instanceof double[] values) {
             return values.clone();
         }
-        if (series instanceof Object[] values) {
-            double[] copied = new double[values.length];
-            for (int index = 0; index < values.length; index++) {
-                copied[index] = objectToDouble(values[index]);
-            }
-            return copied;
+        if (series instanceof float[] values) {
+            return values.clone();
         }
-        throw unsupportedSeries(series, "1D");
+        throw unsupportedSeries(series, "numeric 1D");
     }
 
-    private static double[][] copySeries2DToPrimitive(
+    private static Object copySeries2D(
             Object series
     ) {
         if (series instanceof double[][] values) {
@@ -823,27 +886,26 @@ public final class PFImpute {
             for (int dimension = 0;
                  dimension < values.length;
                  dimension++) {
-                copied[dimension] = values[dimension].clone();
+                copied[dimension] = Objects.requireNonNull(
+                        values[dimension],
+                        "Numeric dimension cannot be null."
+                ).clone();
             }
             return copied;
         }
-        if (series instanceof Object[][] values) {
-            double[][] copied = new double[values.length][];
+        if (series instanceof float[][] values) {
+            float[][] copied = new float[values.length][];
             for (int dimension = 0;
                  dimension < values.length;
                  dimension++) {
-                copied[dimension] = new double[values[dimension].length];
-                for (int feature = 0;
-                     feature < values[dimension].length;
-                     feature++) {
-                    copied[dimension][feature] = objectToDouble(
-                            values[dimension][feature]
-                    );
-                }
+                copied[dimension] = Objects.requireNonNull(
+                        values[dimension],
+                        "Numeric dimension cannot be null."
+                ).clone();
             }
             return copied;
         }
-        throw unsupportedSeries(series, "2D");
+        throw unsupportedSeries(series, "numeric 2D");
     }
 
     private static Object[] copyObjectRow(
@@ -909,12 +971,13 @@ public final class PFImpute {
     }
 
     private static double fallbackValue1D(
-            double[] row,
+            Object row,
             int feature,
             double[] fallbackMeans
     ) {
-        if (!Double.isNaN(row[feature])) {
-            return row[feature];
+        double current = getNumericValue1D(row, feature);
+        if (!Double.isNaN(current)) {
+            return current;
         }
         if (feature < fallbackMeans.length
                 && !Double.isNaN(fallbackMeans[feature])) {
@@ -924,13 +987,14 @@ public final class PFImpute {
     }
 
     private static double fallbackValue2D(
-            double[][] matrix,
+            Object matrix,
             int dimension,
             int feature,
             double[][] fallbackMeans
     ) {
-        if (!Double.isNaN(matrix[dimension][feature])) {
-            return matrix[dimension][feature];
+        double current = getNumericValue2D(matrix, dimension, feature);
+        if (!Double.isNaN(current)) {
+            return current;
         }
         if (dimension < fallbackMeans.length
                 && feature < fallbackMeans[dimension].length
@@ -940,9 +1004,42 @@ public final class PFImpute {
         return 0.0;
     }
 
+    private static void setNumericValue1D(
+            Object series,
+            int feature,
+            double value
+    ) {
+        if (series instanceof double[] values) {
+            values[feature] = value;
+            return;
+        }
+        if (series instanceof float[] values) {
+            values[feature] = (float) value;
+            return;
+        }
+        throw unsupportedSeries(series, "numeric 1D");
+    }
+
+    private static void setNumericValue2D(
+            Object series,
+            int dimension,
+            int feature,
+            double value
+    ) {
+        if (series instanceof double[][] values) {
+            values[dimension][feature] = value;
+            return;
+        }
+        if (series instanceof float[][] values) {
+            values[dimension][feature] = (float) value;
+            return;
+        }
+        throw unsupportedSeries(series, "numeric 2D");
+    }
+
     private static double[] computeObservedMeans1D(
             List<Object> data,
-            List<List<Integer>> missingIndices
+            MissingIndices missingIndices
     ) {
         int maximumLength = 0;
         for (Object series : data) {
@@ -957,9 +1054,6 @@ public final class PFImpute {
             int length = length1D(series);
 
             for (int feature = 0; feature < length; feature++) {
-                if (isMissing1D(missingIndices, instance, feature)) {
-                    continue;
-                }
 
                 double value = getNumericValue1D(series, feature);
                 if (!Double.isNaN(value)) {
@@ -980,7 +1074,7 @@ public final class PFImpute {
 
     private static double[][] computeObservedMeans2D(
             List<Object> data,
-            List<List<List<Integer>>> missingIndices
+            MissingIndices missingIndices
     ) {
         int maximumDimensions = 0;
         for (Object series : data) {
@@ -1020,14 +1114,6 @@ public final class PFImpute {
                 for (int feature = 0;
                      feature < length2D(series, dimension);
                      feature++) {
-                    if (isMissing2D(
-                            missingIndices,
-                            instance,
-                            dimension,
-                            feature
-                    )) {
-                        continue;
-                    }
 
                     double value = getNumericValue2D(
                             series,
@@ -1065,6 +1151,9 @@ public final class PFImpute {
         if (series instanceof double[] values) {
             return values.length;
         }
+        if (series instanceof float[] values) {
+            return values.length;
+        }
         if (series instanceof Object[] values) {
             return values.length;
         }
@@ -1075,6 +1164,9 @@ public final class PFImpute {
             Object series
     ) {
         if (series instanceof double[][] values) {
+            return values.length;
+        }
+        if (series instanceof float[][] values) {
             return values.length;
         }
         if (series instanceof Object[][] values) {
@@ -1088,6 +1180,11 @@ public final class PFImpute {
             int dimension
     ) {
         if (series instanceof double[][] values) {
+            return dimension >= 0 && dimension < values.length
+                    ? values[dimension].length
+                    : 0;
+        }
+        if (series instanceof float[][] values) {
             return dimension >= 0 && dimension < values.length
                     ? values[dimension].length
                     : 0;

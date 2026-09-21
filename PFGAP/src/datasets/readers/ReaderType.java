@@ -21,6 +21,8 @@ public enum ReaderType {
     // each row is a record, and it supports a single-character delimiter.
     // designed for tabular data and univariate time series.
     NUMERIC_DELIMITED,
+    /** Eager NumPy .npy array reader for float32 and float64 data. */
+    NPY,
 
     /**
      * .ts files, such as those used by the UEA/UCR time-series archive.

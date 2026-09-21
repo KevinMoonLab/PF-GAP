@@ -3,179 +3,227 @@ package imputation.initial;
 import datasets.ListObjectDataset;
 import imputation.util.MissingIndices;
 
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
+import java.util.List;
+import java.util.Objects;
 
-// We need to be working with List<Double[]> or List<Double[][]>
-
+/**
+ * Replaces each originally missing numeric value with the mean of the observed
+ * values in the same row or dimension. Supports primitive double and float
+ * observations and preserves their storage type.
+ */
 public class MeanImpute extends Imputer {
 
-    private static final int CHUNK_SIZE = 1000;
-
-    public void Impute(ListObjectDataset missingDS) {
-        List<Object> rawData = missingDS.getData();
-        MissingIndices mi = missingDS.getMissingIndices();
-
-        if (mi.is2D()) {
-            List<Object> result = new ArrayList<>(rawData.size());
-
-            for (int i = 0; i < rawData.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, rawData.size());
-
-                List<Object> chunk = rawData.subList(i, end);
-                List<List<List<Integer>>> missingChunk = mi.indices2D.subList(i, end);
-
-                List<Object> processedChunk = IntStream.range(0, chunk.size())
-                        .parallel()
-                        .mapToObj(j -> {
-                            Double[][] matrix = (Double[][]) chunk.get(j);
-                            List<List<Integer>> missing = missingChunk.get(j);
-                            double[][] imputed = convert2DPrimitive(matrix, missing);
-                            return (Object) imputed;
-                        })
-                        .collect(Collectors.toList());
-
-                result.addAll(processedChunk);
-
-                // Erase original data
-                for (int j = i; j < end; j++) {
-                    rawData.set(j, null);
-                }
-
-                System.gc(); // Hint GC
-            }
-
-            missingDS.setData(result);
-
+    @Override
+    public void Impute(ListObjectDataset dataset) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        List<Object> data = Objects.requireNonNull(
+                dataset.getData(),
+                "Dataset data cannot be null."
+        );
+        MissingIndices missing = Objects.requireNonNull(
+                dataset.getMissingIndices(),
+                "MissingIndices must be attached before mean imputation."
+        );
+        requireInstanceCount(data.size(), missing);
+        if (missing.is2D()) {
+            impute2D(data, missing);
         } else {
-            List<Object> result = new ArrayList<>(rawData.size());
-
-            for (int i = 0; i < rawData.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, rawData.size());
-
-                List<Object> chunk = rawData.subList(i, end);
-                List<List<Integer>> missingChunk = mi.indices1D.subList(i, end);
-
-                List<Object> processedChunk = IntStream.range(0, chunk.size())
-                        .parallel()
-                        .mapToObj(j -> {
-                            Double[] row = (Double[]) chunk.get(j);
-                            List<Integer> missing = missingChunk.get(j);
-                            double[] imputed = convert1DPrimitive(row, missing);
-                            return (Object) imputed;
-                        })
-                        .collect(Collectors.toList());
-
-                result.addAll(processedChunk);
-
-                // Erase original data
-                for (int j = i; j < end; j++) {
-                    rawData.set(j, null);
-                }
-
-                System.gc(); // Hint GC
-            }
-
-            missingDS.setData(result);
+            impute1D(data, missing);
         }
     }
 
-    public static double[] convert1DPrimitive(Double[] row, List<Integer> missingIndices) {
-        double[] result = new double[row.length];
-        double sum = 0;
+    private static void impute1D(
+            List<Object> data,
+            MissingIndices missing
+    ) {
+        for (int instance = 0; instance < data.size(); instance++) {
+            Object series = requireSeries(data.get(instance), instance);
+            int start = missing.start1D(instance);
+            int end = missing.end1D(instance);
+            if (series instanceof double[] row) {
+                imputeDoubleRow(row, missing, start, end, instance, -1);
+            } else if (series instanceof float[] row) {
+                imputeFloatRow(row, missing, start, end, instance, -1);
+            } else {
+                throw unsupportedType(series, instance, false);
+            }
+        }
+    }
+
+    private static void impute2D(
+            List<Object> data,
+            MissingIndices missing
+    ) {
+        for (int instance = 0; instance < data.size(); instance++) {
+            Object series = requireSeries(data.get(instance), instance);
+            int dimensions = missing.dimensionCount(instance);
+            if (series instanceof double[][] matrix) {
+                requireDimensionCount(matrix.length, dimensions, instance);
+                for (int dimension = 0; dimension < dimensions; dimension++) {
+                    imputeDoubleRow(
+                            Objects.requireNonNull(
+                                    matrix[dimension],
+                                    nullRowMessage(instance, dimension)
+                            ),
+                            missing,
+                            missing.start2D(instance, dimension),
+                            missing.end2D(instance, dimension),
+                            instance,
+                            dimension
+                    );
+                }
+            } else if (series instanceof float[][] matrix) {
+                requireDimensionCount(matrix.length, dimensions, instance);
+                for (int dimension = 0; dimension < dimensions; dimension++) {
+                    imputeFloatRow(
+                            Objects.requireNonNull(
+                                    matrix[dimension],
+                                    nullRowMessage(instance, dimension)
+                            ),
+                            missing,
+                            missing.start2D(instance, dimension),
+                            missing.end2D(instance, dimension),
+                            instance,
+                            dimension
+                    );
+                }
+            } else {
+                throw unsupportedType(series, instance, true);
+            }
+        }
+    }
+
+    private static void imputeDoubleRow(
+            double[] row,
+            MissingIndices missing,
+            int start,
+            int end,
+            int instance,
+            int dimension
+    ) {
+        double sum = 0.0;
         int count = 0;
-
-        Set<Integer> missingSet = new HashSet<>(missingIndices);
-
-        for (int i = 0; i < row.length; i++) {
-            if (!missingSet.contains(i)) {
-                Double val = row[i];
-                if (val != null) {
-                    sum += val;
-                    count++;
-                    result[i] = val;
-                }
+        for (double value : row) {
+            if (!Double.isNaN(value)) {
+                sum += value;
+                count++;
             }
         }
-
-        double mean = count > 0 ? sum / count : 0;
-
-        for (int i : missingIndices) {
-            result[i] = mean;
+        double mean = count == 0 ? 0.0 : sum / count;
+        for (int offset = start; offset < end; offset++) {
+            int index = missing.positionAt(offset);
+            requirePosition(row.length, index, instance, dimension);
+            if (!Double.isNaN(row[index])) {
+                throw staleIndex(index, instance, dimension);
+            }
+            row[index] = mean;
         }
-
-        return result;
     }
 
-    public static double[][] convert2DPrimitive(Double[][] matrix, List<List<Integer>> missingIndices) {
-        double[][] result = new double[matrix.length][];
-
-        for (int i = 0; i < matrix.length; i++) {
-            Double[] row = matrix[i];
-            List<Integer> missing = missingIndices.get(i);
-            result[i] = convert1DPrimitive(row, missing);
+    private static void imputeFloatRow(
+            float[] row,
+            MissingIndices missing,
+            int start,
+            int end,
+            int instance,
+            int dimension
+    ) {
+        double sum = 0.0;
+        int count = 0;
+        for (float value : row) {
+            if (!Float.isNaN(value)) {
+                sum += value;
+                count++;
+            }
         }
+        float mean = count == 0 ? 0.0f : (float) (sum / count);
+        for (int offset = start; offset < end; offset++) {
+            int index = missing.positionAt(offset);
+            requirePosition(row.length, index, instance, dimension);
+            if (!Float.isNaN(row[index])) {
+                throw staleIndex(index, instance, dimension);
+            }
+            row[index] = mean;
+        }
+    }
 
-        return result;
+    private static void requireInstanceCount(int dataSize, MissingIndices missing) {
+        if (missing.instanceCount() != dataSize) {
+            throw new IllegalArgumentException(
+                    "Missing metadata contains " + missing.instanceCount()
+                            + " instances, but the dataset contains "
+                            + dataSize + "."
+            );
+        }
+    }
+
+    private static Object requireSeries(Object series, int instance) {
+        if (series == null) {
+            throw new IllegalArgumentException(
+                    "Numeric series cannot be null at instance " + instance + "."
+            );
+        }
+        return series;
+    }
+
+    private static void requireDimensionCount(int actual, int expected, int instance) {
+        if (actual != expected) {
+            throw new IllegalArgumentException(
+                    "Numeric matrix contains " + actual
+                            + " dimensions, but missing metadata contains "
+                            + expected + " at instance " + instance + "."
+            );
+        }
+    }
+
+    private static void requirePosition(
+            int length,
+            int index,
+            int instance,
+            int dimension
+    ) {
+        if (index < 0 || index >= length) {
+            throw new IllegalArgumentException(
+                    "Missing position " + index + " is outside row length "
+                            + length + location(instance, dimension) + "."
+            );
+        }
+    }
+
+    private static IllegalStateException staleIndex(
+            int index,
+            int instance,
+            int dimension
+    ) {
+        return new IllegalStateException(
+                "Missing metadata identifies index " + index
+                        + location(instance, dimension)
+                        + ", but its current value is not NaN."
+        );
+    }
+
+    private static IllegalArgumentException unsupportedType(
+            Object series,
+            int instance,
+            boolean twoDimensional
+    ) {
+        return new IllegalArgumentException(
+                "Unsupported numeric series type at instance " + instance
+                        + ": " + series.getClass().getTypeName()
+                        + ". Expected "
+                        + (twoDimensional
+                                ? "double[][] or float[][]."
+                                : "double[] or float[].")
+        );
+    }
+
+    private static String nullRowMessage(int instance, int dimension) {
+        return "Numeric row cannot be null at instance " + instance
+                + ", dimension " + dimension + ".";
+    }
+
+    private static String location(int instance, int dimension) {
+        return " at instance " + instance
+                + (dimension < 0 ? "" : ", dimension " + dimension);
     }
 }
-
-
-/*public class ListMeanImpute extends Imputer{
-
-
-    public static void Impute(ListObjectDataset missingDS){
-        List<Object> rawData = missingDS.getData();
-        missingDS.setData(rawData);
-    }
-
-    // assumes we would want to work with ListDataset--given Double[], need double[].
-
-    public static double[] convertToPrimitive(Object Input) {
-        Double[] input = (Double[]) Input;
-        int len = input.length;
-        double[] result = new double[len];
-        double sum = 0;
-        int count = 0;
-
-        for (int i = 0; i < len; i++) {
-            Double val = input[i];
-            if (val != null) {
-                sum += val;
-                count++;
-                result[i] = val;
-            }
-        }
-
-        double mean = count > 0 ? sum / count : 0;
-
-        for (int i = 0; i < len; i++) {
-            if (input[i] == null) {
-                result[i] = mean;
-            }
-        }
-
-        return result;
-    }
-
-
-
-    public static List<double[]> convertList(List<Object> inputList) {
-        return inputList.parallelStream()
-                .map(ListMeanImpute::convertToPrimitive)
-                .collect(Collectors.toList());
-    }
-
-
-
-    // this is the non parallel version:
-    //public static List<double[]> convertList(List<Double[]> inputList) {
-    //    List<double[]> resultList = new ArrayList<>();
-    //    for (Double[] row : inputList) {
-    //        resultList.add(convertToPrimitive(row));
-    //    }
-    //    return resultList;
-    //}
-
-}*/

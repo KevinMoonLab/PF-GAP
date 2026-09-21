@@ -1,201 +1,173 @@
 package distance.missing;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * Missing-value-aware Euclidean distance for univariate numeric series.
+ * Missing-value-aware Euclidean distance for primitive univariate series.
  *
- * Distance:
+ * <p>The squared distance is {@code (M / M_obs) * sum((x_i-y_i)^2)},
+ * where {@code M_obs} counts positions observed in both vectors. If no
+ * positions are jointly observed, the result is positive infinity.</p>
  *
- *     d(x, y) = sqrt( (M / M_obs) * sum_{i observed in both} (x_i - y_i)^2 )
- *
- * where:
- * - M is the full series length;
- * - M_obs is the number of positions where both series are observed.
- *
- * The corresponding squared distance is:
- *
- *     d^2(x, y) = (M / M_obs) * sum_{i observed in both} (x_i - y_i)^2
- *
- * Supported input types:
- * - double[]
- * - Double[]
- * - Object[] containing numeric values
- *
- * Missing-value conventions:
- * - null
- * - Double.NaN
- * - Float.NaN
- *
- * Notes:
- * - PF-GAP currently represents file-loaded numeric missing data as Double[]
- *   or Double[][] with null missing entries.
- * - Primitive double[] support is included for NaN-backed numeric data,
- *   post-imputation data, and future Python/NumPy interop.
+ * <p>Supported pairs are matching {@code double[]} arrays or matching
+ * {@code float[]} arrays. Missing values use primitive NaN. Mixed precision
+ * and boxed numeric arrays are unsupported. Float values are widened
+ * individually for double-precision arithmetic without array conversion.</p>
  */
 public class NaNEuclidean implements Serializable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     public NaNEuclidean() {
     }
 
-    /**
-     * Computes NaN-Euclidean distance.
-     *
-     * This overload is useful for reflective calls that expect
-     * distance(Object, Object).
-     */
-    public synchronized double distance(Object Series1, Object Series2) {
-        return distance(Series1, Series2, Double.POSITIVE_INFINITY);
+    public synchronized double distance(Object first, Object second) {
+        return distance(first, second, Double.POSITIVE_INFINITY);
     }
 
     /**
-     * Computes NaN-Euclidean distance with a best-so-far threshold.
-     *
-     * The threshold is applied after the final scaled distance is computed.
-     * Exact early abandoning is not used here because the final scale factor
-     * depends on the final number of jointly observed positions.
+     * Computes ordinary NaN-Euclidean distance. Exact early abandoning is not
+     * used because the final scale depends on the final joint-observation count.
      */
-    public synchronized double distance(Object Series1, Object Series2, double bsf) {
-
-        double squared = squaredDistance(Series1, Series2);
-
+    public synchronized double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        validateBestSoFar(bestSoFar);
+        double squared = squaredDistance(first, second);
         if (Double.isInfinite(squared)) {
             return Double.POSITIVE_INFINITY;
         }
-
         double result = Math.sqrt(squared);
-
-        return result > bsf ? Double.POSITIVE_INFINITY : result;
+        return result > bestSoFar
+                ? Double.POSITIVE_INFINITY
+                : result;
     }
 
-    /**
-     * Computes the scaled squared NaN-Euclidean distance:
-     *
-     *     (M / M_obs) * sum_{i observed in both} (x_i - y_i)^2
-     *
-     * This helper is useful when another distance needs the squared local
-     * vector cost rather than the square-rooted distance.
-     *
-     * Returns Double.POSITIVE_INFINITY if there are no jointly observed
-     * numeric positions.
-     */
-    public synchronized double squaredDistance(Object Series1, Object Series2) {
-
-        if (Series1 instanceof double[] && Series2 instanceof double[]) {
-            return squaredDistancePrimitive(
-                    (double[]) Series1,
-                    (double[]) Series2
-            );
+    public synchronized double squaredDistance(
+            Object first,
+            Object second
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return squaredDistanceDouble(firstValues, secondValues);
         }
-
-        if (Series1 instanceof Object[] && Series2 instanceof Object[]) {
-            return squaredDistanceObject(
-                    (Object[]) Series1,
-                    (Object[]) Series2
-            );
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return squaredDistanceFloat(firstValues, secondValues);
         }
-
-        throw new IllegalArgumentException(
-                "NaNEuclidean supports double[], Double[], or numeric Object[] inputs."
-        );
+        throw unsupportedPair(first, second);
     }
 
-    /**
-     * Returns true if the NaN-Euclidean comparison is computable.
-     *
-     * A comparison is computable when the two series have at least one
-     * jointly observed numeric position.
-     */
-    public synchronized boolean isComputable(Object Series1, Object Series2) {
-        return !Double.isInfinite(squaredDistance(Series1, Series2));
+    public synchronized boolean isComputable(
+            Object first,
+            Object second
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return MissingDistanceTools.countJointlyObserved(
+                    firstValues,
+                    secondValues
+            ) > 0;
+        }
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return MissingDistanceTools.countJointlyObserved(
+                    firstValues,
+                    secondValues
+            ) > 0;
+        }
+        throw unsupportedPair(first, second);
     }
 
-    private double squaredDistancePrimitive(double[] series1, double[] series2) {
-
-        MissingDistanceTools.validateSameLength(series1, series2);
-
+    private static double squaredDistanceDouble(
+            double[] first,
+            double[] second
+    ) {
+        MissingDistanceTools.validateSameLength(first, second);
         double sum = 0.0;
         int jointlyObserved = 0;
-
-        for (int i = 0; i < series1.length; i++) {
-
-            double a = series1[i];
-            double b = series2[i];
-
-            if (MissingDistanceTools.isMissing(a)
-                    || MissingDistanceTools.isMissing(b)) {
+        for (int index = 0; index < first.length; index++) {
+            double firstValue = first[index];
+            double secondValue = second[index];
+            if (Double.isNaN(firstValue)
+                    || Double.isNaN(secondValue)) {
                 continue;
             }
-
-            sum += MissingDistanceTools.squaredDifference(a, b);
+            sum += MissingDistanceTools.squaredDifference(
+                    firstValue,
+                    secondValue
+            );
             jointlyObserved++;
         }
+        return scaleSquaredDistance(first.length, jointlyObserved, sum);
+    }
 
+    private static double squaredDistanceFloat(
+            float[] first,
+            float[] second
+    ) {
+        MissingDistanceTools.validateSameLength(first, second);
+        double sum = 0.0;
+        int jointlyObserved = 0;
+        for (int index = 0; index < first.length; index++) {
+            float firstValue = first[index];
+            float secondValue = second[index];
+            if (Float.isNaN(firstValue)
+                    || Float.isNaN(secondValue)) {
+                continue;
+            }
+            sum += MissingDistanceTools.squaredDifference(
+                    firstValue,
+                    secondValue
+            );
+            jointlyObserved++;
+        }
+        return scaleSquaredDistance(first.length, jointlyObserved, sum);
+    }
+
+    private static double scaleSquaredDistance(
+            int fullLength,
+            int jointlyObserved,
+            double sum
+    ) {
         if (jointlyObserved == 0) {
             return Double.POSITIVE_INFINITY;
         }
-
-        double scale = MissingDistanceTools.scaleFactor(
-                series1.length,
+        return MissingDistanceTools.scaleFactor(
+                fullLength,
                 jointlyObserved
-        );
-
-        return scale * sum;
+        ) * sum;
     }
 
-    private double squaredDistanceObject(Object[] series1, Object[] series2) {
-
-        MissingDistanceTools.validateSameLength(series1, series2);
-
-        double sum = 0.0;
-        int jointlyObserved = 0;
-
-        for (int i = 0; i < series1.length; i++) {
-
-            Object a = series1[i];
-            Object b = series2[i];
-
-            if (MissingDistanceTools.isMissing(a)
-                    || MissingDistanceTools.isMissing(b)) {
-                continue;
-            }
-
-            if (!(a instanceof Number) || !(b instanceof Number)) {
-                throw new IllegalArgumentException(
-                        "NaNEuclidean requires numeric values at all jointly observed positions. "
-                                + "Found "
-                                + a.getClass().getName()
-                                + " and "
-                                + b.getClass().getName()
-                                + " at index "
-                                + i
-                                + "."
-                );
-            }
-
-            double av = ((Number) a).doubleValue();
-            double bv = ((Number) b).doubleValue();
-
-            if (MissingDistanceTools.isMissing(av)
-                    || MissingDistanceTools.isMissing(bv)) {
-                continue;
-            }
-
-            sum += MissingDistanceTools.squaredDifference(av, bv);
-            jointlyObserved++;
+    private static void validateBestSoFar(double bestSoFar) {
+        if (Double.isNaN(bestSoFar) || bestSoFar < 0.0) {
+            throw new IllegalArgumentException(
+                    "NaNEuclidean bestSoFar must be nonnegative and not NaN. "
+                            + "Received: " + bestSoFar + "."
+            );
         }
+    }
 
-        if (jointlyObserved == 0) {
-            return Double.POSITIVE_INFINITY;
-        }
-
-        double scale = MissingDistanceTools.scaleFactor(
-                series1.length,
-                jointlyObserved
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "NaNEuclidean requires matching double[] or float[] inputs. "
+                        + "Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric arrays "
+                        + "are not supported."
         );
+    }
 
-        return scale * sum;
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

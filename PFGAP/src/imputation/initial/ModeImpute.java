@@ -1,99 +1,39 @@
 package imputation.initial;
 
 import datasets.ListObjectDataset;
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
+import imputation.util.MissingIndices;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
+/** Mode initial imputation for categorical Object arrays using CSR metadata. */
 public class ModeImpute extends Imputer {
-
-    private static final int CHUNK_SIZE = 1000;
-
-
-    public void Impute(ListObjectDataset missingDS) {
-        List<Object> rawData = missingDS.getData();
-        var mi = missingDS.getMissingIndices();
-
-        if (mi.is2D()) {
-            List<Object> result = new ArrayList<>(rawData.size());
-
-            for (int i = 0; i < rawData.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, rawData.size());
-                List<Object> chunk = rawData.subList(i, end);
-                List<List<List<Integer>>> missingChunk = mi.indices2D.subList(i, end);
-
-                List<Object> processedChunk = IntStream.range(0, chunk.size())
-                        .parallel()
-                        .mapToObj(j -> {
-                            Object[][] matrix = (Object[][]) chunk.get(j);
-                            List<List<Integer>> missing = missingChunk.get(j);
-                            Object[][] imputed = convert2D(matrix, missing);
-                            return (Object) imputed;
-                        })
-                        .collect(Collectors.toList());
-
-                result.addAll(processedChunk);
-                for (int j = i; j < end; j++) rawData.set(j, null);
-                System.gc();
-            }
-
-            missingDS.setData(result);
-        } else {
-            List<Object> result = new ArrayList<>(rawData.size());
-
-            for (int i = 0; i < rawData.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, rawData.size());
-                List<Object> chunk = rawData.subList(i, end);
-                List<List<Integer>> missingChunk = mi.indices1D.subList(i, end);
-
-                List<Object> processedChunk = IntStream.range(0, chunk.size())
-                        .parallel()
-                        .mapToObj(j -> {
-                            Object[] row = (Object[]) chunk.get(j);
-                            List<Integer> missing = missingChunk.get(j);
-                            Object[] imputed = convert1D(row, missing);
-                            return (Object) imputed;
-                        })
-                        .collect(Collectors.toList());
-
-                result.addAll(processedChunk);
-                for (int j = i; j < end; j++) rawData.set(j, null);
-                System.gc();
-            }
-
-            missingDS.setData(result);
+    @Override
+    public void Impute(ListObjectDataset dataset) {
+        Objects.requireNonNull(dataset,"Dataset cannot be null.");
+        List<Object> data=Objects.requireNonNull(dataset.getData(),"Dataset data cannot be null.");
+        MissingIndices missing=Objects.requireNonNull(dataset.getMissingIndices(),"MissingIndices cannot be null.");
+        if(missing.instanceCount()!=data.size())throw new IllegalArgumentException("Missing metadata instance count mismatch.");
+        for(int instance=0;instance<data.size();instance++){
+            Object series=Objects.requireNonNull(data.get(instance),"Categorical series cannot be null.");
+            if(missing.is2D()) impute2D(series,missing,instance);
+            else if(series instanceof Object[] row) imputeRow(row,missing,missing.start1D(instance),missing.end1D(instance));
+            else throw unsupported(series,false);
         }
     }
-
-    public static Object[] convert1D(Object[] row, List<Integer> missingIndices) {
-        Object[] result = Arrays.copyOf(row, row.length);
-        Map<Object, Integer> freq = new HashMap<>();
-
-        for (Object val : row) {
-            if (val != null) {
-                freq.put(val, freq.getOrDefault(val, 0) + 1);
-            }
-        }
-
-        Object mode = freq.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(null);
-
-        for (int i : missingIndices) {
-            result[i] = mode;
-        }
-
-        return result;
+    private static void impute2D(Object series,MissingIndices missing,int instance){
+        if(!(series instanceof Object[][] matrix))throw unsupported(series,true);
+        int dimensions=missing.dimensionCount(instance);
+        if(matrix.length!=dimensions)throw new IllegalArgumentException("Dimension count mismatch.");
+        for(int d=0;d<dimensions;d++)imputeRow(Objects.requireNonNull(matrix[d],"Categorical dimension cannot be null."),missing,missing.start2D(instance,d),missing.end2D(instance,d));
     }
-
-    public static Object[][] convert2D(Object[][] matrix, List<List<Integer>> missingIndices) {
-        Object[][] result = new Object[matrix.length][];
-        for (int i = 0; i < matrix.length; i++) {
-            Object[] row = matrix[i];
-            List<Integer> missing = missingIndices.get(i);
-            result[i] = convert1D(row, missing);
-        }
-        return result;
+    private static void imputeRow(Object[] row,MissingIndices missing,int start,int end){
+        Map<Object,Integer> counts=new HashMap<>();
+        for(Object value:row)if(value!=null)counts.merge(value,1,Integer::sum);
+        Object mode=null;int best=-1;
+        for(Map.Entry<Object,Integer> entry:counts.entrySet())if(entry.getValue()>best){best=entry.getValue();mode=entry.getKey();}
+        for(int offset=start;offset<end;offset++){int index=missing.positionAt(offset);if(index<0||index>=row.length)throw new IndexOutOfBoundsException("Missing position outside row.");if(row[index]!=null)throw new IllegalStateException("Recorded categorical missing position is not null.");row[index]=mode;}
     }
+    private static IllegalArgumentException unsupported(Object series,boolean matrix){return new IllegalArgumentException("Unsupported categorical type: "+series.getClass().getTypeName()+". Expected "+(matrix?"Object[][].":"Object[]."));}
 }

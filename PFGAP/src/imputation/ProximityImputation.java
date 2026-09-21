@@ -9,6 +9,7 @@ import imputation.update.PFImpute;
 import proximity.ProximityMatrixResult;
 import trees.ProximityForest;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -78,6 +79,10 @@ public final class ProximityImputation {
             Runnable proximityInvalidator,
             ParallelRuntime runtime
     ) throws Exception {
+        Objects.requireNonNull(
+                trainingData,
+                "Training data cannot be null."
+        );
         if (!AppContext.perform_train_imputation) {
             return;
         }
@@ -139,6 +144,10 @@ public final class ProximityImputation {
             Runnable proximityInvalidator,
             ParallelRuntime runtime
     ) throws Exception {
+        Objects.requireNonNull(
+                testingData,
+                "Testing data cannot be null."
+        );
         if (!AppContext.perform_test_imputation) {
             return;
         }
@@ -336,49 +345,30 @@ public final class ProximityImputation {
         requirePositiveIterationsForProximityFirst();
         log("Imputing the testing set using proximity-first strategy...");
 
+        /*
+         * Test imputation is inference-only. The supplied forest has already
+         * been trained after training-data imputation completed. Every update
+         * recomputes test/train proximities against the current test values and
+         * the final imputed training data, but no forest is constructed or
+         * trained here.
+         */
         for (int iteration = 0;
              iteration < AppContext.numImputes;
              iteration++) {
-
-            boolean firstPass = iteration == 0;
-            ProximityForest forestForProximities;
-
-            if (firstPass) {
-                logIteration(
-                        "Testing",
-                        iteration,
-                        "using missing-compatible proximity distances..."
-                );
-
-                forestForProximities = new ProximityForest(
-                        0,
-                        getMissingProximityDistances()
-                );
-
-                forestForProximities.train(
-                        trainingData,
-                        runtime
-                );
-            } else {
-                logIteration(
-                        "Testing",
-                        iteration,
-                        "using normal trained forest..."
-                );
-
-                forestForProximities = trainedForest;
-            }
-
+            logIteration(
+                    "Testing",
+                    iteration,
+                    "using the final trained forest..."
+            );
             updateTestingIteration(
                     testingData,
                     trainingData,
-                    forestForProximities,
+                    trainedForest,
                     proximityComputer,
                     proximityInvalidator,
                     runtime
             );
         }
-
         log("Done imputing the testing set.");
     }
 
@@ -463,10 +453,13 @@ public final class ProximityImputation {
     private static boolean shouldRunNumericImputation(
             ListObjectDataset data
     ) {
-        return data != null
-                && AppContext.hasMissingValues
-                && AppContext.isNumeric
-                && data.getMissingIndices() != null;
+        if (data == null
+                || !AppContext.hasMissingValues
+                || !AppContext.isNumeric
+                || data.getMissingIndices() == null) {
+            return false;
+        }
+        return !data.getMissingIndices().isEmpty();
     }
 
     private static String getInitializationStrategy() {
@@ -477,7 +470,7 @@ public final class ProximityImputation {
             return IMPUTE_FIRST;
         }
 
-        return strategy.trim().toLowerCase();
+        return strategy.trim().toLowerCase(Locale.ROOT);
     }
 
     private static boolean usesDTWAlignmentUpdate() {
@@ -489,7 +482,7 @@ public final class ProximityImputation {
         }
 
         return GAP_DTW_ALIGNMENT.equals(
-                strategy.trim().toLowerCase()
+                strategy.trim().toLowerCase(Locale.ROOT)
         );
     }
 
@@ -502,6 +495,13 @@ public final class ProximityImputation {
         return AppContext.is2D
                 ? new MEASURE[]{MEASURE.nan_euclidean_i}
                 : new MEASURE[]{MEASURE.nan_euclidean};
+    }
+
+    private static void requireInitialImputer() {
+        Objects.requireNonNull(
+                AppContext.initial_imputer,
+                "impute_first requires AppContext.initial_imputer."
+        );
     }
 
     private static void requirePositiveIterationsForProximityFirst() {

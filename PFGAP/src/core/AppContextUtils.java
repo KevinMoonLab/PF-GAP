@@ -32,6 +32,7 @@ public class AppContextUtils {
 
         snapshot.is2D = AppContext.is2D;
         snapshot.isNumeric = AppContext.isNumeric;
+        snapshot.numericStorageType = AppContext.numericStorageType;
         //snapshot.hasMissingValues = AppContext.hasMissingValues;
         //snapshot.numImputes = AppContext.numImputes;
         //snapshot.entry_separator = AppContext.entry_separator;

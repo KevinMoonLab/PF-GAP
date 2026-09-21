@@ -4,341 +4,407 @@ import core.AppContext;
 import core.contracts.ObjectDataset;
 import util.Pair;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 
 /**
- * DTW-AROW distance for univariate numeric time series with missing values.
+ * DTW-AROW distance for primitive univariate numeric time series containing
+ * missing values.
  *
- * DTW-AROW differs from ordinary DTW in two key ways:
+ * <p>DTW-AROW extends the ordinary DTW recurrence in two ways:</p>
  *
- * 1. The local cost is extended so that missing comparisons contribute 0:
+ * <ol>
+ *     <li>A local comparison contributes zero when either value is missing;
+ *     otherwise it contributes the squared numeric difference.</li>
+ *     <li>A horizontal or vertical transition is prohibited when the samples
+ *     involved in that transition violate the AROW missingness rule.</li>
+ * </ol>
  *
- *      delta_ext(x, y) = 0          if x or y is missing
- *                        (x-y)^2    otherwise
+ * <p>Supported input pairs are matching {@code double[]} arrays or matching
+ * {@code float[]} arrays. Missing numeric values use primitive NaN. Unequal
+ * series lengths are supported. Mixed float/double pairs, boxed numeric arrays,
+ * and generic numeric object arrays are not supported.</p>
  *
- * 2. Horizontal and vertical moves are penalized with infinity when the
- *    corresponding adjacent samples involve missing values.
+ * <p>Float values are widened individually when read. Dynamic-programming
+ * costs, normalization, and returned distances use double precision. No
+ * temporary double representation of a float series is allocated.</p>
  *
- * Missing-value conventions:
- * - null
- * - Double.NaN
- * - Float.NaN
- *
- * Supported input types:
- * - double[]
- * - Double[]
- * - Object[] containing numeric values
- *
- * Notes:
- * - PF-GAP currently stores file-loaded numeric data with missing values as
- *   Double[] with null missing entries.
- * - Primitive double[] support is included for NaN-backed numeric data,
- *   post-imputation data, and future Python/NumPy interop.
- * - Unlike Euclidean distances, DTW-AROW does not require equal-length series.
+ * <p>Methods remain synchronized pending the broader distance ownership and
+ * concurrency audit.</p>
  */
 public class DTWAROW implements Serializable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private static final double INF = Double.POSITIVE_INFINITY;
+    private static final byte STEP_NONE = 0;
+    private static final byte STEP_DIAGONAL = 1;
+    private static final byte STEP_HORIZONTAL = 2;
+    private static final byte STEP_VERTICAL = 3;
 
     public DTWAROW() {
     }
 
-    /**
-     * Convenience overload for reflective calls.
-     */
-    public synchronized double distance(Object Series1, Object Series2) {
-        return distance(Series1, Series2, Double.POSITIVE_INFINITY, -1);
+    /** Computes unconstrained DTW-AROW distance. */
+    public synchronized double distance(
+            Object first,
+            Object second
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                -1
+        );
     }
 
-    /**
-     * Convenience overload using no window constraint.
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf) {
-        return distance(Series1, Series2, bsf, -1);
+    /** Computes unconstrained DTW-AROW distance with a best-so-far bound. */
+    public synchronized double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        return distance(first, second, bestSoFar, -1);
     }
 
     /**
      * Computes DTW-AROW distance.
      *
-     * @param Series1 Object expected to be double[], Double[], or numeric Object[]
-     * @param Series2 Object expected to be double[], Double[], or numeric Object[]
-     * @param bsf best-so-far threshold
-     * @param windowSize Sakoe-Chiba window size; -1 means unconstrained
-     * @return DTW-AROW distance, or POSITIVE_INFINITY if unavailable or above bsf
+     * @param first first {@code double[]} or {@code float[]} series
+     * @param second matching second series
+     * @param bestSoFar nonnegative ordinary-distance threshold
+     * @param windowSize Sakoe-Chiba radius; {@code -1} means unconstrained
+     * @return DTW-AROW distance, or positive infinity when unavailable or
+     *         greater than {@code bestSoFar}
      */
     public synchronized double distance(
-            Object Series1,
-            Object Series2,
-            double bsf,
-            int windowSize) {
-
-        SeriesAccessor x = makeAccessor(Series1);
-        SeriesAccessor y = makeAccessor(Series2);
-
-        DTWResult result = compute(x, y, bsf, windowSize, false);
-        return result.distance;
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        validateBestSoFar(bestSoFar);
+        AccessorPair pair = makeMatchingAccessors(first, second);
+        return compute(
+                pair.first(),
+                pair.second(),
+                bestSoFar,
+                windowSize,
+                false
+        ).distance();
     }
 
     /**
-     * Computes the optimal DTW-AROW alignment path.
-     *
-     * Path entries are zero-based index pairs into Series1 and Series2.
+     * Computes the optimal DTW-AROW alignment path as zero-based index pairs.
+     * An unavailable alignment returns an empty list.
      */
     public synchronized List<Pair<Integer, Integer>> getAlignmentPath(
-            Object Series1,
-            Object Series2,
-            int windowSize) {
-
-        SeriesAccessor x = makeAccessor(Series1);
-        SeriesAccessor y = makeAccessor(Series2);
-
-        DTWResult result = compute(
-                x,
-                y,
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        AccessorPair pair = makeMatchingAccessors(first, second);
+        return compute(
+                pair.first(),
+                pair.second(),
                 Double.POSITIVE_INFINITY,
                 windowSize,
                 true
-        );
-
-        return result.path;
+        ).path();
     }
 
-    private DTWResult compute(
-            SeriesAccessor x,
-            SeriesAccessor y,
-            double bsf,
+    private static DTWResult compute(
+            SeriesAccessor first,
+            SeriesAccessor second,
+            double bestSoFar,
             int windowSize,
-            boolean keepPath) {
-
-        int m = x.length();
-        int n = y.length();
-
-        if (m == 0 || n == 0) {
-            return new DTWResult(INF, Collections.emptyList());
+            boolean keepPath
+    ) {
+        int firstLength = first.length();
+        int secondLength = second.length();
+        if (firstLength == 0 || secondLength == 0) {
+            return unavailable();
         }
 
-        int availableX = x.countAvailable();
-        int availableY = y.countAvailable();
-
-        if (availableX + availableY == 0) {
-            return new DTWResult(INF, Collections.emptyList());
+        int availableFirst = first.countAvailable();
+        int availableSecond = second.countAvailable();
+        int totalAvailable = availableFirst + availableSecond;
+        if (totalAvailable == 0) {
+            return unavailable();
         }
 
-        double gamma = ((double) (m + n)) / (availableX + availableY);
+        int window = resolveWindow(
+                windowSize,
+                firstLength,
+                secondLength
+        );
+        if (Math.abs(firstLength - secondLength) > window) {
+            return unavailable();
+        }
 
-        int window = windowSize == -1 ? Math.max(m, n) : windowSize;
-        if (window < 0) {
-            throw new IllegalArgumentException(
-                    "windowSize must be -1 or a non-negative integer."
+        double gamma =
+                (double) (firstLength + secondLength) / totalAvailable;
+        double[][] cost =
+                new double[firstLength + 1][secondLength + 1];
+        byte[][] steps = keepPath
+                ? new byte[firstLength + 1][secondLength + 1]
+                : null;
+
+        for (double[] row : cost) {
+            java.util.Arrays.fill(row, INF);
+        }
+
+        // The algorithm's zeroth row and column are DP boundaries.
+        for (int firstIndex = 0;
+                firstIndex <= firstLength;
+                firstIndex++) {
+            cost[firstIndex][0] = 0.0;
+        }
+        for (int secondIndex = 0;
+                secondIndex <= secondLength;
+                secondIndex++) {
+            cost[0][secondIndex] = 0.0;
+        }
+
+        for (int firstDp = 1;
+                firstDp <= firstLength;
+                firstDp++) {
+            int secondStart = Math.max(1, firstDp - window);
+            int secondStop = Math.min(
+                    secondLength,
+                    firstDp + window
             );
-        }
 
-        double[][] cost = new double[m + 1][n + 1];
-        int[][] step = keepPath ? new int[m + 1][n + 1] : null;
+            for (int secondDp = secondStart;
+                    secondDp <= secondStop;
+                    secondDp++) {
+                int firstIndex = firstDp - 1;
+                int secondIndex = secondDp - 1;
 
-        for (int i = 0; i <= m; i++) {
-            for (int j = 0; j <= n; j++) {
-                cost[i][j] = INF;
-            }
-        }
+                double localCost = extendedSquaredDifference(
+                        first,
+                        firstIndex,
+                        second,
+                        secondIndex
+                );
+                double diagonal = cost[firstDp - 1][secondDp - 1];
+                double horizontal = invalidHorizontalStep(
+                        first,
+                        firstIndex,
+                        second,
+                        secondIndex
+                )
+                        ? INF
+                        : cost[firstDp][secondDp - 1];
+                double vertical = invalidVerticalStep(
+                        first,
+                        firstIndex,
+                        second,
+                        secondIndex
+                )
+                        ? INF
+                        : cost[firstDp - 1][secondDp];
 
-        /*
-         * Algorithm 1 initializes c_{j,0} = 0 and c_{0,j'} = 0.
-         * The zeroth row and column are DP boundaries, not real samples.
-         */
-        for (int i = 0; i <= m; i++) {
-            cost[i][0] = 0.0;
-        }
-        for (int j = 0; j <= n; j++) {
-            cost[0][j] = 0.0;
-        }
-
-        for (int i = 1; i <= m; i++) {
-
-            int jStart = Math.max(1, i - window);
-            int jStop = Math.min(n, i + window);
-
-            for (int j = jStart; j <= jStop; j++) {
-
-                int xi = i - 1;
-                int yj = j - 1;
-
-                double localCost = extendedSquaredDifference(x, xi, y, yj);
-
-                double diagonal = cost[i - 1][j - 1];
-
-                double horizontalPenalty =
-                        invalidHorizontalStep(x, xi, y, yj) ? INF : 0.0;
-
-                double verticalPenalty =
-                        invalidVerticalStep(x, xi, y, yj) ? INF : 0.0;
-
-                double horizontal = safeAdd(cost[i][j - 1], horizontalPenalty);
-                double vertical = safeAdd(cost[i - 1][j], verticalPenalty);
-
-                double minPrev = diagonal;
-                int bestStep = 1; // diagonal
-
-                if (horizontal < minPrev) {
-                    minPrev = horizontal;
-                    bestStep = 2; // horizontal
+                double minimumPrevious = diagonal;
+                byte selectedStep = STEP_DIAGONAL;
+                if (horizontal < minimumPrevious) {
+                    minimumPrevious = horizontal;
+                    selectedStep = STEP_HORIZONTAL;
+                }
+                if (vertical < minimumPrevious) {
+                    minimumPrevious = vertical;
+                    selectedStep = STEP_VERTICAL;
                 }
 
-                if (vertical < minPrev) {
-                    minPrev = vertical;
-                    bestStep = 3; // vertical
-                }
-
-                cost[i][j] = safeAdd(localCost, minPrev);
-
+                cost[firstDp][secondDp] = safeAdd(
+                        localCost,
+                        minimumPrevious
+                );
                 if (keepPath) {
-                    step[i][j] = bestStep;
+                    steps[firstDp][secondDp] = selectedStep;
                 }
             }
         }
 
-        double finalCost = cost[m][n];
-
+        double finalCost = cost[firstLength][secondLength];
         if (Double.isInfinite(finalCost)) {
-            return new DTWResult(INF, Collections.emptyList());
+            return unavailable();
         }
 
         double distance = Math.sqrt(gamma * finalCost);
-
-        if (distance > bsf) {
-            return new DTWResult(INF, Collections.emptyList());
+        if (distance > bestSoFar) {
+            return unavailable();
         }
 
         List<Pair<Integer, Integer>> path = keepPath
-                ? backtrack(step, m, n)
+                ? backtrack(steps, firstLength, secondLength)
                 : Collections.emptyList();
-
         return new DTWResult(distance, path);
     }
 
-    /**
-     * delta_ext(x_i, y_j)
-     */
-    private double extendedSquaredDifference(
-            SeriesAccessor x,
-            int xi,
-            SeriesAccessor y,
-            int yj) {
-
-        if (x.isMissing(xi) || y.isMissing(yj)) {
+    private static double extendedSquaredDifference(
+            SeriesAccessor first,
+            int firstIndex,
+            SeriesAccessor second,
+            int secondIndex
+    ) {
+        if (first.isMissing(firstIndex)
+                || second.isMissing(secondIndex)) {
             return 0.0;
         }
-
-        return MissingDistanceTools.squaredDifference(
-                x.value(xi),
-                y.value(yj)
-        );
+        double difference =
+                first.value(firstIndex) - second.value(secondIndex);
+        return difference * difference;
     }
 
-    /**
-     * Horizontal move penalty from Algorithm 1.
-     *
-     * In zero-based indexing, y_{j'-1} becomes y[j - 1].
-     * If j - 1 is outside the real series, it refers to the DP boundary
-     * and is not treated as missing.
-     */
-    private boolean invalidHorizontalStep(
-            SeriesAccessor x,
-            int xi,
-            SeriesAccessor y,
-            int yj) {
-
-        return x.isMissing(xi)
-                || y.isMissing(yj)
-                || y.isMissingIfInRange(yj - 1);
+    private static boolean invalidHorizontalStep(
+            SeriesAccessor first,
+            int firstIndex,
+            SeriesAccessor second,
+            int secondIndex
+    ) {
+        return first.isMissing(firstIndex)
+                || second.isMissing(secondIndex)
+                || second.isMissingIfInRange(secondIndex - 1);
     }
 
-    /**
-     * Vertical move penalty from Algorithm 1.
-     *
-     * In zero-based indexing, x_{j-1} becomes x[i - 1].
-     * If i - 1 is outside the real series, it refers to the DP boundary
-     * and is not treated as missing.
-     */
-    private boolean invalidVerticalStep(
-            SeriesAccessor x,
-            int xi,
-            SeriesAccessor y,
-            int yj) {
-
-        return x.isMissing(xi)
-                || x.isMissingIfInRange(xi - 1)
-                || y.isMissing(yj);
+    private static boolean invalidVerticalStep(
+            SeriesAccessor first,
+            int firstIndex,
+            SeriesAccessor second,
+            int secondIndex
+    ) {
+        return first.isMissing(firstIndex)
+                || first.isMissingIfInRange(firstIndex - 1)
+                || second.isMissing(secondIndex);
     }
 
-    private double safeAdd(double a, double b) {
-
-        if (Double.isInfinite(a) || Double.isInfinite(b)) {
+    private static double safeAdd(
+            double first,
+            double second
+    ) {
+        if (Double.isInfinite(first) || Double.isInfinite(second)) {
             return INF;
         }
-
-        return a + b;
+        return first + second;
     }
 
-    private List<Pair<Integer, Integer>> backtrack(
-            int[][] step,
-            int m,
-            int n) {
+    private static List<Pair<Integer, Integer>> backtrack(
+            byte[][] steps,
+            int firstLength,
+            int secondLength
+    ) {
+        List<Pair<Integer, Integer>> reversePath = new ArrayList<>();
+        int firstDp = firstLength;
+        int secondDp = secondLength;
 
-        List<Pair<Integer, Integer>> path = new ArrayList<>();
-
-        int i = m;
-        int j = n;
-
-        while (i > 0 && j > 0) {
-
-            path.add(0, new Pair<>(i - 1, j - 1));
-
-            int s = step[i][j];
-
-            if (s == 1) {
-                i--;
-                j--;
-            } else if (s == 2) {
-                j--;
-            } else if (s == 3) {
-                i--;
+        while (firstDp > 0 && secondDp > 0) {
+            reversePath.add(
+                    new Pair<>(firstDp - 1, secondDp - 1)
+            );
+            byte step = steps[firstDp][secondDp];
+            if (step == STEP_DIAGONAL) {
+                firstDp--;
+                secondDp--;
+            } else if (step == STEP_HORIZONTAL) {
+                secondDp--;
+            } else if (step == STEP_VERTICAL) {
+                firstDp--;
             } else {
-                break;
+                return Collections.emptyList();
             }
         }
 
-        return path;
+        Collections.reverse(reversePath);
+        return reversePath;
     }
 
-    private SeriesAccessor makeAccessor(Object series) {
-
-        if (series instanceof double[]) {
-            return new PrimitiveSeriesAccessor((double[]) series);
+    private static int resolveWindow(
+            int windowSize,
+            int firstLength,
+            int secondLength
+    ) {
+        if (windowSize == -1) {
+            return Math.max(firstLength, secondLength);
         }
-
-        if (series instanceof Object[]) {
-            return new ObjectSeriesAccessor((Object[]) series);
+        if (windowSize < 0) {
+            throw new IllegalArgumentException(
+                    "windowSize must be -1 or a nonnegative integer."
+            );
         }
+        return windowSize;
+    }
 
-        throw new IllegalArgumentException(
-                "DTWAROW supports double[], Double[], or numeric Object[] inputs."
+    private static AccessorPair makeMatchingAccessors(
+            Object first,
+            Object second
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return new AccessorPair(
+                    new DoubleSeriesAccessor(firstValues),
+                    new DoubleSeriesAccessor(secondValues)
+            );
+        }
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return new AccessorPair(
+                    new FloatSeriesAccessor(firstValues),
+                    new FloatSeriesAccessor(secondValues)
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    public int get_random_window(
+            ObjectDataset dataset,
+            Random random
+    ) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        Objects.requireNonNull(random, "Random cannot be null.");
+        int bound = Math.max(1, (AppContext.length + 1) / 4);
+        return random.nextInt(bound);
+    }
+
+    private static void validateBestSoFar(double bestSoFar) {
+        if (Double.isNaN(bestSoFar) || bestSoFar < 0.0) {
+            throw new IllegalArgumentException(
+                    "DTWAROW bestSoFar must be nonnegative and not NaN. "
+                            + "Received: "
+                            + bestSoFar
+                            + "."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "DTWAROW requires matching double[] or float[] inputs. "
+                        + "Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric arrays "
+                        + "are not supported."
         );
     }
 
-    public int get_random_window(ObjectDataset d, Random r) {
-        int bound = Math.max(1, (AppContext.length + 1) / 4);
-        return r.nextInt(bound);
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
     }
 
     private interface SeriesAccessor {
-
         int length();
 
         boolean isMissing(int index);
@@ -348,21 +414,22 @@ public class DTWAROW implements Serializable {
         int countAvailable();
 
         default boolean isMissingIfInRange(int index) {
-
-            if (index < 0 || index >= length()) {
-                return false;
-            }
-
-            return isMissing(index);
+            return index >= 0
+                    && index < length()
+                    && isMissing(index);
         }
     }
 
-    private static class PrimitiveSeriesAccessor implements SeriesAccessor {
+    private static final class DoubleSeriesAccessor
+            implements SeriesAccessor {
 
         private final double[] series;
 
-        PrimitiveSeriesAccessor(double[] series) {
-            this.series = series;
+        private DoubleSeriesAccessor(double[] series) {
+            this.series = Objects.requireNonNull(
+                    series,
+                    "Double series cannot be null."
+            );
         }
 
         @Override
@@ -372,7 +439,7 @@ public class DTWAROW implements Serializable {
 
         @Override
         public boolean isMissing(int index) {
-            return MissingDistanceTools.isMissing(series[index]);
+            return Double.isNaN(series[index]);
         }
 
         @Override
@@ -386,12 +453,16 @@ public class DTWAROW implements Serializable {
         }
     }
 
-    private static class ObjectSeriesAccessor implements SeriesAccessor {
+    private static final class FloatSeriesAccessor
+            implements SeriesAccessor {
 
-        private final Object[] series;
+        private final float[] series;
 
-        ObjectSeriesAccessor(Object[] series) {
-            this.series = series;
+        private FloatSeriesAccessor(float[] series) {
+            this.series = Objects.requireNonNull(
+                    series,
+                    "Float series cannot be null."
+            );
         }
 
         @Override
@@ -401,43 +472,12 @@ public class DTWAROW implements Serializable {
 
         @Override
         public boolean isMissing(int index) {
-
-            Object value = series[index];
-
-            if (MissingDistanceTools.isMissing(value)) {
-                return true;
-            }
-
-            if (value instanceof Number) {
-                return Double.isNaN(((Number) value).doubleValue());
-            }
-
-            return false;
+            return Float.isNaN(series[index]);
         }
 
         @Override
         public double value(int index) {
-
-            Object value = series[index];
-
-            if (isMissing(index)) {
-                throw new IllegalArgumentException(
-                        "Cannot read a missing value as numeric."
-                );
-            }
-
-            if (!(value instanceof Number)) {
-                throw new IllegalArgumentException(
-                        "DTWAROW requires numeric values at all observed positions. "
-                                + "Found "
-                                + value.getClass().getName()
-                                + " at index "
-                                + index
-                                + "."
-                );
-            }
-
-            return ((Number) value).doubleValue();
+            return series[index];
         }
 
         @Override
@@ -446,14 +486,19 @@ public class DTWAROW implements Serializable {
         }
     }
 
-    private static class DTWResult {
+    private record AccessorPair(
+            SeriesAccessor first,
+            SeriesAccessor second
+    ) {
+    }
 
-        final double distance;
-        final List<Pair<Integer, Integer>> path;
+    private record DTWResult(
+            double distance,
+            List<Pair<Integer, Integer>> path
+    ) {
+    }
 
-        DTWResult(double distance, List<Pair<Integer, Integer>> path) {
-            this.distance = distance;
-            this.path = path;
-        }
+    private static DTWResult unavailable() {
+        return new DTWResult(INF, Collections.emptyList());
     }
 }

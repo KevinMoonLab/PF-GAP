@@ -305,6 +305,8 @@ def train(
     custom_reader_descriptor=None,
     custom_reader_parameters=None,
     custom_reader_thread_safe=False,
+    numeric_storage="auto",
+    
     
     # Standardization controls
     standardization="none",
@@ -453,6 +455,7 @@ def train(
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),
+        "-numeric_storage=" + numeric_storage,
 
         "-get_training_outlier_scores=" + _bool(return_training_outlier_scores),
         "-initial_imputer=" + initial_imputer,

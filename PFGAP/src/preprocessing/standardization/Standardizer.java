@@ -9,12 +9,12 @@ import java.util.Objects;
 /**
  * Applies prepared standardization statistics to realized numeric data.
  *
- * <p>Supported representations are {@code double[]}, {@code Double[]},
- * {@code double[][]}, and {@code Double[][]}. Multivariate arrays use
+ * <p>Supported representations are {@code double[]}, {@code float[]},
+ * {@code double[][]}, and {@code float[][]}. Multivariate arrays use
  * dimension-major orientation: {@code data[dimension][time]}.</p>
  *
  * <p>For {@link StandardizationScope#PER_DIMENSION}, one-dimensional
- * {@code double[]} and {@code Double[]} instances are interpreted as tabular
+ * {@code double[]} and {@code float[]} instances are interpreted as tabular
  * rows. Each array position is standardized with the corresponding fitted
  * feature statistics.</p>
  *
@@ -28,8 +28,9 @@ import java.util.Objects;
  * structural checks are retained so configuration errors fail near their
  * source.</p>
  *
- * <p>{@code null} boxed values and {@code NaN} values are preserved. No
- * standardized copy of the dataset is created.</p>
+ * <p>Primitive NaN values are preserved. Float-backed observations retain float
+ * storage: each standardized double result is narrowed once when written back
+ * to the source float array. No standardized copy is created.</p>
  */
 public final class Standardizer {
 
@@ -225,8 +226,8 @@ public final class Standardizer {
             return values;
         }
 
-        if (series instanceof Double[] values) {
-            transformBoxedOneDimensionalInstance(
+        if (series instanceof float[] values) {
+            transformFloatOneDimensionalInstance(
                     values,
                     scope,
                     centers,
@@ -247,8 +248,8 @@ public final class Standardizer {
             return values;
         }
 
-        if (series instanceof Double[][] values) {
-            transformBoxedMultivariateInstance(
+        if (series instanceof float[][] values) {
+            transformFloatMultivariateInstance(
                     values,
                     scope,
                     centers,
@@ -261,8 +262,8 @@ public final class Standardizer {
         throw new IllegalArgumentException(
                 "Unsupported standardization series type: "
                         + series.getClass().getTypeName()
-                        + ". Expected double[], Double[], double[][], or "
-                        + "Double[][]."
+                        + ". Expected double[], float[], double[][], or "
+                        + "float[][]. Boxed numeric arrays are not supported."
         );
     }
 
@@ -307,13 +308,13 @@ public final class Standardizer {
     }
 
     /**
-     * Transforms one boxed one-dimensional instance.
+     * Transforms one float one-dimensional instance.
      *
      * <p>PER_DIMENSION interprets the instance as a tabular row.
      * GLOBAL applies the single prepared statistic group to every value.</p>
      */
-    private static void transformBoxedOneDimensionalInstance(
-            Double[] values,
+    private static void transformFloatOneDimensionalInstance(
+            float[] values,
             StandardizationScope scope,
             double[] centers,
             double[] scales
@@ -324,13 +325,11 @@ public final class Standardizer {
                     centers.length,
                     "Tabular row"
             );
-
-            transformBoxedTabularRow(
+            transformFloatTabularRow(
                     values,
                     centers,
                     scales
             );
-
             return;
         }
 
@@ -338,8 +337,7 @@ public final class Standardizer {
                 centers,
                 scales
         );
-
-        transformBoxedDimension(
+        transformFloatDimension(
                 values,
                 centers[0],
                 scales[0]
@@ -420,10 +418,10 @@ public final class Standardizer {
     }
 
     /**
-     * Transforms one boxed dimension-major multivariate instance.
+     * Transforms one float dimension-major multivariate instance.
      */
-    private static void transformBoxedMultivariateInstance(
-            Double[][] values,
+    private static void transformFloatMultivariateInstance(
+            float[][] values,
             StandardizationScope scope,
             double[] centers,
             double[] scales
@@ -431,33 +429,28 @@ public final class Standardizer {
         requirePositiveDimensionCount(
                 values.length
         );
-
         if (scope == StandardizationScope.PER_DIMENSION) {
             requireDimensionCompatibility(
                     values.length,
                     centers.length,
                     "Multivariate series"
             );
-
             for (int dimension = 0;
                  dimension < values.length;
                  dimension++) {
-
-                Double[] dimensionValues =
+                float[] dimensionValues =
                         Objects.requireNonNull(
                                 values[dimension],
                                 "Numeric series contains a null dimension at "
                                         + dimension
                                         + "."
                         );
-
-                transformBoxedDimension(
+                transformFloatDimension(
                         dimensionValues,
                         centers[dimension],
                         scales[dimension]
                 );
             }
-
             return;
         }
 
@@ -465,26 +458,19 @@ public final class Standardizer {
                 centers,
                 scales
         );
-
-        double center =
-                centers[0];
-
-        double scale =
-                scales[0];
-
+        double center = centers[0];
+        double scale = scales[0];
         for (int dimension = 0;
              dimension < values.length;
              dimension++) {
-
-            Double[] dimensionValues =
+            float[] dimensionValues =
                     Objects.requireNonNull(
                             values[dimension],
                             "Numeric series contains a null dimension at "
                                     + dimension
                                     + "."
                     );
-
-            transformBoxedDimension(
+            transformFloatDimension(
                     dimensionValues,
                     center,
                     scale
@@ -518,27 +504,22 @@ public final class Standardizer {
     }
 
     /**
-     * Applies one center and scale per boxed tabular feature.
+     * Applies one center and scale per float tabular feature.
      */
-    private static void transformBoxedTabularRow(
-            Double[] values,
+    private static void transformFloatTabularRow(
+            float[] values,
             double[] centers,
             double[] scales
     ) {
         for (int feature = 0;
              feature < values.length;
              feature++) {
-
-            Double value =
-                    values[feature];
-
-            if (value != null
-                    && !Double.isNaN(
-                    value
-            )) {
-                values[feature] =
-                        (value - centers[feature])
-                                / scales[feature];
+            float value = values[feature];
+            if (!Float.isNaN(value)) {
+                values[feature] = (float) (
+                        ((double) value - centers[feature])
+                                / scales[feature]
+                );
             }
         }
     }
@@ -571,27 +552,21 @@ public final class Standardizer {
 
     /**
      * Applies one prepared center and scale to every accepted value in one
-     * boxed series dimension.
+     * float series dimension.
      */
-    private static void transformBoxedDimension(
-            Double[] values,
+    private static void transformFloatDimension(
+            float[] values,
             double center,
             double scale
     ) {
         for (int index = 0;
              index < values.length;
              index++) {
-
-            Double value =
-                    values[index];
-
-            if (value != null
-                    && !Double.isNaN(
-                    value
-            )) {
-                values[index] =
-                        (value - center)
-                                / scale;
+            float value = values[index];
+            if (!Float.isNaN(value)) {
+                values[index] = (float) (
+                        ((double) value - center) / scale
+                );
             }
         }
     }

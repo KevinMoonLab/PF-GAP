@@ -13,23 +13,23 @@ import java.util.Objects;
  *
  * <p>The fitter performs one value traversal. It trusts the configured
  * numeric and missing-value contracts and retains only cheap structural
- * checks. Primitive and boxed NaN values, plus boxed null values, are skipped.
+ * checks. Primitive double and float NaN values are skipped.
  * {@link OnlineMoments} owns finite-value and accumulator-overflow checks.</p>
  *
  * <p>Supported instance representations are {@code double[]},
- * {@code Double[]}, {@code double[][]}, and {@code Double[][]}.
+ * {@code float[]}, {@code double[][]}, and {@code float[][]}.
  * Multivariate arrays are dimension-major.</p>
  *
  * <p>When {@link StandardizationScope#PER_DIMENSION} is selected for
- * {@code double[]} or {@code Double[]} instances, each array position is
+ * {@code double[]} or {@code float[]} instances, each array position is
  * interpreted as one tabular feature and is fitted across dataset instances.
  * All rows must consequently contain the same number of features.</p>
  *
  * <p>For {@link StandardizationScope#GLOBAL}, {@code double[]} and
- * {@code Double[]} retain their univariate-series interpretation, and all
+ * {@code float[]} retain their univariate-series interpretation, and all
  * values from every instance contribute to one reusable statistic group.</p>
  *
- * <p>For {@code double[][]} and {@code Double[][]}, the outer array remains
+ * <p>For {@code double[][]} and {@code float[][]}, the outer array remains
  * the dimension-major axis. GLOBAL combines values from all dimensions into
  * one group, while PER_DIMENSION fits one group per outer-array dimension.</p>
  */
@@ -258,7 +258,7 @@ public final class StandardizationFitter {
             return 1;
         }
 
-        if (instance instanceof Double[] values) {
+        if (instance instanceof float[] values) {
             if (scope == StandardizationScope.PER_DIMENSION) {
                 requirePositiveDimensionCount(
                         values.length
@@ -278,7 +278,7 @@ public final class StandardizationFitter {
             return matrix.length;
         }
 
-        if (instance instanceof Double[][] matrix) {
+        if (instance instanceof float[][] matrix) {
             requirePositiveDimensionCount(
                     matrix.length
             );
@@ -349,8 +349,8 @@ public final class StandardizationFitter {
             return;
         }
 
-        if (instance instanceof Double[] values) {
-            accumulateBoxedOneDimensionalInstance(
+        if (instance instanceof float[] values) {
+            accumulateFloatOneDimensionalInstance(
                     values,
                     expectedDimensionCount,
                     scope,
@@ -371,8 +371,8 @@ public final class StandardizationFitter {
             return;
         }
 
-        if (instance instanceof Double[][] matrix) {
-            accumulateBoxedMultivariateInstance(
+        if (instance instanceof float[][] matrix) {
+            accumulateFloatMultivariateInstance(
                     matrix,
                     expectedDimensionCount,
                     scope,
@@ -425,14 +425,14 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Accumulates one boxed one-dimensional instance.
+     * Accumulates one float one-dimensional instance.
      *
      * <p>PER_DIMENSION interprets the instance as a tabular row.
      * GLOBAL interprets it as a univariate series contributing to one
      * statistic group.</p>
      */
-    private static void accumulateBoxedOneDimensionalInstance(
-            Double[] values,
+    private static void accumulateFloatOneDimensionalInstance(
+            float[] values,
             int expectedDimensionCount,
             StandardizationScope scope,
             OnlineMoments[] moments
@@ -443,7 +443,7 @@ public final class StandardizationFitter {
                     expectedDimensionCount
             );
 
-            accumulateBoxedTabularRow(
+            accumulateFloatTabularRow(
                     values,
                     moments
             );
@@ -455,7 +455,7 @@ public final class StandardizationFitter {
                 expectedDimensionCount
         );
 
-        accumulateBoxedDimension(
+        accumulateFloatDimension(
                 values,
                 moments[0]
         );
@@ -497,10 +497,10 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Accumulates one boxed dimension-major multivariate instance.
+     * Accumulates one float dimension-major multivariate instance.
      */
-    private static void accumulateBoxedMultivariateInstance(
-            Double[][] matrix,
+    private static void accumulateFloatMultivariateInstance(
+            float[][] matrix,
             int expectedDimensionCount,
             StandardizationScope scope,
             OnlineMoments[] moments
@@ -514,13 +514,13 @@ public final class StandardizationFitter {
              dimension < matrix.length;
              dimension++) {
 
-            Double[] values =
+            float[] values =
                     Objects.requireNonNull(
                             matrix[dimension],
                             "Training series contains a null dimension."
                     );
 
-            accumulateBoxedDimension(
+            accumulateFloatDimension(
                     values,
                     accumulator(
                             scope,
@@ -570,22 +570,21 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Accumulates one boxed tabular row into one statistic group per feature
+     * Accumulates one float tabular row into one statistic group per feature
      * position.
      */
-    private static void accumulateBoxedTabularRow(
-            Double[] values,
+    private static void accumulateFloatTabularRow(
+            float[] values,
             OnlineMoments[] moments
     ) {
         for (int feature = 0;
              feature < values.length;
              feature++) {
 
-            Double value =
+            float value =
                     values[feature];
 
-            if (value != null
-                    && !Double.isNaN(
+            if (!Float.isNaN(
                     value
             )) {
                 moments[feature].add(
@@ -615,16 +614,15 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Accumulates every accepted value from one boxed series dimension into
+     * Accumulates every accepted value from one float series dimension into
      * one statistic group.
      */
-    private static void accumulateBoxedDimension(
-            Double[] values,
+    private static void accumulateFloatDimension(
+            float[] values,
             OnlineMoments moments
     ) {
-        for (Double value : values) {
-            if (value != null
-                    && !Double.isNaN(
+        for (float value : values) {
+            if (!Float.isNaN(
                     value
             )) {
                 moments.add(
@@ -721,7 +719,7 @@ public final class StandardizationFitter {
      * Validates and defensively copies ordered feature names.
      *
      * <p>For PER_DIMENSION tabular data, the expected count is the length of
-     * each double[] or Double[] row. For dimension-major multivariate data,
+     * each double[] or float[] row. For dimension-major multivariate data,
      * it is the number of outer-array dimensions.</p>
      */
     private static List<String> validateAndCopyFeatureNames(
@@ -821,8 +819,8 @@ public final class StandardizationFitter {
         return new IllegalArgumentException(
                 "Unsupported standardization training type: "
                         + instance.getClass().getTypeName()
-                        + ". Expected double[], Double[], double[][], "
-                        + "or Double[][]."
+                        + ". Expected double[], float[], double[][], "
+                        + "or float[][]."
         );
     }
 }
