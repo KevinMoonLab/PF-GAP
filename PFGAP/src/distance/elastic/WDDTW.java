@@ -1,29 +1,123 @@
 package distance.elastic;
 
+import core.contracts.ObjectDataset;
+import transformation.DerivativeTransform;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Random;
+
 /**
- * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
- * we might have modified (bug fixes, and improvements for efficiency) the original classes.
- * 
+ * Weighted Derivative Dynamic Time Warping.
+ *
+ * <p>Both inputs are transformed with the unified
+ * {@link DerivativeTransform}, then evaluated by the optimized weighted,
+ * squared-cost {@link WDTW} kernel. Every overload returns accumulated
+ * weighted squared derivative cost, and a finite {@code bestSoFar} is
+ * interpreted in the same units.</p>
+ *
+ * <p>Both {@code double[]} and {@code float[]} inputs are supported. Float
+ * derivatives are formed in double precision. The class contains no mutable
+ * scratch state and is safe for concurrent use.</p>
  */
+public final class WDDTW implements Serializable {
 
-public class WDDTW extends WDTW{
-	protected double[] deriv1, deriv2;
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-	//public synchronized double distance(double[] first, double[] second, double bsf, double g) {
-	public synchronized double distance(Object First, Object Second, double bsf, double g) {
+    private final WDTW wdtw;
 
-		double[] first = (double[]) First;
-		double[] second = (double[]) Second;
+    public WDDTW() {
+        wdtw = new WDTW();
+    }
 
-		if (deriv1 == null || deriv1.length != first.length) {
-			deriv1 = new double[first.length];
-		}
-		DDTW.getDeriv(deriv1, first);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double g
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return distance(firstValues, secondValues, bestSoFar, g);
+        }
 
-		if (deriv2 == null || deriv2.length != second.length) {
-			deriv2 = new double[second.length];
-		}
-		DDTW.getDeriv(deriv2, second);
-		return super.distance(deriv1, deriv2, bsf, g);
-	}	
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return distance(firstValues, secondValues, bestSoFar, g);
+        }
+
+        throw unsupportedPair(first, second);
+    }
+
+    public double distance(
+            Object first,
+            Object second,
+            double g
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                g
+        );
+    }
+
+    private double distance(
+            double[] first,
+            double[] second,
+            double bestSoFar,
+            double g
+    ) {
+        double[] firstDerivative = DerivativeTransform.transform(first);
+        double[] secondDerivative = DerivativeTransform.transform(second);
+
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    private double distance(
+            float[] first,
+            float[] second,
+            double bestSoFar,
+            double g
+    ) {
+        double[] firstDerivative = DerivativeTransform.transform(first);
+        double[] secondDerivative = DerivativeTransform.transform(second);
+
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    public double get_random_g(ObjectDataset dataset, Random random) {
+        return wdtw.get_random_g(dataset, random);
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "WDDTW requires matching double[] or float[] inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric "
+                        + "arrays are not supported."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
+    }
 }

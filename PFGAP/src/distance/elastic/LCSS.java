@@ -1,115 +1,225 @@
 package distance.elastic;
 
-import static distance.DistanceTools.sim;
-
-import java.io.Serializable;
-import java.util.Random;
-//import core.contracts.Dataset;
 import core.AppContext;
 import core.contracts.ObjectDataset;
 import distance.DistanceTools;
-import distance.MemorySpaceProvider;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Arrays;
+import java.util.Random;
 
 /**
- * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
- * we might have modified (bug fixes, and improvements for efficiency) the original classes.
- * 
+ * Longest Common Subsequence distance for primitive univariate series.
+ *
+ * <p>Two values match when their absolute difference is at most
+ * {@code epsilon}. The similarity is the constrained LCSS length divided by
+ * the shorter input length, and the returned distance is
+ * {@code 1.0 - similarity}, therefore lying in {@code [0, 1]}.</p>
+ *
+ * <p>Both {@code double[]} and {@code float[]} inputs are supported without
+ * conversion or boxing. Evaluation uses a Sakoe-Chiba band and two integer
+ * rows. A negative window means unconstrained alignment, while a finite window
+ * is widened when necessary for unequal input lengths.</p>
+ *
+ * <p>The {@code bestSoFar} parameter is accepted for the common distance
+ * contract but is not used for cell-level early abandonment. LCSS maximizes a
+ * subsequence length, so an intermediate low score does not provide the same
+ * monotone cutoff as additive-cost elastic distances.</p>
  */
+public final class LCSS implements Serializable {
 
-public class LCSS implements Serializable {
-	
-	public LCSS() {
-		
-	}
-	
-	//public synchronized double distance(double[] series1, double[] series2, double bsf, int windowSize, double epsilon) {
-	public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize, double epsilon) {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-		double[] series1 = (double[]) Series1;
-		double[] series2 = (double[]) Series2;
+    public LCSS() {
+    }
 
-		if (windowSize == -1) {
-			windowSize = series1.length;
-		}
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize,
+            double epsilon
+    ) {
+        validateEpsilon(epsilon);
 
-		int length1 = series1.length;
-		int length2 = series2.length;
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return distance(firstValues, secondValues, windowSize, epsilon);
+        }
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return distance(firstValues, secondValues, windowSize, epsilon);
+        }
+        throw unsupportedPair(first, second);
+    }
 
-		int maxLength = Math.max(length1, length2);
-		int minLength = Math.min(length1, length2);
+    private static double distance(
+            double[] first,
+            double[] second,
+            int windowSize,
+            double epsilon
+    ) {
+        requireNonempty(first.length, second.length);
+        if (first.length >= second.length) {
+            return distanceKernel(first, second, windowSize, epsilon);
+        }
+        return distanceKernel(second, first, windowSize, epsilon);
+    }
 
-		int [][]matrix = MemorySpaceProvider.getInstance(maxLength).getIntMatrix();
-//		int[][] matrix = MemoryManager.getInstance().getIntMatrix(0);
+    private static double distance(
+            float[] first,
+            float[] second,
+            int windowSize,
+            double epsilon
+    ) {
+        requireNonempty(first.length, second.length);
+        if (first.length >= second.length) {
+            return distanceKernel(first, second, windowSize, epsilon);
+        }
+        return distanceKernel(second, first, windowSize, epsilon);
+    }
 
-		int i, j;
-	
-		matrix[0][0] = sim(series1[0], series2[0], epsilon);
-		for (i = 1; i < Math.min(length1, 1 + windowSize); i++) {
-			matrix[i][0] = (sim(series1[i], series2[0], epsilon)==1)?sim(series1[i], series2[0], epsilon):matrix[i-1][0];
-		}
+    private static double distanceKernel(
+            double[] rowSeries,
+            double[] columnSeries,
+            int windowSize,
+            double epsilon
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        int[] previous = new int[columnCount + 1];
+        int[] current = new int[columnCount + 1];
 
-		for (j = 1; j < Math.min(length2, 1 + windowSize); j++) {
-			matrix[0][j] = (sim(series1[0], series2[j], epsilon)==1?sim(series1[0], series2[j], epsilon):matrix[0][j-1]);
-		}
-		
-		if (j < length2)
-			matrix[0][j] = Integer.MIN_VALUE;
+        for (int row = 1; row <= rowCount; row++) {
+            Arrays.fill(current, 0);
+            int start = Math.max(1, row - window);
+            int end = Math.min(columnCount, row + window);
+            double rowValue = rowSeries[row - 1];
 
+            for (int column = start; column <= end; column++) {
+                if (Math.abs(
+                        rowValue - columnSeries[column - 1]
+                ) <= epsilon) {
+                    current[column] = previous[column - 1] + 1;
+                } else {
+                    current[column] = Math.max(
+                            previous[column],
+                            current[column - 1]
+                    );
+                }
+            }
 
-		for (i = 1; i < length1; i++) {
-			int jStart = (i - windowSize < 1) ? 1 : i - windowSize;
-			int jStop = (i + windowSize + 1 > length2) ? length2 : i + windowSize + 1;
-			
-			if (i-windowSize-1>=0)
-				matrix[i][i-windowSize-1] = Integer.MIN_VALUE;
-			for (j = jStart; j < jStop; j++) {
-				if (sim(series1[i], series2[j], epsilon) == 1) {
-					matrix[i][j] = matrix[i - 1][j - 1] + 1;
-				} else {
-					matrix[i][j] = max(matrix[i - 1][j - 1], matrix[i][j - 1], matrix[i - 1][j]);
-				}
-			}
-			if (jStop < length2)
-				matrix[i][jStop] = Integer.MIN_VALUE;
-		}
-		
-		double res = 1.0 - 1.0 * matrix[length1 - 1][length2 - 1] / minLength;
-		MemorySpaceProvider.getInstance().returnIntMatrix(matrix);
-		return res;
+            int[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
 
-	}
-	
-	
-	public static final int max(int A, int B, int C) {
-		if (A > B) {
-			if (A > C) {
-				return A;
-			} else {
-				// C > A > B
-				return C;
-			}
-		} else {
-			if (B > C) {
-				// B > A and B > C
-				return B;
-			} else {
-				// C > B > A
-				return C;
-			}
-		}
-	}	
-	
-	public int get_random_window(ObjectDataset d, Random r) {
-//		int x = (d.length() +1) / 4;
-		//return r.nextInt((d.length() +1) / 4); //TODO
-		return r.nextInt((AppContext.length +1) / 4); //TODO
-	} 	
-	
-	public double get_random_epsilon(ObjectDataset d, Random r) {
-		double stdTrain = DistanceTools.stdv_p(d);
-		double stdFloor = stdTrain * 0.2;
-		double e = r.nextDouble()*(stdTrain-stdFloor)+stdFloor;
-		return e;
-	} 
-	
+        return 1.0 - (double) previous[columnCount] / columnCount;
+    }
+
+    private static double distanceKernel(
+            float[] rowSeries,
+            float[] columnSeries,
+            int windowSize,
+            double epsilon
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        int[] previous = new int[columnCount + 1];
+        int[] current = new int[columnCount + 1];
+
+        for (int row = 1; row <= rowCount; row++) {
+            Arrays.fill(current, 0);
+            int start = Math.max(1, row - window);
+            int end = Math.min(columnCount, row + window);
+            double rowValue = rowSeries[row - 1];
+
+            for (int column = start; column <= end; column++) {
+                if (Math.abs(
+                        rowValue - (double) columnSeries[column - 1]
+                ) <= epsilon) {
+                    current[column] = previous[column - 1] + 1;
+                } else {
+                    current[column] = Math.max(
+                            previous[column],
+                            current[column - 1]
+                    );
+                }
+            }
+
+            int[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return 1.0 - (double) previous[columnCount] / columnCount;
+    }
+
+    private static int resolveWindow(
+            int configuredWindow,
+            int firstLength,
+            int secondLength
+    ) {
+        if (configuredWindow < 0) {
+            return Math.max(firstLength, secondLength);
+        }
+        return Math.max(
+                configuredWindow,
+                Math.abs(firstLength - secondLength)
+        );
+    }
+
+    private static void validateEpsilon(double epsilon) {
+        if (!Double.isFinite(epsilon) || epsilon < 0.0) {
+            throw new IllegalArgumentException(
+                    "LCSS epsilon must be finite and nonnegative."
+            );
+        }
+    }
+
+    private static void requireNonempty(
+            int firstLength,
+            int secondLength
+    ) {
+        if (firstLength == 0 || secondLength == 0) {
+            throw new IllegalArgumentException(
+                    "LCSS requires two nonempty time series."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "LCSS requires matching double[] or float[] inputs. Received "
+                        + typeName(first) + " and " + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
+    }
+
+    public int get_random_window(ObjectDataset dataset, Random random) {
+        int upperExclusive = (AppContext.length + 1) / 4;
+        return upperExclusive <= 1
+                ? 0
+                : random.nextInt(upperExclusive);
+    }
+
+    public double get_random_epsilon(
+            ObjectDataset dataset,
+            Random random
+    ) {
+        double standardDeviation = DistanceTools.stdv_p(dataset);
+        double floor = standardDeviation * 0.2;
+        return floor + random.nextDouble()
+                * (standardDeviation - floor);
+    }
 }

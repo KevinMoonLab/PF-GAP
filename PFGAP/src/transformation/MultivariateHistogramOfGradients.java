@@ -1,9 +1,20 @@
 package transformation;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Objects;
 
-public class MultivariateHistogramOfGradients {
+/**
+ * Histogram construction for multivariate gradient matrices.
+ *
+ * <p>Input is expected to be an already-derived matrix with orientation
+ * {@code [dimension][time]}. This class never applies
+ * {@link DerivativeTransform}; callers own derivative preprocessing. This
+ * contract prevents the accidental double differentiation that previously
+ * occurred in ShapeHoG distance pipelines.</p>
+ *
+ * <p>All strategies use primitive arrays and loops. Histogram values are raw
+ * counts represented as {@code double}.</p>
+ */
+public final class MultivariateHistogramOfGradients {
 
     public enum Strategy {
         CONCATENATE_GRADIENTS,
@@ -12,71 +23,190 @@ public class MultivariateHistogramOfGradients {
         AVERAGE_GRADIENTS
     }
 
-    public static double[] computeHistogram(double[][] input, int binsPerDim, Strategy strategy) {
-        if (input == null || input.length == 0) {
-            return new double[0];
-        }
-
-        switch (strategy) {
-            case CONCATENATE_GRADIENTS:
-                return histogramFromConcatenatedGradients(input, binsPerDim);
-            case PER_DIMENSION:
-                return histogramFromPerDimension(input, binsPerDim);
-            case PCA_BEFORE_HISTOGRAM:
-                double[][] projected = PCA.transform(input, 1); // reduce to 1D
-                return HistogramOfGradients.computeHistogram(projected[0], binsPerDim);
-            case AVERAGE_GRADIENTS:
-                return histogramFromAveragedGradients(input, binsPerDim);
-            default:
-                throw new IllegalArgumentException("Unknown strategy: " + strategy);
-        }
+    private MultivariateHistogramOfGradients() {
     }
 
-    public static double[] computeHistogram(double[][] input, Strategy strategy) {
-        int binsPerDim = (int) Math.sqrt(input[0].length);
-        return computeHistogram(input, binsPerDim, strategy);
+    public static double[] computeHistogram(
+            double[][] gradients,
+            int binsPerDimension,
+            Strategy strategy
+    ) {
+        requireGradientMatrix(gradients);
+        requirePositiveBins(binsPerDimension);
+        Objects.requireNonNull(strategy, "Histogram strategy cannot be null.");
+
+        return switch (strategy) {
+            case CONCATENATE_GRADIENTS ->
+                    histogramFromConcatenatedGradients(
+                            gradients,
+                            binsPerDimension
+                    );
+            case PER_DIMENSION ->
+                    histogramFromPerDimension(
+                            gradients,
+                            binsPerDimension
+                    );
+            case PCA_BEFORE_HISTOGRAM ->
+                    histogramAfterPca(
+                            gradients,
+                            binsPerDimension
+                    );
+            case AVERAGE_GRADIENTS ->
+                    histogramFromAveragedGradients(
+                            gradients,
+                            binsPerDimension
+                    );
+        };
     }
 
-    private static double[] histogramFromConcatenatedGradients(double[][] input, int bins) {
-        List<Double> allGradients = new ArrayList<>();
-        for (double[] dim : input) {
-            double[] grad = FirstOrderDifference.computeFirstOrderDifference(dim);
-            for (double g : grad) allGradients.add(g);
-        }
-        double[] flat = allGradients.stream().mapToDouble(Double::doubleValue).toArray();
-        return HistogramOfGradients.computeHistogram(flat, bins);
+    public static double[] computeHistogram(
+            double[][] gradients,
+            Strategy strategy
+    ) {
+        requireGradientMatrix(gradients);
+        return computeHistogram(
+                gradients,
+                defaultBinCount(gradients[0].length),
+                strategy
+        );
     }
 
-    private static double[] histogramFromPerDimension(double[][] input, int bins) {
-        List<double[]> histograms = new ArrayList<>();
-        for (double[] dim : input) {
-            double[] grad = FirstOrderDifference.computeFirstOrderDifference(dim);
-            double[] hist = HistogramOfGradients.computeHistogram(grad, bins);
-            histograms.add(hist);
+    private static double[] histogramFromConcatenatedGradients(
+            double[][] gradients,
+            int bins
+    ) {
+        int totalLength = 0;
+        for (double[] dimension : gradients) {
+            totalLength = Math.addExact(totalLength, dimension.length);
         }
 
-        int totalLength = histograms.stream().mapToInt(h -> h.length).sum();
-        double[] combined = new double[totalLength];
-        int pos = 0;
-        for (double[] h : histograms) {
-            System.arraycopy(h, 0, combined, pos, h.length);
-            pos += h.length;
+        double[] flattened = new double[totalLength];
+        int output = 0;
+        for (double[] dimension : gradients) {
+            System.arraycopy(
+                    dimension,
+                    0,
+                    flattened,
+                    output,
+                    dimension.length
+            );
+            output += dimension.length;
         }
+
+        return HistogramOfGradients.computeGradientHistogram(
+                flattened,
+                bins
+        );
+    }
+
+    private static double[] histogramFromPerDimension(
+            double[][] gradients,
+            int bins
+    ) {
+        double[] combined = new double[
+                Math.multiplyExact(gradients.length, bins)
+        ];
+        int output = 0;
+
+        for (double[] dimension : gradients) {
+            double[] histogram =
+                    HistogramOfGradients.computeGradientHistogram(
+                            dimension,
+                            bins
+                    );
+            System.arraycopy(
+                    histogram,
+                    0,
+                    combined,
+                    output,
+                    bins
+            );
+            output += bins;
+        }
+
         return combined;
     }
 
-    private static double[] histogramFromAveragedGradients(double[][] input, int bins) {
-        int len = input[0].length - 1;
-        double[] avgGrad = new double[len];
-        for (double[] dim : input) {
-            double[] grad = FirstOrderDifference.computeFirstOrderDifference(dim);
-            for (int i = 0; i < len; i++) {
-                avgGrad[i] += grad[i];
+    private static double[] histogramAfterPca(
+            double[][] gradients,
+            int bins
+    ) {
+        double[][] projected = PCA.transform(gradients, 1);
+        return HistogramOfGradients.computeGradientHistogram(
+                projected[0],
+                bins
+        );
+    }
+
+    private static double[] histogramFromAveragedGradients(
+            double[][] gradients,
+            int bins
+    ) {
+        int timeLength = gradients[0].length;
+        double[] average = new double[timeLength];
+
+        for (double[] dimension : gradients) {
+            for (int time = 0; time < timeLength; time++) {
+                average[time] += dimension[time];
             }
         }
-        for (int i = 0; i < len; i++) {
-            avgGrad[i] /= input.length;
+
+        double reciprocalDimensionCount = 1.0 / gradients.length;
+        for (int time = 0; time < timeLength; time++) {
+            average[time] *= reciprocalDimensionCount;
         }
-        return HistogramOfGradients.computeHistogram(avgGrad, bins);
+
+        return HistogramOfGradients.computeGradientHistogram(
+                average,
+                bins
+        );
+    }
+
+    private static int defaultBinCount(int timeLength) {
+        return Math.max(1, (int) Math.sqrt(timeLength));
+    }
+
+    private static void requireGradientMatrix(double[][] gradients) {
+        Objects.requireNonNull(
+                gradients,
+                "Gradient matrix cannot be null."
+        );
+        if (gradients.length == 0) {
+            throw new IllegalArgumentException(
+                    "Gradient matrix cannot have zero dimensions."
+            );
+        }
+
+        int timeLength = -1;
+        for (int dimension = 0;
+             dimension < gradients.length;
+             dimension++) {
+            double[] row = Objects.requireNonNull(
+                    gradients[dimension],
+                    "Gradient row cannot be null at dimension "
+                            + dimension
+                            + "."
+            );
+            if (row.length == 0) {
+                throw new IllegalArgumentException(
+                        "Gradient rows cannot be empty."
+                );
+            }
+            if (timeLength < 0) {
+                timeLength = row.length;
+            } else if (row.length != timeLength) {
+                throw new IllegalArgumentException(
+                        "All gradient rows must have equal time length."
+                );
+            }
+        }
+    }
+
+    private static void requirePositiveBins(int bins) {
+        if (bins <= 0) {
+            throw new IllegalArgumentException(
+                    "Histogram bin count must be positive."
+            );
+        }
     }
 }

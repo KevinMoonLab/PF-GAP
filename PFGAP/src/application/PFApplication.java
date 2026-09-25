@@ -746,6 +746,9 @@ public class PFApplication {
 					case "-num_workers":
 						AppContext.num_workers = Integer.parseInt(options[1]);
 						break;
+					case "-use_vector_api":
+						AppContext.useVectorApi = Boolean.parseBoolean(options[1]);
+						break;
 					case "-knn_distances":
 						//String[] distanceNames = options[1].split(",");
 					/*MEASURE[] measures = Arrays.stream(distanceNames)

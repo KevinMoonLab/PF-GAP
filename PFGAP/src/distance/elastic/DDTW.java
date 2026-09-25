@@ -1,47 +1,128 @@
 package distance.elastic;
 
+import core.contracts.ObjectDataset;
+import transformation.DerivativeTransform;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Random;
+
 /**
- * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
- * we might have modified (bug fixes, and improvements for efficiency) the original classes.
- * 
+ * Derivative Dynamic Time Warping with squared Euclidean local costs.
+ *
+ * <p>Both inputs are transformed with the unified
+ * {@link DerivativeTransform}, then evaluated by the optimized squared-cost
+ * {@link DTW} kernel. Every overload returns accumulated squared derivative-DTW
+ * cost, and a finite {@code bestSoFar} is interpreted in the same units.</p>
  */
+public final class DDTW implements Serializable {
 
-public class DDTW extends DTW{
-	double[] deriv1, deriv2;
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-	public DDTW() {
-		
-	}
-	
-	//public synchronized double distance(double[] series1, double[] series2, double bsf, int w) {
-	public synchronized double distance(Object Series1, Object Series2, double bsf, int w) {
+    private final DTW dtw;
 
-		double[] series1 = (double[]) Series1;
-		double[] series2 = (double[]) Series2;
+    public DDTW() {
+        dtw = new DTW();
+    }
 
-//		System.out.println("calling ddtw with w="+w);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
+        }
 
-		if (deriv1 == null || deriv1.length != series1.length) {
-			deriv1 = new double[series1.length];
-		}
-		getDeriv(deriv1,series1);
-		
-		if (deriv2 == null || deriv2.length != series2.length) {
-			deriv2 = new double[series2.length];
-		}
-		getDeriv(deriv2,series2);
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
+        }
 
-		return super.distance(deriv1, deriv2, bsf,w);
-	}
-	
-	protected static final void getDeriv(double[]d,double[] series) {
-		for (int i = 1; i < series.length - 1 ; i++) { 
-			d[i] = ((series[i] - series[i - 1]) + ((series[i + 1] - series[i - 1]) / 2.0)) / 2.0;
-		}
+        throw unsupportedPair(first, second);
+    }
 
-		d[0] = d[1];
-		d[d.length - 1] = d[d.length - 2];
-		
-	}
-	
+    public double distance(
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                windowSize
+        );
+    }
+
+    private double distance(
+            double[] first,
+            double[] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        double[] firstDerivative = DerivativeTransform.transform(first);
+        double[] secondDerivative = DerivativeTransform.transform(second);
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private double distance(
+            float[] first,
+            float[] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        double[] firstDerivative = DerivativeTransform.transform(first);
+        double[] secondDerivative = DerivativeTransform.transform(second);
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "DDTW requires matching double[] or float[] inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric "
+                        + "arrays are not supported."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
+    }
+
+    public int get_random_window(ObjectDataset dataset, Random random) {
+        return dtw.get_random_window(dataset, random);
+    }
 }

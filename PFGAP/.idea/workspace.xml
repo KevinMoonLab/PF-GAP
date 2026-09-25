@@ -7,41 +7,60 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContextSnapshot.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContextSnapshot.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContextUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContextUtils.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ModelIO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ModelIO.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/DatasetPreparationCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/DatasetPreparationCoordinator.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericDelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericDelimitedFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/CID.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/CID.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Cosine.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Cosine.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/DDTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/DTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/DTWWithPath.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/DTWWithPath.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/ERP.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/ERP.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Euclidean.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/LCSS.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/MSM.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/MSM.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/Manhattan.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/SBD.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/SBD.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/ShapeHoG1dDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/ShapeHoG1dDTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/TWE.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/TWE.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/WDDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/WDDTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/elastic/WDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/elastic/WDTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/interop/MetaClassMatchDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MetaClassMatchDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/interop/MetaRegressionDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MetaRegressionDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/PythonDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/meta/MetaFileClassMatchDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/meta/MetaFileClassMatchDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/meta/MetaFileRegressionDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/meta/MetaFileRegressionDistance.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/missing/DTWAROW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/DTWAROW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/missing/DTWAROW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/DTWAROW_D.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/missing/DTWAROW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/DTWAROW_I.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/missing/MissingDistanceTools.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/MissingDistanceTools.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/missing/NaNEuclidean.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/NaNEuclidean.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/distance/missing/NaNEuclidean_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/missing/NaNEuclidean_I.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/ProximityImputation.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/ProximityImputation.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/GlobalMeanImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/GlobalMeanImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/GlobalMedianImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/GlobalMedianImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/GlobalModeImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/GlobalModeImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/KNNImputer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/KNNImputer.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/LinearImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/LinearImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/MaskedDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/MaskedDistance.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/MeanImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/MeanImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/MedianImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/MedianImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/initial/ModeImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/initial/ModeImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/update/DTWPFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/update/DTWPFImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/update/PFImpute.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/update/PFImpute.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/util/MissingIndices.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/util/MissingIndices.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/imputation/util/MissingIndicesBuilder.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/imputation/util/MissingIndicesBuilder.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/CID_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/CID_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DDTW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DDTW_D.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DDTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DDTW_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DTW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DTW_D.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/DTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/DTW_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/ERP_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/ERP_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/Euclidean_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/Euclidean_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/LCSS_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/LCSS_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/MSM_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/MSM_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/Manhattan_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/Manhattan_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/SBD_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/SBD_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/ShapeHoG1dDTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/ShapeHoG1dDTW_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/ShapeHoGDTW.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/ShapeHoGDTW.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/TWE_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/TWE_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/WDDTW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/WDDTW_D.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/WDDTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/WDDTW_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/WDTW_D.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/WDTW_D.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/multiTS/WDTW_I.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/multiTS/WDTW_I.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/transformation/FirstOrderDifference.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/transformation/DerivativeTransform.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/transformation/HistogramOfGradients.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/transformation/HistogramOfGradients.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/transformation/MultivariateHistogramOfGradients.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/transformation/MultivariateHistogramOfGradients.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/transformation/PCA.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/transformation/PCA.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -92,7 +111,7 @@
     <property name="project.structure.last.edited" value="Modules" />
     <property name="project.structure.proportion" value="0.20536344" />
     <property name="project.structure.side.proportion" value="0.13663366" />
-    <property name="settings.editor.selected.configurable" value="preferences.keymap" />
+    <property name="settings.editor.selected.configurable" value="reference.projectsettings.compiler.javacompiler" />
   </component>
   <component name="RunManager">
     <configuration name="PFApplication" type="Application" factoryName="Application">

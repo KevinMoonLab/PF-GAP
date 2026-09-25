@@ -3,44 +3,154 @@ package distance.multiTS;
 import core.contracts.ObjectDataset;
 import distance.elastic.MSM;
 
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Random;
 
-public class MSM_I implements Serializable {
+/** Independent multivariate MSM with summed selected-channel costs. */
+public final class MSM_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final MSM msm;
 
     public MSM_I() {
-        this.msm = new MSM();
+        msm = new MSM();
     }
 
-    /**
-     * Computes the average MSM distance across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * MSM uses a cost parameter to penalize move/split/merge operations.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @param cost Cost parameter for MSM operations
-     * @return Average MSM distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf, double cost) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
-
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
-        }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += msm.distance(series1[i], series2[i], bsf, cost);
-        }
-
-        return totalDistance / series1.length;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double cost
+    ) {
+        return distance(first, second, bestSoFar, cost, null);
     }
 
-    public double get_random_cost(ObjectDataset d, java.util.Random r) {
-        return msm.get_random_cost(d, r);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double cost,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    cost,
+                    selectedDimensions
+            );
+        }
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    cost,
+                    selectedDimensions
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    private double distance(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double cost,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = msm.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    cost
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private double distance(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double cost,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = msm.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    cost
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    public double get_random_cost(ObjectDataset dataset, Random random) {
+        return msm.get_random_cost(dataset, random);
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Independent MSM requires matching double[][] or float[][] "
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

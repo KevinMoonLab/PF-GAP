@@ -8,29 +8,31 @@ import java.util.Objects;
 import java.util.Random;
 
 /**
- * Independent DTW-AROW distance for primitive dimension-major multivariate
- * numeric time series containing missing values.
+ * Independent multivariate DTW-AROW for primitive dimension-major time series
+ * containing missing values represented by NaN.
  *
- * <p>Each dimension in the first series is compared with the corresponding
- * dimension in the second series using {@link DTWAROW}. The component
- * distances are averaged across dimensions.</p>
+ * <p>Each selected dimension is compared independently with the faithful
+ * univariate {@link DTWAROW} implementation, and the resulting ordinary
+ * DTW-AROW distances are summed. Dimension selection applies only to the outer
+ * matrix axis. Selected dimension indices are never interpreted as temporal
+ * indices.</p>
  *
- * <p>Supported input pairs are matching {@code double[][]} arrays or matching
- * {@code float[][]} arrays. Missing numeric values use primitive NaN. Unequal
- * time lengths are supported within corresponding dimensions. Mixed
- * float/double pairs, boxed numeric arrays, and generic numeric object arrays
- * are not supported.</p>
+ * <p>Both matching {@code double[][]} and matching {@code float[][]} inputs are
+ * supported without slicing or whole-matrix conversion. A null selected-
+ * dimension array evaluates every dimension. Unequal time lengths are allowed
+ * within corresponding dimension pairs, subject to the univariate DTW-AROW
+ * window rules.</p>
  *
- * <p>If either series has no dimensions, or if any component DTW-AROW distance
- * is unavailable, the final result is positive infinity. The best-so-far
- * threshold is applied after the final average is computed, because an
- * individual component distance may exceed the final average threshold without
- * proving that the completed average will do so.</p>
+ * <p>A finite {@code bestSoFar} is reduced by each completed component
+ * distance. The remaining ordinary-distance budget is passed to the next
+ * univariate DTW-AROW calculation, where it is converted to that component's
+ * exact cumulative-cost cutoff. If any selected component is unavailable, the
+ * independent distance is unavailable.</p>
  *
- * <p>Methods remain synchronized pending the broader distance ownership and
- * concurrency audit.</p>
+ * <p>The class contains no mutable calculation state and is safe for concurrent
+ * use.</p>
  */
-public class DTWAROW_I implements Serializable {
+public final class DTWAROW_I implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
@@ -38,11 +40,11 @@ public class DTWAROW_I implements Serializable {
     private final DTWAROW dtwArow;
 
     public DTWAROW_I() {
-        this.dtwArow = new DTWAROW();
+        dtwArow = new DTWAROW();
     }
 
-    /** Computes unconstrained independent DTW-AROW distance. */
-    public synchronized double distance(
+    /** Computes unconstrained independent DTW-AROW over all dimensions. */
+    public double distance(
             Object first,
             Object second
     ) {
@@ -50,92 +52,115 @@ public class DTWAROW_I implements Serializable {
                 first,
                 second,
                 Double.POSITIVE_INFINITY,
-                -1
+                -1,
+                null
         );
     }
 
     /**
-     * Computes unconstrained independent DTW-AROW distance with a best-so-far
-     * threshold.
+     * Computes unconstrained independent DTW-AROW over all dimensions with a
+     * finite aggregate bound.
      */
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second,
             double bestSoFar
     ) {
-        return distance(first, second, bestSoFar, -1);
+        return distance(first, second, bestSoFar, -1, null);
     }
 
-    /**
-     * Computes the average DTW-AROW distance across corresponding dimensions.
-     *
-     * @param first first {@code double[][]} or {@code float[][]} series
-     * @param second matching second series
-     * @param bestSoFar nonnegative ordinary-distance threshold
-     * @param windowSize Sakoe-Chiba radius; {@code -1} means unconstrained
-     * @return average component distance, or positive infinity when unavailable
-     *         or greater than {@code bestSoFar}
-     */
-    public synchronized double distance(
+    /** Computes independent DTW-AROW over all dimensions. */
+    public double distance(
             Object first,
             Object second,
             double bestSoFar,
             int windowSize
     ) {
-        validateBestSoFar(bestSoFar);
-        validateWindow(windowSize);
-
-        double result;
-        if (first instanceof double[][] firstValues
-                && second instanceof double[][] secondValues) {
-            result = distanceDouble(
-                    firstValues,
-                    secondValues,
-                    windowSize
-            );
-        } else if (first instanceof float[][] firstValues
-                && second instanceof float[][] secondValues) {
-            result = distanceFloat(
-                    firstValues,
-                    secondValues,
-                    windowSize
-            );
-        } else {
-            throw unsupportedPair(first, second);
-        }
-
-        return result > bestSoFar
-                ? Double.POSITIVE_INFINITY
-                : result;
+        return distance(first, second, bestSoFar, windowSize, null);
     }
 
     /**
-     * Returns whether every corresponding component has an available
-     * DTW-AROW alignment under the requested window.
+     * Computes the sum of independent DTW-AROW distances over selected
+     * dimensions.
+     *
+     * @param first first matching {@code double[][]} or {@code float[][]} input
+     * @param second second input with the same primitive matrix type
+     * @param bestSoFar nonnegative aggregate ordinary-distance threshold
+     * @param windowSize {@code -1} for unconstrained DTW-AROW, otherwise an
+     *                   explicit nonnegative Sakoe-Chiba radius
+     * @param selectedDimensions selected outer matrix rows, or null for all
+     * @return summed component distance, or positive infinity if unavailable or
+     *         unable to beat {@code bestSoFar}
      */
-    public synchronized boolean isComputable(
+    public double distance(
             Object first,
             Object second,
-            int windowSize
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
     ) {
+        validateBestSoFar(bestSoFar);
         validateWindow(windowSize);
+
         if (first instanceof double[][] firstValues
                 && second instanceof double[][] secondValues) {
-            validateDoubleDimensions(firstValues, secondValues);
-            if (firstValues.length == 0) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    selectedDimensions
+            );
+        }
+
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    selectedDimensions
+            );
+        }
+
+        throw unsupportedPair(first, second);
+    }
+
+    /**
+     * Returns whether every selected component has an available DTW-AROW
+     * alignment under the requested window.
+     */
+    public boolean isComputable(
+            Object first,
+            Object second,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        validateWindow(windowSize);
+
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            validateDimensions(firstValues, secondValues);
+            int count = selectedCount(
+                    firstValues.length,
+                    selectedDimensions
+            );
+            if (count == 0) {
                 return false;
             }
-            for (int dimension = 0;
-                    dimension < firstValues.length;
-                    dimension++) {
-                if (Double.isInfinite(
-                        dtwArow.distance(
-                                firstValues[dimension],
-                                secondValues[dimension],
-                                Double.POSITIVE_INFINITY,
-                                windowSize
-                        )
-                )) {
+
+            for (int position = 0; position < count; position++) {
+                int dimension = selectedDimension(
+                        position,
+                        selectedDimensions
+                );
+                if (Double.isInfinite(dtwArow.distance(
+                        firstValues[dimension],
+                        secondValues[dimension],
+                        Double.POSITIVE_INFINITY,
+                        windowSize
+                ))) {
                     return false;
                 }
             }
@@ -144,21 +169,26 @@ public class DTWAROW_I implements Serializable {
 
         if (first instanceof float[][] firstValues
                 && second instanceof float[][] secondValues) {
-            validateFloatDimensions(firstValues, secondValues);
-            if (firstValues.length == 0) {
+            validateDimensions(firstValues, secondValues);
+            int count = selectedCount(
+                    firstValues.length,
+                    selectedDimensions
+            );
+            if (count == 0) {
                 return false;
             }
-            for (int dimension = 0;
-                    dimension < firstValues.length;
-                    dimension++) {
-                if (Double.isInfinite(
-                        dtwArow.distance(
-                                firstValues[dimension],
-                                secondValues[dimension],
-                                Double.POSITIVE_INFINITY,
-                                windowSize
-                        )
-                )) {
+
+            for (int position = 0; position < count; position++) {
+                int dimension = selectedDimension(
+                        position,
+                        selectedDimensions
+                );
+                if (Double.isInfinite(dtwArow.distance(
+                        firstValues[dimension],
+                        secondValues[dimension],
+                        Double.POSITIVE_INFINITY,
+                        windowSize
+                ))) {
                     return false;
                 }
             }
@@ -168,80 +198,136 @@ public class DTWAROW_I implements Serializable {
         throw unsupportedPair(first, second);
     }
 
-    /**
-     * Convenience computability check using an unconstrained window.
-     */
-    public synchronized boolean isComputable(
+    /** Checks all dimensions using the requested window. */
+    public boolean isComputable(
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        return isComputable(first, second, windowSize, null);
+    }
+
+    /** Checks all dimensions using unconstrained DTW-AROW. */
+    public boolean isComputable(
             Object first,
             Object second
     ) {
-        return isComputable(first, second, -1);
+        return isComputable(first, second, -1, null);
     }
 
-    private double distanceDouble(
+    private double distance(
             double[][] first,
             double[][] second,
-            int windowSize
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
     ) {
-        validateDoubleDimensions(first, second);
-        if (first.length == 0) {
+        validateDimensions(first, second);
+        int count = selectedCount(first.length, selectedDimensions);
+        if (count == 0) {
             return Double.POSITIVE_INFINITY;
         }
 
-        double totalDistance = 0.0;
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
+        double total = 0.0;
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimension(
+                    position,
+                    selectedDimensions
+            );
             double componentDistance = dtwArow.distance(
                     first[dimension],
                     second[dimension],
-                    Double.POSITIVE_INFINITY,
+                    remainingBudget(bestSoFar, total),
                     windowSize
             );
+
             if (Double.isInfinite(componentDistance)) {
                 return Double.POSITIVE_INFINITY;
             }
-            totalDistance += componentDistance;
+
+            total += componentDistance;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
         }
-        return totalDistance / first.length;
+
+        return total;
     }
 
-    private double distanceFloat(
+    private double distance(
             float[][] first,
             float[][] second,
-            int windowSize
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
     ) {
-        validateFloatDimensions(first, second);
-        if (first.length == 0) {
+        validateDimensions(first, second);
+        int count = selectedCount(first.length, selectedDimensions);
+        if (count == 0) {
             return Double.POSITIVE_INFINITY;
         }
 
-        double totalDistance = 0.0;
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
+        double total = 0.0;
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimension(
+                    position,
+                    selectedDimensions
+            );
             double componentDistance = dtwArow.distance(
                     first[dimension],
                     second[dimension],
-                    Double.POSITIVE_INFINITY,
+                    remainingBudget(bestSoFar, total),
                     windowSize
             );
+
             if (Double.isInfinite(componentDistance)) {
                 return Double.POSITIVE_INFINITY;
             }
-            totalDistance += componentDistance;
+
+            total += componentDistance;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
         }
-        return totalDistance / first.length;
+
+        return total;
     }
 
-    private static void validateDoubleDimensions(
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    private static int selectedCount(
+            int dimensionCount,
+            int[] selectedDimensions
+    ) {
+        return selectedDimensions == null
+                ? dimensionCount
+                : selectedDimensions.length;
+    }
+
+    private static int selectedDimension(
+            int position,
+            int[] selectedDimensions
+    ) {
+        return selectedDimensions == null
+                ? position
+                : selectedDimensions[position];
+    }
+
+    private static void validateDimensions(
             double[][] first,
             double[][] second
     ) {
         MissingDistanceTools.validateSameRows(first, second);
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
+        for (int dimension = 0; dimension < first.length; dimension++) {
             Objects.requireNonNull(
                     first[dimension],
                     nullDimensionMessage("first", dimension)
@@ -253,14 +339,12 @@ public class DTWAROW_I implements Serializable {
         }
     }
 
-    private static void validateFloatDimensions(
+    private static void validateDimensions(
             float[][] first,
             float[][] second
     ) {
         MissingDistanceTools.validateSameRows(first, second);
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
+        for (int dimension = 0; dimension < first.length; dimension++) {
             Objects.requireNonNull(
                     first[dimension],
                     nullDimensionMessage("first", dimension)
@@ -272,7 +356,6 @@ public class DTWAROW_I implements Serializable {
         }
     }
 
-    /** Delegates random window selection to the univariate distance. */
     public int get_random_window(
             ObjectDataset dataset,
             Random random
@@ -289,15 +372,11 @@ public class DTWAROW_I implements Serializable {
         );
     }
 
-    private static void validateBestSoFar(
-            double bestSoFar
-    ) {
+    private static void validateBestSoFar(double bestSoFar) {
         if (Double.isNaN(bestSoFar) || bestSoFar < 0.0) {
             throw new IllegalArgumentException(
                     "DTWAROW_I bestSoFar must be nonnegative and not NaN. "
-                            + "Received: "
-                            + bestSoFar
-                            + "."
+                            + "Received: " + bestSoFar + "."
             );
         }
     }
@@ -314,11 +393,9 @@ public class DTWAROW_I implements Serializable {
             String seriesName,
             int dimension
     ) {
-        return "The "
-                + seriesName
+        return "The " + seriesName
                 + " series contains a null row at dimension "
-                + dimension
-                + ".";
+                + dimension + ".";
     }
 
     private static IllegalArgumentException unsupportedPair(
@@ -327,18 +404,12 @@ public class DTWAROW_I implements Serializable {
     ) {
         return new IllegalArgumentException(
                 "DTWAROW_I requires matching double[][] or float[][] inputs. "
-                        + "Received "
-                        + typeName(first)
-                        + " and "
-                        + typeName(second)
-                        + ". Mixed float/double pairs and boxed numeric arrays "
-                        + "are not supported."
+                        + "Received " + typeName(first) + " and "
+                        + typeName(second) + "."
         );
     }
 
     private static String typeName(Object value) {
-        return value == null
-                ? "null"
-                : value.getClass().getTypeName();
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

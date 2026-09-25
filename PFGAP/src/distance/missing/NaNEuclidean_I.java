@@ -2,30 +2,26 @@ package distance.missing;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Objects;
 
 /**
- * Independent missing-value-aware Euclidean distance for primitive
- * dimension-major multivariate series.
+ * Independent multivariate missing-value-aware Euclidean distance.
  *
- * <p>Each dimension in the first series is compared with the corresponding
- * dimension in the second series using {@link NaNEuclidean}. The component
- * distances are then averaged across dimensions.</p>
+ * <p>Each selected outer dimension is compared independently with
+ * {@link NaNEuclidean}, and the resulting ordinary component distances are
+ * summed. Selected dimension indices are never forwarded to the univariate
+ * evaluator or interpreted as temporal indices.</p>
  *
- * <p>Supported input pairs are matching {@code double[][]} arrays or matching
- * {@code float[][]} arrays. Missing numeric values use primitive NaN. Mixed
- * float/double pairs, boxed numeric arrays, and generic numeric object arrays
- * are not supported.</p>
+ * <p>Matching {@code double[][]} and matching {@code float[][]} inputs are
+ * supported without slicing or conversion. If any selected component has no
+ * jointly observed temporal position, the independent distance is unavailable.
+ * A null selected-dimension array evaluates every dimension.</p>
  *
- * <p>If either series contains no dimensions, or if any corresponding
- * dimension has no jointly observed positions, the result is positive
- * infinity. The best-so-far threshold is applied only after the final average
- * is computed, because an individual component may exceed the final average
- * threshold without proving that the completed average will do so.</p>
- *
- * <p>Methods remain synchronized pending the broader distance ownership and
- * concurrency audit.</p>
+ * <p>The class contains no mutable calculation state and is safe for concurrent
+ * use. The univariate evaluator automatically uses its scalar or Vector API
+ * kernel according to {@code AppContext.useVectorApi}.</p>
  */
-public class NaNEuclidean_I implements Serializable {
+public final class NaNEuclidean_I implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
@@ -33,65 +29,81 @@ public class NaNEuclidean_I implements Serializable {
     private final NaNEuclidean nanEuclidean;
 
     public NaNEuclidean_I() {
-        this.nanEuclidean = new NaNEuclidean();
+        nanEuclidean = new NaNEuclidean();
     }
 
-    /** Computes independent NaN-Euclidean distance. */
-    public synchronized double distance(
-            Object first,
-            Object second
-    ) {
+    public double distance(Object first, Object second) {
         return distance(
                 first,
                 second,
-                Double.POSITIVE_INFINITY
+                Double.POSITIVE_INFINITY,
+                null
         );
     }
 
-    /**
-     * Computes the average NaN-Euclidean distance across corresponding
-     * dimensions.
-     */
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second,
             double bestSoFar
     ) {
-        validateBestSoFar(bestSoFar);
-
-        double result;
-        if (first instanceof double[][] firstValues
-                && second instanceof double[][] secondValues) {
-            result = distanceDouble(firstValues, secondValues);
-        } else if (first instanceof float[][] firstValues
-                && second instanceof float[][] secondValues) {
-            result = distanceFloat(firstValues, secondValues);
-        } else {
-            throw unsupportedPair(first, second);
-        }
-
-        return result > bestSoFar
-                ? Double.POSITIVE_INFINITY
-                : result;
+        return distance(first, second, bestSoFar, null);
     }
 
-    /**
-     * Returns whether every corresponding dimension has at least one jointly
-     * observed position.
-     */
-    public synchronized boolean isComputable(
+    public double distance(
             Object first,
-            Object second
+            Object second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        validateBestSoFar(bestSoFar);
+
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
+        }
+
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
+        }
+
+        throw unsupportedPair(first, second);
+    }
+
+    public boolean isComputable(Object first, Object second) {
+        return isComputable(first, second, null);
+    }
+
+    public boolean isComputable(
+            Object first,
+            Object second,
+            int[] selectedDimensions
     ) {
         if (first instanceof double[][] firstValues
                 && second instanceof double[][] secondValues) {
-            validateDoubleRows(firstValues, secondValues);
-            if (firstValues.length == 0) {
+            validateRows(firstValues, secondValues);
+            int count = selectedCount(
+                    firstValues.length,
+                    selectedDimensions
+            );
+            if (count == 0) {
                 return false;
             }
-            for (int dimension = 0;
-                    dimension < firstValues.length;
-                    dimension++) {
+            for (int position = 0; position < count; position++) {
+                int dimension = selectedDimension(
+                        position,
+                        selectedDimensions
+                );
                 if (!nanEuclidean.isComputable(
                         firstValues[dimension],
                         secondValues[dimension]
@@ -104,13 +116,19 @@ public class NaNEuclidean_I implements Serializable {
 
         if (first instanceof float[][] firstValues
                 && second instanceof float[][] secondValues) {
-            validateFloatRows(firstValues, secondValues);
-            if (firstValues.length == 0) {
+            validateRows(firstValues, secondValues);
+            int count = selectedCount(
+                    firstValues.length,
+                    selectedDimensions
+            );
+            if (count == 0) {
                 return false;
             }
-            for (int dimension = 0;
-                    dimension < firstValues.length;
-                    dimension++) {
+            for (int position = 0; position < count; position++) {
+                int dimension = selectedDimension(
+                        position,
+                        selectedDimensions
+                );
                 if (!nanEuclidean.isComputable(
                         firstValues[dimension],
                         secondValues[dimension]
@@ -124,70 +142,117 @@ public class NaNEuclidean_I implements Serializable {
         throw unsupportedPair(first, second);
     }
 
-    private double distanceDouble(
+    private double distance(
             double[][] first,
-            double[][] second
+            double[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
     ) {
-        validateDoubleRows(first, second);
-        if (first.length == 0) {
+        validateRows(first, second);
+        int count = selectedCount(first.length, selectedDimensions);
+        if (count == 0) {
             return Double.POSITIVE_INFINITY;
         }
 
-        double totalDistance = 0.0;
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
-            double componentDistance = nanEuclidean.distance(
+        double total = 0.0;
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimension(
+                    position,
+                    selectedDimensions
+            );
+            double component = nanEuclidean.distance(
                     first[dimension],
                     second[dimension],
-                    Double.POSITIVE_INFINITY
+                    remainingBudget(bestSoFar, total)
             );
-            if (Double.isInfinite(componentDistance)) {
+            if (Double.isInfinite(component)) {
                 return Double.POSITIVE_INFINITY;
             }
-            totalDistance += componentDistance;
+            total += component;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
         }
-        return totalDistance / first.length;
+        return total;
     }
 
-    private double distanceFloat(
+    private double distance(
             float[][] first,
-            float[][] second
+            float[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
     ) {
-        validateFloatRows(first, second);
-        if (first.length == 0) {
+        validateRows(first, second);
+        int count = selectedCount(first.length, selectedDimensions);
+        if (count == 0) {
             return Double.POSITIVE_INFINITY;
         }
 
-        double totalDistance = 0.0;
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
-            double componentDistance = nanEuclidean.distance(
+        double total = 0.0;
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimension(
+                    position,
+                    selectedDimensions
+            );
+            double component = nanEuclidean.distance(
                     first[dimension],
                     second[dimension],
-                    Double.POSITIVE_INFINITY
+                    remainingBudget(bestSoFar, total)
             );
-            if (Double.isInfinite(componentDistance)) {
+            if (Double.isInfinite(component)) {
                 return Double.POSITIVE_INFINITY;
             }
-            totalDistance += componentDistance;
+            total += component;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
         }
-        return totalDistance / first.length;
+        return total;
     }
 
-    private static void validateDoubleRows(
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    private static int selectedCount(
+            int dimensions,
+            int[] selectedDimensions
+    ) {
+        return selectedDimensions == null
+                ? dimensions
+                : selectedDimensions.length;
+    }
+
+    private static int selectedDimension(
+            int position,
+            int[] selectedDimensions
+    ) {
+        return selectedDimensions == null
+                ? position
+                : selectedDimensions[position];
+    }
+
+    private static void validateRows(
             double[][] first,
             double[][] second
     ) {
         MissingDistanceTools.validateSameRows(first, second);
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
-            if (first[dimension] == null
-                    || second[dimension] == null) {
-                throw nullDimension(dimension);
-            }
+        for (int dimension = 0; dimension < first.length; dimension++) {
+            Objects.requireNonNull(
+                    first[dimension],
+                    nullDimensionMessage("first", dimension)
+            );
+            Objects.requireNonNull(
+                    second[dimension],
+                    nullDimensionMessage("second", dimension)
+            );
             MissingDistanceTools.validateSameLength(
                     first[dimension],
                     second[dimension]
@@ -195,18 +260,20 @@ public class NaNEuclidean_I implements Serializable {
         }
     }
 
-    private static void validateFloatRows(
+    private static void validateRows(
             float[][] first,
             float[][] second
     ) {
         MissingDistanceTools.validateSameRows(first, second);
-        for (int dimension = 0;
-                dimension < first.length;
-                dimension++) {
-            if (first[dimension] == null
-                    || second[dimension] == null) {
-                throw nullDimension(dimension);
-            }
+        for (int dimension = 0; dimension < first.length; dimension++) {
+            Objects.requireNonNull(
+                    first[dimension],
+                    nullDimensionMessage("first", dimension)
+            );
+            Objects.requireNonNull(
+                    second[dimension],
+                    nullDimensionMessage("second", dimension)
+            );
             MissingDistanceTools.validateSameLength(
                     first[dimension],
                     second[dimension]
@@ -214,27 +281,22 @@ public class NaNEuclidean_I implements Serializable {
         }
     }
 
-    private static void validateBestSoFar(
-            double bestSoFar
-    ) {
+    private static void validateBestSoFar(double bestSoFar) {
         if (Double.isNaN(bestSoFar) || bestSoFar < 0.0) {
             throw new IllegalArgumentException(
                     "NaNEuclidean_I bestSoFar must be nonnegative and not "
-                            + "NaN. Received: "
-                            + bestSoFar
-                            + "."
+                            + "NaN. Received: " + bestSoFar + "."
             );
         }
     }
 
-    private static IllegalArgumentException nullDimension(
+    private static String nullDimensionMessage(
+            String seriesName,
             int dimension
     ) {
-        return new IllegalArgumentException(
-                "NaNEuclidean_I encountered a null row at dimension "
-                        + dimension
-                        + "."
-        );
+        return "The " + seriesName
+                + " series contains a null row at dimension "
+                + dimension + ".";
     }
 
     private static IllegalArgumentException unsupportedPair(
@@ -243,18 +305,12 @@ public class NaNEuclidean_I implements Serializable {
     ) {
         return new IllegalArgumentException(
                 "NaNEuclidean_I requires matching double[][] or float[][] "
-                        + "inputs. Received "
-                        + typeName(first)
-                        + " and "
-                        + typeName(second)
-                        + ". Mixed float/double pairs and boxed numeric "
-                        + "arrays are not supported."
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
         );
     }
 
     private static String typeName(Object value) {
-        return value == null
-                ? "null"
-                : value.getClass().getTypeName();
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

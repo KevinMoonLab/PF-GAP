@@ -167,6 +167,7 @@ public class AppContext {
 	 * >1 enables bounded parallel execution with the specified worker count.
 	 */
 	public static int num_workers = 1;
+	public static boolean useVectorApi = false;
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;

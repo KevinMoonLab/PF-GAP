@@ -4,482 +4,558 @@ import core.AppContext;
 import core.contracts.ObjectDataset;
 import util.Pair;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 
 /**
- * Dependent multivariate generalization of DTW-AROW.
+ * Dependent multivariate extension of DTW-AROW.
  *
- * This class extends the univariate DTW-AROW idea to multivariate time series
- * using a single shared warping path across dimensions, consistent with the
- * dependent multivariate DTW convention used elsewhere in PF-GAP.
+ * <p>This is a research extension of the published univariate DTW-AROW
+ * algorithm. It preserves the essential AROW principles while using one shared
+ * warping path across selected dimensions:</p>
  *
- * Expected multivariate shape:
+ * <ul>
+ *     <li>A time-pair comparison is computable when at least one selected
+ *         dimension is jointly observed.</li>
+ *     <li>A computable local cost is the scaled squared NaN-Euclidean cost
+ *         {@code selectedCount / jointlyObservedCount * squaredSum}.</li>
+ *     <li>An incomputable comparison has local cost zero.</li>
+ *     <li>Horizontal and vertical transitions are prohibited when either
+ *         endpoint comparison is incomputable.</li>
+ *     <li>Diagonal transitions remain available through incomputable pairs.</li>
+ *     <li>The published zero-boundary and availability-correction principles
+ *         are retained.</li>
+ * </ul>
  *
- *     series[dimension][time]
+ * <p>Matching {@code double[][]}, {@code float[][]}, and numeric
+ * {@code Object[][]} inputs are supported. Primitive matrices use NaN for
+ * missingness; object matrices additionally accept null. Object matrices are
+ * retained as a compatibility path for missing-data imputation and interop,
+ * while primitive matrices remain the preferred numerical representation.</p>
  *
- * Supported input types:
+ * <p>Distance-only evaluation uses two cost rows and two comparability rows.
+ * Path evaluation additionally stores one predecessor byte per matrix cell.
+ * Each local cost and comparability result is computed once per cell and then
+ * reused for transition checks. A finite {@code bestSoFar} is converted to the
+ * exact cumulative-cost cutoff implied by the availability correction.</p>
  *
- *     double[][]
- *     Double[][]
- *     Object[][] containing numeric values
- *
- * Missing-value conventions:
- *
- *     null
- *     Double.NaN
- *     Float.NaN
- *
- * Multivariate local cost:
- *
- *     delta_ext_D(x_i, y_j) =
- *
- *         0
- *             if the vector comparison is not computable
- *
- *         squared NaN-Euclidean distance between x_i and y_j
- *             otherwise
- *
- * A vector comparison is computable when there is at least one dimension d
- * such that both x[d][i] and y[d][j] are present numeric values.
- *
- * Horizontal and vertical transition restrictions:
- *
- *     A horizontal move into (i,j), from (i,j-1), is forbidden if either
- *     endpoint comparison is not computable:
- *
- *         comparable(x_i, y_j)     must be true
- *         comparable(x_i, y_{j-1}) must be true
- *
- *     A vertical move into (i,j), from (i-1,j), is forbidden if either
- *     endpoint comparison is not computable:
- *
- *         comparable(x_i,   y_j) must be true
- *         comparable(x_{i-1}, y_j) must be true
- *
- * Diagonal moves remain allowed through incomputable comparisons, with local
- * cost 0, matching the spirit of scalar DTW-AROW.
- *
- * This is a principled dependent multivariate generalization of DTW-AROW,
- * not a verbatim scalar algorithm.
+ * <p>A window of {@code -1} is unconstrained. A nonnegative window is an
+ * explicit additional Sakoe-Chiba constraint and is never silently widened.</p>
  */
-public class DTWAROW_D implements Serializable {
+public final class DTWAROW_D implements Serializable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private static final double INF = Double.POSITIVE_INFINITY;
+    private static final byte STEP_NONE = 0;
+    private static final byte STEP_DIAGONAL = 1;
+    private static final byte STEP_HORIZONTAL = 2;
+    private static final byte STEP_VERTICAL = 3;
 
     public DTWAROW_D() {
     }
 
-    /**
-     * Convenience overload for reflective calls expecting distance(Object,Object).
-     */
-    public synchronized double distance(Object Series1, Object Series2) {
-        return distance(Series1, Series2, Double.POSITIVE_INFINITY, -1);
+    public double distance(Object first, Object second) {
+        return distance(first, second, Double.POSITIVE_INFINITY, -1, null);
     }
 
-    /**
-     * Convenience overload using no explicit window constraint.
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf) {
-        return distance(Series1, Series2, bsf, -1);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        return distance(first, second, bestSoFar, -1, null);
     }
 
-    /**
-     * Computes dependent multivariate DTW-AROW distance.
-     *
-     * @param Series1 Object expected to be double[][], Double[][], or numeric Object[][]
-     * @param Series2 Object expected to be double[][], Double[][], or numeric Object[][]
-     * @param bsf best-so-far threshold
-     * @param windowSize Sakoe-Chiba window size; -1 means unconstrained
-     * @return dependent multivariate DTW-AROW distance
-     */
-    public synchronized double distance(
-            Object Series1,
-            Object Series2,
-            double bsf,
-            int windowSize) {
-
-        MultiSeriesAccessor x = makeAccessor(Series1);
-        MultiSeriesAccessor y = makeAccessor(Series2);
-
-        return compute(x, y, bsf, windowSize, false).distance;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        return distance(first, second, bestSoFar, windowSize, null);
     }
 
-    /**
-     * Computes the optimal dependent multivariate DTW-AROW alignment path.
-     *
-     * Path entries are zero-based time-index pairs into Series1 and Series2.
-     */
-    public synchronized List<Pair<Integer, Integer>> getAlignmentPath(
-            Object Series1,
-            Object Series2,
-            int windowSize) {
-
-        MultiSeriesAccessor x = makeAccessor(Series1);
-        MultiSeriesAccessor y = makeAccessor(Series2);
-
-        return compute(
-                x,
-                y,
-                Double.POSITIVE_INFINITY,
-                windowSize,
-                true
-        ).path;
-    }
-
-    private DTWResult compute(
-            MultiSeriesAccessor x,
-            MultiSeriesAccessor y,
-            double bsf,
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
             int windowSize,
-            boolean keepPath) {
-
-        validateCompatibleSeries(x, y);
-
-        int lenX = x.length();
-        int lenY = y.length();
-
-        if (lenX == 0 || lenY == 0 || x.dimensions() == 0) {
-            return new DTWResult(INF, Collections.emptyList());
-        }
-
-        int availableX = x.countAvailableTimePoints();
-        int availableY = y.countAvailableTimePoints();
-
-        if (availableX + availableY == 0) {
-            return new DTWResult(INF, Collections.emptyList());
-        }
-
-        double gamma = ((double) (lenX + lenY)) / (availableX + availableY);
-
-        int window = normalizeWindow(windowSize, lenX, lenY);
-
-        double[][] cost = new double[lenX + 1][lenY + 1];
-        int[][] step = keepPath ? new int[lenX + 1][lenY + 1] : null;
-
-        initializeCostMatrix(cost, lenX, lenY);
-
-        for (int i = 1; i <= lenX; i++) {
-
-            int jStart = Math.max(1, i - window);
-            int jStop = Math.min(lenY, i + window);
-
-            for (int j = jStart; j <= jStop; j++) {
-
-                int xi = i - 1;
-                int yj = j - 1;
-
-                double localCost = extendedSquaredDistanceAt(x, xi, y, yj);
-
-                double diagonal = cost[i - 1][j - 1];
-
-                double horizontal = safeAdd(
-                        cost[i][j - 1],
-                        invalidHorizontalStep(x, xi, y, yj) ? INF : 0.0
-                );
-
-                double vertical = safeAdd(
-                        cost[i - 1][j],
-                        invalidVerticalStep(x, xi, y, yj) ? INF : 0.0
-                );
-
-                double minPrev = diagonal;
-                int bestStep = 1; // diagonal
-
-                if (horizontal < minPrev) {
-                    minPrev = horizontal;
-                    bestStep = 2; // horizontal
-                }
-
-                if (vertical < minPrev) {
-                    minPrev = vertical;
-                    bestStep = 3; // vertical
-                }
-
-                cost[i][j] = safeAdd(localCost, minPrev);
-
-                if (keepPath) {
-                    step[i][j] = bestStep;
-                }
-            }
-        }
-
-        double finalCost = cost[lenX][lenY];
-
-        if (Double.isInfinite(finalCost)) {
-            return new DTWResult(INF, Collections.emptyList());
-        }
-
-        double distance = Math.sqrt(gamma * finalCost);
-
-        if (distance > bsf) {
-            return new DTWResult(INF, Collections.emptyList());
-        }
-
-        List<Pair<Integer, Integer>> path = keepPath
-                ? backtrack(step, lenX, lenY)
-                : Collections.emptyList();
-
-        return new DTWResult(distance, path);
-    }
-
-    private void validateCompatibleSeries(
-            MultiSeriesAccessor x,
-            MultiSeriesAccessor y) {
-
-        if (x.dimensions() != y.dimensions()) {
-            throw new IllegalArgumentException(
-                    "Both multivariate series must have the same number of dimensions."
-            );
-        }
-    }
-
-    private int normalizeWindow(int windowSize, int lenX, int lenY) {
-
-        if (windowSize == -1) {
-            return Math.max(lenX, lenY);
-        }
-
-        if (windowSize < 0) {
-            throw new IllegalArgumentException(
-                    "windowSize must be -1 or a non-negative integer."
-            );
-        }
-
-        return windowSize;
-    }
-
-    private void initializeCostMatrix(
-            double[][] cost,
-            int lenX,
-            int lenY) {
-
-        for (int i = 0; i <= lenX; i++) {
-            for (int j = 0; j <= lenY; j++) {
-                cost[i][j] = INF;
-            }
-        }
-
-        /*
-         * DTW-AROW boundary convention from the algorithm:
-         *
-         *     c[i][0] = 0
-         *     c[0][j] = 0
-         *
-         * The zeroth row and zeroth column are DP boundaries, not observed
-         * time points.
-         */
-        for (int i = 0; i <= lenX; i++) {
-            cost[i][0] = 0.0;
-        }
-
-        for (int j = 0; j <= lenY; j++) {
-            cost[0][j] = 0.0;
-        }
-    }
-
-    /**
-     * Multivariate delta_ext.
-     *
-     * Returns 0.0 when the vector comparison is not computable. Otherwise
-     * returns the scaled squared NaN-Euclidean distance across dimensions.
-     */
-    private double extendedSquaredDistanceAt(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        double squared = squaredNaNEuclideanAt(x, xi, y, yj);
-
-        if (Double.isInfinite(squared)) {
-            return 0.0;
-        }
-
-        return squared;
-    }
-
-    /**
-     * A horizontal move into (xi,yj) comes from (xi,yj-1).
-     *
-     * It is illegal if either endpoint vector comparison is not computable:
-     *
-     *     comparable(xi, yj)
-     *     comparable(xi, yj - 1)
-     */
-    private boolean invalidHorizontalStep(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        return !comparableIfInRange(x, xi, y, yj)
-                || !comparableIfInRange(x, xi, y, yj - 1);
-    }
-
-    /**
-     * A vertical move into (xi,yj) comes from (xi-1,yj).
-     *
-     * It is illegal if either endpoint vector comparison is not computable:
-     *
-     *     comparable(xi, yj)
-     *     comparable(xi - 1, yj)
-     */
-    private boolean invalidVerticalStep(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        return !comparableIfInRange(x, xi, y, yj)
-                || !comparableIfInRange(x, xi - 1, y, yj);
-    }
-
-    /**
-     * DP boundary indices are treated as valid boundaries. Real time-index
-     * pairs must be computable.
-     */
-    private boolean comparableIfInRange(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        if (xi < 0 || xi >= x.length()) {
-            return true;
-        }
-
-        if (yj < 0 || yj >= y.length()) {
-            return true;
-        }
-
-        return comparableAt(x, xi, y, yj);
-    }
-
-    /**
-     * A vector comparison is computable if the scaled squared NaN-Euclidean
-     * distance is finite, which occurs when at least one dimension is jointly
-     * observed and numeric.
-     */
-    private boolean comparableAt(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        return !Double.isInfinite(squaredNaNEuclideanAt(x, xi, y, yj));
-    }
-
-    /**
-     * Computes scaled squared NaN-Euclidean distance between two multivariate
-     * time-point vectors:
-     *
-     *     (D / D_obs) * sum_d (x_d - y_d)^2
-     *
-     * where the sum is over dimensions where both values are observed.
-     *
-     * Returns POSITIVE_INFINITY if no jointly observed numeric dimensions
-     * exist.
-     */
-    private double squaredNaNEuclideanAt(
-            MultiSeriesAccessor x,
-            int xi,
-            MultiSeriesAccessor y,
-            int yj) {
-
-        int dims = x.dimensions();
-
-        double sum = 0.0;
-        int observed = 0;
-
-        for (int d = 0; d < dims; d++) {
-
-            if (x.isMissing(d, xi) || y.isMissing(d, yj)) {
-                continue;
-            }
-
-            double xv = x.value(d, xi);
-            double yv = y.value(d, yj);
-
-            double diff = xv - yv;
-            sum += diff * diff;
-            observed++;
-        }
-
-        if (observed == 0) {
-            return INF;
-        }
-
-        return ((double) dims / observed) * sum;
-    }
-
-    private double safeAdd(double a, double b) {
-
-        if (Double.isInfinite(a) || Double.isInfinite(b)) {
-            return INF;
-        }
-
-        return a + b;
-    }
-
-    private List<Pair<Integer, Integer>> backtrack(
-            int[][] step,
-            int lenX,
-            int lenY) {
-
-        List<Pair<Integer, Integer>> path = new ArrayList<>();
-
-        int i = lenX;
-        int j = lenY;
-
-        while (i > 0 && j > 0) {
-
-            path.add(0, new Pair<>(i - 1, j - 1));
-
-            int s = step[i][j];
-
-            if (s == 1) {
-                i--;
-                j--;
-            } else if (s == 2) {
-                j--;
-            } else if (s == 3) {
-                i--;
-            } else {
-                break;
-            }
-        }
-
-        return path;
-    }
-
-    private MultiSeriesAccessor makeAccessor(Object series) {
-
-        if (series instanceof double[][]) {
-            return new PrimitiveMultiSeriesAccessor((double[][]) series);
-        }
-
-        if (series instanceof Object[][]) {
-            return new ObjectMultiSeriesAccessor((Object[][]) series);
-        }
-
-        throw new IllegalArgumentException(
-                "DTWAROW_D supports double[][], Double[][], or numeric Object[][] inputs."
+            int[] selectedDimensions
+    ) {
+        validateBestSoFar(bestSoFar);
+        validateWindow(windowSize);
+        AccessorPair pair = makeMatchingAccessors(first, second);
+        return computeDistance(
+                pair.first(),
+                pair.second(),
+                bestSoFar,
+                windowSize,
+                selectedDimensions
         );
     }
 
-    public int get_random_window(ObjectDataset d, Random r) {
+    public List<Pair<Integer, Integer>> getAlignmentPath(
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        return getAlignmentPath(first, second, windowSize, null);
+    }
+
+    public List<Pair<Integer, Integer>> getAlignmentPath(
+            Object first,
+            Object second,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        validateWindow(windowSize);
+        AccessorPair pair = makeMatchingAccessors(first, second);
+        return computePath(
+                pair.first(),
+                pair.second(),
+                windowSize,
+                selectedDimensions
+        );
+    }
+
+    private static double computeDistance(
+            MultiSeriesAccessor first,
+            MultiSeriesAccessor second,
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        Preparation preparation = prepare(
+                first,
+                second,
+                windowSize,
+                selectedDimensions
+        );
+        if (!preparation.available()) {
+            return INF;
+        }
+
+        int firstLength = first.length();
+        int secondLength = second.length();
+        int window = preparation.window();
+        int selectedCount = preparation.selectedCount();
+        double gamma = preparation.gamma();
+        double rawCutoff = rawCutoff(bestSoFar, gamma);
+
+        double[] previousCost = new double[secondLength + 1];
+        double[] currentCost = new double[secondLength + 1];
+        boolean[] previousComparable = new boolean[secondLength + 1];
+        boolean[] currentComparable = new boolean[secondLength + 1];
+
+        // Published AROW boundary convention: C[i,0] = C[0,j] = 0.
+        Arrays.fill(previousCost, 0.0);
+
+        for (int firstDp = 1; firstDp <= firstLength; firstDp++) {
+            Arrays.fill(currentCost, INF);
+            Arrays.fill(currentComparable, false);
+            currentCost[0] = 0.0;
+
+            int secondStart = Math.max(1, firstDp - window);
+            int secondStop = Math.min(secondLength, firstDp + window);
+            int firstIndex = firstDp - 1;
+
+            for (int secondDp = secondStart;
+                 secondDp <= secondStop;
+                 secondDp++) {
+                int secondIndex = secondDp - 1;
+                LocalComparison local = localComparison(
+                        first,
+                        firstIndex,
+                        second,
+                        secondIndex,
+                        selectedDimensions,
+                        selectedCount
+                );
+                currentComparable[secondDp] = local.comparable();
+
+                double diagonal = previousCost[secondDp - 1];
+                double horizontal = local.comparable()
+                        && (secondIndex == 0
+                        || currentComparable[secondDp - 1])
+                        ? currentCost[secondDp - 1]
+                        : INF;
+                double vertical = local.comparable()
+                        && (firstIndex == 0
+                        || previousComparable[secondDp])
+                        ? previousCost[secondDp]
+                        : INF;
+
+                double cumulative = safeAdd(
+                        local.cost(),
+                        minimum(diagonal, horizontal, vertical)
+                );
+                currentCost[secondDp] = cumulative > rawCutoff
+                        ? INF
+                        : cumulative;
+            }
+
+            double[] temporaryCost = previousCost;
+            previousCost = currentCost;
+            currentCost = temporaryCost;
+
+            boolean[] temporaryComparable = previousComparable;
+            previousComparable = currentComparable;
+            currentComparable = temporaryComparable;
+        }
+
+        double finalCost = previousCost[secondLength];
+        if (Double.isInfinite(finalCost)) {
+            return INF;
+        }
+        return Math.sqrt(gamma * finalCost);
+    }
+
+    private static List<Pair<Integer, Integer>> computePath(
+            MultiSeriesAccessor first,
+            MultiSeriesAccessor second,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        Preparation preparation = prepare(
+                first,
+                second,
+                windowSize,
+                selectedDimensions
+        );
+        if (!preparation.available()) {
+            return Collections.emptyList();
+        }
+
+        int firstLength = first.length();
+        int secondLength = second.length();
+        int window = preparation.window();
+        int selectedCount = preparation.selectedCount();
+
+        double[] previousCost = new double[secondLength + 1];
+        double[] currentCost = new double[secondLength + 1];
+        boolean[] previousComparable = new boolean[secondLength + 1];
+        boolean[] currentComparable = new boolean[secondLength + 1];
+        byte[][] steps = new byte[firstLength + 1][secondLength + 1];
+
+        Arrays.fill(previousCost, 0.0);
+
+        for (int firstDp = 1; firstDp <= firstLength; firstDp++) {
+            Arrays.fill(currentCost, INF);
+            Arrays.fill(currentComparable, false);
+            currentCost[0] = 0.0;
+
+            int secondStart = Math.max(1, firstDp - window);
+            int secondStop = Math.min(secondLength, firstDp + window);
+            int firstIndex = firstDp - 1;
+
+            for (int secondDp = secondStart;
+                 secondDp <= secondStop;
+                 secondDp++) {
+                int secondIndex = secondDp - 1;
+                LocalComparison local = localComparison(
+                        first,
+                        firstIndex,
+                        second,
+                        secondIndex,
+                        selectedDimensions,
+                        selectedCount
+                );
+                currentComparable[secondDp] = local.comparable();
+
+                double diagonal = previousCost[secondDp - 1];
+                double horizontal = local.comparable()
+                        && (secondIndex == 0
+                        || currentComparable[secondDp - 1])
+                        ? currentCost[secondDp - 1]
+                        : INF;
+                double vertical = local.comparable()
+                        && (firstIndex == 0
+                        || previousComparable[secondDp])
+                        ? previousCost[secondDp]
+                        : INF;
+
+                double minimumPrevious = diagonal;
+                byte selectedStep = STEP_DIAGONAL;
+                if (horizontal < minimumPrevious) {
+                    minimumPrevious = horizontal;
+                    selectedStep = STEP_HORIZONTAL;
+                }
+                if (vertical < minimumPrevious) {
+                    minimumPrevious = vertical;
+                    selectedStep = STEP_VERTICAL;
+                }
+
+                currentCost[secondDp] = safeAdd(
+                        local.cost(),
+                        minimumPrevious
+                );
+                if (!Double.isInfinite(currentCost[secondDp])) {
+                    steps[firstDp][secondDp] = selectedStep;
+                }
+            }
+
+            double[] temporaryCost = previousCost;
+            previousCost = currentCost;
+            currentCost = temporaryCost;
+
+            boolean[] temporaryComparable = previousComparable;
+            previousComparable = currentComparable;
+            currentComparable = temporaryComparable;
+        }
+
+        if (Double.isInfinite(previousCost[secondLength])) {
+            return Collections.emptyList();
+        }
+        return backtrack(steps, firstLength, secondLength);
+    }
+
+    private static Preparation prepare(
+            MultiSeriesAccessor first,
+            MultiSeriesAccessor second,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        validateCompatibleSeries(first, second);
+
+        int selectedCount = selectedDimensions == null
+                ? first.dimensions()
+                : selectedDimensions.length;
+        if (selectedCount == 0
+                || first.length() == 0
+                || second.length() == 0) {
+            return Preparation.UNAVAILABLE;
+        }
+
+        int availableFirst = countAvailableTimePoints(
+                first,
+                selectedDimensions,
+                selectedCount
+        );
+        int availableSecond = countAvailableTimePoints(
+                second,
+                selectedDimensions,
+                selectedCount
+        );
+        int totalAvailable = availableFirst + availableSecond;
+        if (totalAvailable == 0) {
+            return Preparation.UNAVAILABLE;
+        }
+
+        int window = windowSize == -1
+                ? Math.max(first.length(), second.length())
+                : windowSize;
+        if (Math.abs(first.length() - second.length()) > window) {
+            return Preparation.UNAVAILABLE;
+        }
+
+        double gamma = (double) (first.length() + second.length())
+                / totalAvailable;
+        return new Preparation(true, window, gamma, selectedCount);
+    }
+
+    private static int countAvailableTimePoints(
+            MultiSeriesAccessor series,
+            int[] selectedDimensions,
+            int selectedCount
+    ) {
+        int count = 0;
+        for (int time = 0; time < series.length(); time++) {
+            for (int position = 0; position < selectedCount; position++) {
+                int dimension = selectedDimensions == null
+                        ? position
+                        : selectedDimensions[position];
+                if (!series.isMissing(dimension, time)) {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static LocalComparison localComparison(
+            MultiSeriesAccessor first,
+            int firstTime,
+            MultiSeriesAccessor second,
+            int secondTime,
+            int[] selectedDimensions,
+            int selectedCount
+    ) {
+        double squaredSum = 0.0;
+        int jointlyObserved = 0;
+
+        for (int position = 0; position < selectedCount; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            if (first.isMissing(dimension, firstTime)
+                    || second.isMissing(dimension, secondTime)) {
+                continue;
+            }
+
+            double difference = first.value(dimension, firstTime)
+                    - second.value(dimension, secondTime);
+            squaredSum += difference * difference;
+            jointlyObserved++;
+        }
+
+        if (jointlyObserved == 0) {
+            return LocalComparison.INCOMPUTABLE;
+        }
+
+        return new LocalComparison(
+                true,
+                (double) selectedCount / jointlyObserved * squaredSum
+        );
+    }
+
+    private static double rawCutoff(
+            double bestSoFar,
+            double gamma
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return INF;
+        }
+        return bestSoFar * bestSoFar / gamma;
+    }
+
+    private static double minimum(
+            double first,
+            double second,
+            double third
+    ) {
+        double minimum = first < second ? first : second;
+        return minimum < third ? minimum : third;
+    }
+
+    private static double safeAdd(double first, double second) {
+        if (Double.isInfinite(first) || Double.isInfinite(second)) {
+            return INF;
+        }
+        return first + second;
+    }
+
+    private static List<Pair<Integer, Integer>> backtrack(
+            byte[][] steps,
+            int firstLength,
+            int secondLength
+    ) {
+        List<Pair<Integer, Integer>> reversed = new ArrayList<>(
+                firstLength + secondLength - 1
+        );
+        int firstDp = firstLength;
+        int secondDp = secondLength;
+
+        while (firstDp > 0 && secondDp > 0) {
+            reversed.add(new Pair<>(firstDp - 1, secondDp - 1));
+            byte step = steps[firstDp][secondDp];
+            if (step == STEP_DIAGONAL) {
+                firstDp--;
+                secondDp--;
+            } else if (step == STEP_HORIZONTAL) {
+                secondDp--;
+            } else if (step == STEP_VERTICAL) {
+                firstDp--;
+            } else {
+                return Collections.emptyList();
+            }
+        }
+
+        Collections.reverse(reversed);
+        return reversed;
+    }
+
+    private static void validateCompatibleSeries(
+            MultiSeriesAccessor first,
+            MultiSeriesAccessor second
+    ) {
+        if (first.dimensions() != second.dimensions()) {
+            throw new IllegalArgumentException(
+                    "Both multivariate series must have the same number of "
+                            + "dimensions."
+            );
+        }
+    }
+
+    private static AccessorPair makeMatchingAccessors(
+            Object first,
+            Object second
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return new AccessorPair(
+                    new DoubleMatrixAccessor(firstValues),
+                    new DoubleMatrixAccessor(secondValues)
+            );
+        }
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return new AccessorPair(
+                    new FloatMatrixAccessor(firstValues),
+                    new FloatMatrixAccessor(secondValues)
+            );
+        }
+        if (first instanceof Object[][] firstValues
+                && second instanceof Object[][] secondValues) {
+            return new AccessorPair(
+                    new ObjectMatrixAccessor(firstValues),
+                    new ObjectMatrixAccessor(secondValues)
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    public int get_random_window(
+            ObjectDataset dataset,
+            Random random
+    ) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        Objects.requireNonNull(random, "Random cannot be null.");
         int bound = Math.max(1, (AppContext.length + 1) / 4);
-        return r.nextInt(bound);
+        return random.nextInt(bound);
+    }
+
+    private static void validateBestSoFar(double bestSoFar) {
+        if (Double.isNaN(bestSoFar) || bestSoFar < 0.0) {
+            throw new IllegalArgumentException(
+                    "DTWAROW_D bestSoFar must be nonnegative and not NaN. "
+                            + "Received: " + bestSoFar + "."
+            );
+        }
+    }
+
+    private static void validateWindow(int windowSize) {
+        if (windowSize < -1) {
+            throw new IllegalArgumentException(
+                    "windowSize must be -1 or a nonnegative integer."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "DTWAROW_D requires matching double[][], float[][], or "
+                        + "numeric Object[][] inputs. Received "
+                        + typeName(first) + " and " + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 
     private interface MultiSeriesAccessor {
-
         int dimensions();
 
         int length();
@@ -487,45 +563,36 @@ public class DTWAROW_D implements Serializable {
         boolean isMissing(int dimension, int timeIndex);
 
         double value(int dimension, int timeIndex);
-
-        int countAvailableTimePoints();
     }
 
-    private static class PrimitiveMultiSeriesAccessor
+    private abstract static class AbstractMatrixAccessor
             implements MultiSeriesAccessor {
-
-        private final double[][] series;
         private final int dimensions;
         private final int length;
 
-        PrimitiveMultiSeriesAccessor(double[][] series) {
-
-            this.series = series;
-            this.dimensions = series.length;
-            this.length = dimensions == 0 ? 0 : series[0].length;
-
-            validateRectangular();
-        }
-
-        private void validateRectangular() {
-
-            for (int d = 0; d < dimensions; d++) {
-                if (series[d].length != length) {
-                    throw new IllegalArgumentException(
-                            "All dimensions must have consistent time lengths."
-                    );
-                }
-            }
+        private AbstractMatrixAccessor(int dimensions, int length) {
+            this.dimensions = dimensions;
+            this.length = length;
         }
 
         @Override
-        public int dimensions() {
+        public final int dimensions() {
             return dimensions;
         }
 
         @Override
-        public int length() {
+        public final int length() {
             return length;
+        }
+    }
+
+    private static final class DoubleMatrixAccessor
+            extends AbstractMatrixAccessor {
+        private final double[][] series;
+
+        private DoubleMatrixAccessor(double[][] series) {
+            super(series.length, validateRectangular(series));
+            this.series = series;
         }
 
         @Override
@@ -537,166 +604,149 @@ public class DTWAROW_D implements Serializable {
         public double value(int dimension, int timeIndex) {
             return series[dimension][timeIndex];
         }
-
-        @Override
-        public int countAvailableTimePoints() {
-
-            int count = 0;
-
-            for (int t = 0; t < length; t++) {
-
-                boolean available = false;
-
-                for (int d = 0; d < dimensions; d++) {
-                    if (!Double.isNaN(series[d][t])) {
-                        available = true;
-                        break;
-                    }
-                }
-
-                if (available) {
-                    count++;
-                }
-            }
-
-            return count;
-        }
     }
 
-    private static class ObjectMultiSeriesAccessor
-            implements MultiSeriesAccessor {
+    private static final class FloatMatrixAccessor
+            extends AbstractMatrixAccessor {
+        private final float[][] series;
 
-        private final Object[][] series;
-        private final int dimensions;
-        private final int length;
-
-        ObjectMultiSeriesAccessor(Object[][] series) {
-
+        private FloatMatrixAccessor(float[][] series) {
+            super(series.length, validateRectangular(series));
             this.series = series;
-            this.dimensions = series.length;
-            this.length = dimensions == 0 ? 0 : series[0].length;
-
-            validateRectangular();
-        }
-
-        private void validateRectangular() {
-
-            for (int d = 0; d < dimensions; d++) {
-                if (series[d].length != length) {
-                    throw new IllegalArgumentException(
-                            "All dimensions must have consistent time lengths."
-                    );
-                }
-            }
-        }
-
-        @Override
-        public int dimensions() {
-            return dimensions;
-        }
-
-        @Override
-        public int length() {
-            return length;
         }
 
         @Override
         public boolean isMissing(int dimension, int timeIndex) {
-
-            Object v = series[dimension][timeIndex];
-
-            if (v == null) {
-                return true;
-            }
-
-            if (v instanceof Double) {
-                return Double.isNaN((Double) v);
-            }
-
-            if (v instanceof Float) {
-                return Float.isNaN((Float) v);
-            }
-
-            if (v instanceof Number) {
-                return Double.isNaN(((Number) v).doubleValue());
-            }
-
-            throw new IllegalArgumentException(
-                    "DTWAROW_D requires numeric values at observed positions. "
-                            + "Found "
-                            + v.getClass().getName()
-                            + " at dimension "
-                            + dimension
-                            + ", time index "
-                            + timeIndex
-                            + "."
-            );
+            return Float.isNaN(series[dimension][timeIndex]);
         }
 
         @Override
         public double value(int dimension, int timeIndex) {
-
-            Object v = series[dimension][timeIndex];
-
-            if (isMissing(dimension, timeIndex)) {
-                throw new IllegalArgumentException(
-                        "Cannot read missing value as numeric at dimension "
-                                + dimension
-                                + ", time index "
-                                + timeIndex
-                                + "."
-                );
-            }
-
-            if (!(v instanceof Number)) {
-                throw new IllegalArgumentException(
-                        "DTWAROW_D requires numeric values at observed positions. "
-                                + "Found "
-                                + v.getClass().getName()
-                                + " at dimension "
-                                + dimension
-                                + ", time index "
-                                + timeIndex
-                                + "."
-                );
-            }
-
-            return ((Number) v).doubleValue();
-        }
-
-        @Override
-        public int countAvailableTimePoints() {
-
-            int count = 0;
-
-            for (int t = 0; t < length; t++) {
-
-                boolean available = false;
-
-                for (int d = 0; d < dimensions; d++) {
-                    if (!isMissing(d, t)) {
-                        available = true;
-                        break;
-                    }
-                }
-
-                if (available) {
-                    count++;
-                }
-            }
-
-            return count;
+            return series[dimension][timeIndex];
         }
     }
 
-    private static class DTWResult {
+    private static final class ObjectMatrixAccessor
+            extends AbstractMatrixAccessor {
+        private final Object[][] series;
 
-        final double distance;
-        final List<Pair<Integer, Integer>> path;
-
-        DTWResult(double distance, List<Pair<Integer, Integer>> path) {
-            this.distance = distance;
-            this.path = path;
+        private ObjectMatrixAccessor(Object[][] series) {
+            super(series.length, validateRectangular(series));
+            this.series = series;
         }
+
+        @Override
+        public boolean isMissing(int dimension, int timeIndex) {
+            Object value = series[dimension][timeIndex];
+            return value == null
+                    || value instanceof Number number
+                    && Double.isNaN(number.doubleValue());
+        }
+
+        @Override
+        public double value(int dimension, int timeIndex) {
+            Object value = series[dimension][timeIndex];
+            if (!(value instanceof Number number)) {
+                throw new IllegalArgumentException(
+                        "DTWAROW_D requires numeric observed values. Found "
+                                + (value == null
+                                ? "null"
+                                : value.getClass().getName())
+                                + " at dimension " + dimension
+                                + ", time index " + timeIndex + "."
+                );
+            }
+            return number.doubleValue();
+        }
+    }
+
+    private static int validateRectangular(double[][] series) {
+        Objects.requireNonNull(series, "Series cannot be null.");
+        if (series.length == 0) {
+            return 0;
+        }
+        int length = Objects.requireNonNull(
+                series[0],
+                "Series row cannot be null."
+        ).length;
+        for (int dimension = 1; dimension < series.length; dimension++) {
+            if (Objects.requireNonNull(
+                    series[dimension],
+                    "Series row cannot be null."
+            ).length != length) {
+                throw new IllegalArgumentException(
+                        "All dimensions must have consistent time lengths."
+                );
+            }
+        }
+        return length;
+    }
+
+    private static int validateRectangular(float[][] series) {
+        Objects.requireNonNull(series, "Series cannot be null.");
+        if (series.length == 0) {
+            return 0;
+        }
+        int length = Objects.requireNonNull(
+                series[0],
+                "Series row cannot be null."
+        ).length;
+        for (int dimension = 1; dimension < series.length; dimension++) {
+            if (Objects.requireNonNull(
+                    series[dimension],
+                    "Series row cannot be null."
+            ).length != length) {
+                throw new IllegalArgumentException(
+                        "All dimensions must have consistent time lengths."
+                );
+            }
+        }
+        return length;
+    }
+
+    private static int validateRectangular(Object[][] series) {
+        Objects.requireNonNull(series, "Series cannot be null.");
+        if (series.length == 0) {
+            return 0;
+        }
+        int length = Objects.requireNonNull(
+                series[0],
+                "Series row cannot be null."
+        ).length;
+        for (int dimension = 1; dimension < series.length; dimension++) {
+            if (Objects.requireNonNull(
+                    series[dimension],
+                    "Series row cannot be null."
+            ).length != length) {
+                throw new IllegalArgumentException(
+                        "All dimensions must have consistent time lengths."
+                );
+            }
+        }
+        return length;
+    }
+
+    private record AccessorPair(
+            MultiSeriesAccessor first,
+            MultiSeriesAccessor second
+    ) {
+    }
+
+    private record LocalComparison(
+            boolean comparable,
+            double cost
+    ) {
+        private static final LocalComparison INCOMPUTABLE =
+                new LocalComparison(false, 0.0);
+    }
+
+    private record Preparation(
+            boolean available,
+            int window,
+            double gamma,
+            int selectedCount
+    ) {
+        private static final Preparation UNAVAILABLE =
+                new Preparation(false, 0, Double.NaN, 0);
     }
 }

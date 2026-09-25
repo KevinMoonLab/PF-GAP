@@ -1,23 +1,30 @@
 package distance.elastic;
 
+import core.AppContext;
+
 import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * Euclidean distance kernels for primitive double and float vectors.
+ * Squared Euclidean distance kernels for primitive double and float vectors.
  *
- * <p>Overloads receiving {@code bestSoFar} return squared Euclidean distance
- * and may stop once the accumulated value exceeds that bound. Overloads
- * without {@code bestSoFar} return ordinary Euclidean distance.</p>
+ * <p>Every overload returns squared Euclidean distance. Float inputs remain
+ * stored as {@code float[]} and are widened only for scalar arithmetic; no
+ * temporary {@code double[]} is allocated.</p>
  *
- * <p>Float inputs remain stored as {@code float[]}. Values are widened
- * individually for double-precision subtraction and accumulation; no temporary
- * {@code double[]} is allocated.</p>
+ * <p>When {@code AppContext.useVectorApi} is true, contiguous all-feature
+ * calculations use the JDK Vector API. Selected-feature calculations remain
+ * scalar because their indexed access pattern is not normally a good SIMD
+ * fit. A finite {@code bestSoFar} is checked after each vector block and each
+ * scalar tail element. Consequently, vector early abandoning may evaluate up
+ * to one complete SIMD block beyond the first element that crosses the bound,
+ * while preserving the returned squared-distance semantics.</p>
  *
- * <p>Methods remain synchronized pending the project-wide distance ownership
- * and concurrency audit.</p>
+ * <p>This class is stateless and thread-safe. Input shape and selected-index
+ * validity are trusted preconditions established by the dataset and splitter
+ * layers rather than revalidated in the pairwise hot path.</p>
  */
-public class Euclidean implements Serializable {
+public final class Euclidean implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
@@ -25,33 +32,45 @@ public class Euclidean implements Serializable {
     public Euclidean() {
     }
 
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second,
             double bestSoFar
     ) {
         if (first instanceof double[] firstValues
                 && second instanceof double[] secondValues) {
-            requireSameLength(firstValues.length, secondValues.length);
-            return squaredDistance(
-                    firstValues,
-                    secondValues,
-                    bestSoFar
-            );
+            return AppContext.useVectorApi
+                    ? VectorKernels.squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    )
+                    : squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    );
         }
+
         if (first instanceof float[] firstValues
                 && second instanceof float[] secondValues) {
-            requireSameLength(firstValues.length, secondValues.length);
-            return squaredDistance(
-                    firstValues,
-                    secondValues,
-                    bestSoFar
-            );
+            return AppContext.useVectorApi
+                    ? VectorKernels.squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    )
+                    : squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    );
         }
+
         throw unsupportedPair(first, second);
     }
 
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second,
             double bestSoFar,
@@ -60,15 +79,9 @@ public class Euclidean implements Serializable {
         if (selectedDimensions == null) {
             return distance(first, second, bestSoFar);
         }
-        if (selectedDimensions.length == 0) {
-            throw new IllegalArgumentException(
-                    "Selected dimensions cannot be empty."
-            );
-        }
 
         if (first instanceof double[] firstValues
                 && second instanceof double[] secondValues) {
-            requireSameLength(firstValues.length, secondValues.length);
             return squaredDistance(
                     firstValues,
                     secondValues,
@@ -76,9 +89,9 @@ public class Euclidean implements Serializable {
                     selectedDimensions
             );
         }
+
         if (first instanceof float[] firstValues
                 && second instanceof float[] secondValues) {
-            requireSameLength(firstValues.length, secondValues.length);
             return squaredDistance(
                     firstValues,
                     secondValues,
@@ -86,34 +99,31 @@ public class Euclidean implements Serializable {
                     selectedDimensions
             );
         }
+
         throw unsupportedPair(first, second);
     }
 
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second
     ) {
-        return Math.sqrt(
-                distance(
-                        first,
-                        second,
-                        Double.POSITIVE_INFINITY
-                )
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY
         );
     }
 
-    public synchronized double distance(
+    public double distance(
             Object first,
             Object second,
             int[] selectedDimensions
     ) {
-        return Math.sqrt(
-                distance(
-                        first,
-                        second,
-                        Double.POSITIVE_INFINITY,
-                        selectedDimensions
-                )
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                selectedDimensions
         );
     }
 
@@ -123,12 +133,16 @@ public class Euclidean implements Serializable {
             double bestSoFar
     ) {
         double total = 0.0;
-        for (int index = 0;
-                index < first.length && total <= bestSoFar;
-                index++) {
+
+        for (int index = 0; index < first.length; index++) {
             double difference = first[index] - second[index];
             total += difference * difference;
+
+            if (total > bestSoFar) {
+                return total;
+            }
         }
+
         return total;
     }
 
@@ -138,13 +152,17 @@ public class Euclidean implements Serializable {
             double bestSoFar
     ) {
         double total = 0.0;
-        for (int index = 0;
-                index < first.length && total <= bestSoFar;
-                index++) {
+
+        for (int index = 0; index < first.length; index++) {
             double difference =
                     (double) first[index] - (double) second[index];
             total += difference * difference;
+
+            if (total > bestSoFar) {
+                return total;
+            }
         }
+
         return total;
     }
 
@@ -155,15 +173,19 @@ public class Euclidean implements Serializable {
             int[] selectedDimensions
     ) {
         double total = 0.0;
+
         for (int position = 0;
-                position < selectedDimensions.length
-                        && total <= bestSoFar;
-                position++) {
+             position < selectedDimensions.length;
+             position++) {
             int feature = selectedDimensions[position];
-            requireSelectedFeature(feature, first.length);
             double difference = first[feature] - second[feature];
             total += difference * difference;
+
+            if (total > bestSoFar) {
+                return total;
+            }
         }
+
         return total;
     }
 
@@ -174,49 +196,22 @@ public class Euclidean implements Serializable {
             int[] selectedDimensions
     ) {
         double total = 0.0;
+
         for (int position = 0;
-                position < selectedDimensions.length
-                        && total <= bestSoFar;
-                position++) {
+             position < selectedDimensions.length;
+             position++) {
             int feature = selectedDimensions[position];
-            requireSelectedFeature(feature, first.length);
             double difference =
                     (double) first[feature]
                             - (double) second[feature];
             total += difference * difference;
+
+            if (total > bestSoFar) {
+                return total;
+            }
         }
+
         return total;
-    }
-
-    private static void requireSameLength(
-            int firstLength,
-            int secondLength
-    ) {
-        if (firstLength != secondLength) {
-            throw new IllegalArgumentException(
-                    "Euclidean distance requires equal-length vectors. "
-                            + "Received "
-                            + firstLength
-                            + " and "
-                            + secondLength
-                            + "."
-            );
-        }
-    }
-
-    private static void requireSelectedFeature(
-            int feature,
-            int vectorLength
-    ) {
-        if (feature < 0 || feature >= vectorLength) {
-            throw new IllegalArgumentException(
-                    "Selected feature index "
-                            + feature
-                            + " is outside vector length "
-                            + vectorLength
-                            + "."
-            );
-        }
     }
 
     private static IllegalArgumentException unsupportedPair(
@@ -238,5 +233,141 @@ public class Euclidean implements Serializable {
         return value == null
                 ? "null"
                 : value.getClass().getTypeName();
+    }
+
+    /**
+     * Isolates all incubator-module references in a lazily initialized nested
+     * class. The scalar path can therefore run without loading this class.
+     */
+    private static final class VectorKernels {
+
+        private static final jdk.incubator.vector.VectorSpecies<Double>
+                DOUBLE_SPECIES =
+                jdk.incubator.vector.DoubleVector.SPECIES_PREFERRED;
+
+        private static final jdk.incubator.vector.VectorSpecies<Float>
+                FLOAT_SPECIES =
+                jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
+
+        private VectorKernels() {
+        }
+
+        private static double squaredDistance(
+                double[] first,
+                double[] second,
+                double bestSoFar
+        ) {
+            int upperBound = DOUBLE_SPECIES.loopBound(first.length);
+            int index = 0;
+            double total = 0.0;
+
+            if (Double.isInfinite(bestSoFar)) {
+                jdk.incubator.vector.DoubleVector accumulated =
+                        jdk.incubator.vector.DoubleVector.zero(DOUBLE_SPECIES);
+
+                for (; index < upperBound;
+                     index += DOUBLE_SPECIES.length()) {
+                    jdk.incubator.vector.DoubleVector difference =
+                            jdk.incubator.vector.DoubleVector.fromArray(
+                                    DOUBLE_SPECIES,
+                                    first,
+                                    index
+                            ).sub(
+                                    jdk.incubator.vector.DoubleVector.fromArray(
+                                            DOUBLE_SPECIES,
+                                            second,
+                                            index
+                                    )
+                            );
+                    accumulated = accumulated.add(
+                            difference.mul(difference)
+                    );
+                }
+
+                total = accumulated.reduceLanes(
+                        jdk.incubator.vector.VectorOperators.ADD
+                );
+            } else {
+                for (; index < upperBound;
+                     index += DOUBLE_SPECIES.length()) {
+                    jdk.incubator.vector.DoubleVector difference =
+                            jdk.incubator.vector.DoubleVector.fromArray(
+                                    DOUBLE_SPECIES,
+                                    first,
+                                    index
+                            ).sub(
+                                    jdk.incubator.vector.DoubleVector.fromArray(
+                                            DOUBLE_SPECIES,
+                                            second,
+                                            index
+                                    )
+                            );
+                    total += difference.mul(difference).reduceLanes(
+                            jdk.incubator.vector.VectorOperators.ADD
+                    );
+
+                    if (total > bestSoFar) {
+                        return total;
+                    }
+                }
+            }
+
+            for (; index < first.length; index++) {
+                double difference = first[index] - second[index];
+                total += difference * difference;
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            return total;
+        }
+
+        private static double squaredDistance(
+                float[] first,
+                float[] second,
+                double bestSoFar
+        ) {
+            int upperBound = FLOAT_SPECIES.loopBound(first.length);
+            int index = 0;
+            double total = 0.0;
+
+            for (; index < upperBound;
+                 index += FLOAT_SPECIES.length()) {
+                jdk.incubator.vector.FloatVector difference =
+                        jdk.incubator.vector.FloatVector.fromArray(
+                                FLOAT_SPECIES,
+                                first,
+                                index
+                        ).sub(
+                                jdk.incubator.vector.FloatVector.fromArray(
+                                        FLOAT_SPECIES,
+                                        second,
+                                        index
+                                )
+                        );
+
+                total += (double) difference.mul(difference).reduceLanes(
+                        jdk.incubator.vector.VectorOperators.ADD
+                );
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            for (; index < first.length; index++) {
+                double difference =
+                        (double) first[index] - (double) second[index];
+                total += difference * difference;
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            return total;
+        }
     }
 }

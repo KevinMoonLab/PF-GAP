@@ -1,75 +1,208 @@
 package distance.multiTS;
 
-import transformation.FirstOrderDifference;
+import transformation.DerivativeTransform;
 
+import java.io.Serial;
 import java.io.Serializable;
 
-public class DDTW_D implements Serializable {
+/**
+ * Dependent multivariate Derivative Dynamic Time Warping.
+ *
+ * <p>Inputs are transformed with the unified derivative convention, after
+ * which one shared dependent-DTW alignment is evaluated across all selected
+ * channels. Every overload returns accumulated squared cost, and a finite
+ * {@code bestSoFar} is interpreted in the same units.</p>
+ *
+ * <p>When dimensions are selected, only those channels are transformed into a
+ * compact derivative matrix. This is deliberate: derivative storage is needed
+ * throughout every dynamic-programming cell, and compacting selected channels
+ * avoids both transforming unselected channels and repeatedly consulting the
+ * selection array inside the dependent local-cost loop.</p>
+ *
+ * <p>Both {@code double[][]} and {@code float[][]} dimension-major inputs are
+ * supported. Derivatives are stored as {@code double[][]}. The class contains
+ * no mutable scratch state and is safe for concurrent use.</p>
+ */
+public final class DDTW_D implements Serializable {
 
-    public DDTW_D() {}
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    private final DTW_D dtw;
 
-        int dims1 = series1.length;
-        int dims2 = series2.length;
-
-        if (dims1 != dims2) {
-            throw new IllegalArgumentException("Both series must have the same number of dimensions (rows).");
-        }
-
-        int len1 = series1[0].length;
-        int len2 = series2[0].length;
-
-        for (int d = 0; d < dims1; d++) {
-            if (series1[d].length != len1 || series2[d].length != len2) {
-                throw new IllegalArgumentException("All dimensions must have consistent time lengths.");
-            }
-        }
-
-        // Apply first-order difference transformation
-        double[][] deriv1 = FirstOrderDifference.computeFirstOrderDifference(series1);
-        double[][] deriv2 = FirstOrderDifference.computeFirstOrderDifference(series2);
-
-        if (windowSize == -1) {
-            windowSize = Math.max(deriv1[0].length, deriv2[0].length);
-        }
-
-        double[][] cost = new double[deriv1[0].length][deriv2[0].length];
-
-        for (int i = 0; i < deriv1[0].length; i++) {
-            int jStart = Math.max(0, i - windowSize);
-            int jStop = Math.min(deriv2[0].length - 1, i + windowSize);
-
-            for (int j = jStart; j <= jStop; j++) {
-                double dist = squaredDistanceAt(deriv1, deriv2, i, j);
-
-                if (i == 0 && j == 0) {
-                    cost[i][j] = dist;
-                } else {
-                    double minPrev = Double.POSITIVE_INFINITY;
-                    if (i > 0 && j > 0) minPrev = Math.min(minPrev, cost[i - 1][j - 1]);
-                    if (i > 0) minPrev = Math.min(minPrev, cost[i - 1][j]);
-                    if (j > 0) minPrev = Math.min(minPrev, cost[i][j - 1]);
-
-                    cost[i][j] = dist + minPrev;
-                }
-
-                if (cost[i][j] > bsf * bsf) return Double.POSITIVE_INFINITY;
-            }
-        }
-
-        double finalDist = Math.sqrt(cost[deriv1[0].length - 1][deriv2[0].length - 1]);
-        return finalDist > bsf ? Double.POSITIVE_INFINITY : finalDist;
+    public DDTW_D() {
+        dtw = new DTW_D();
     }
 
-    private double squaredDistanceAt(double[][] s1, double[][] s2, int t1, int t2) {
-        double sum = 0.0;
-        for (int d = 0; d < s1.length; d++) {
-            double diff = s1[d][t1] - s2[d][t2];
-            sum += diff * diff;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceAll(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
         }
-        return sum;
+
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceAll(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
+        }
+
+        throw unsupportedPair(first, second);
+    }
+
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        if (selectedDimensions == null) {
+            return distance(first, second, bestSoFar, windowSize);
+        }
+
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    selectedDimensions
+            );
+        }
+
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    selectedDimensions
+            );
+        }
+
+        throw unsupportedPair(first, second);
+    }
+
+    private double distanceAll(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        double[][] firstDerivative = DerivativeTransform.transform(first);
+        double[][] secondDerivative = DerivativeTransform.transform(second);
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private double distanceAll(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        double[][] firstDerivative = DerivativeTransform.transform(first);
+        double[][] secondDerivative = DerivativeTransform.transform(second);
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private double distanceSelected(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        double[][] firstDerivative =
+                DerivativeTransform.transformSelected(
+                        first,
+                        selectedDimensions
+                );
+        double[][] secondDerivative =
+                DerivativeTransform.transformSelected(
+                        second,
+                        selectedDimensions
+                );
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private double distanceSelected(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        double[][] firstDerivative =
+                DerivativeTransform.transformSelected(
+                        first,
+                        selectedDimensions
+                );
+        double[][] secondDerivative =
+                DerivativeTransform.transformSelected(
+                        second,
+                        selectedDimensions
+                );
+
+        return dtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Dependent DDTW requires matching double[][] or float[][] "
+                        + "inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric "
+                        + "arrays are not supported."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
     }
 }

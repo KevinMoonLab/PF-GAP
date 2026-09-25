@@ -1,41 +1,148 @@
 package distance.multiTS;
 
-import core.contracts.ObjectDataset;
 import distance.elastic.Manhattan;
 
+import java.io.Serial;
 import java.io.Serializable;
 
-public class Manhattan_I implements Serializable {
+/**
+ * Independent multivariate Manhattan distance.
+ *
+ * <p>Dimension selection is resolved only at the outer matrix level. For each
+ * selected dimension, the complete temporal row is passed to the unselected
+ * all-elements Manhattan kernel. Selected dimension indices are therefore
+ * never reinterpreted as temporal indices.</p>
+ *
+ * <p>The returned value is the sum of row Manhattan costs. When
+ * {@code AppContext.useVectorApi} is enabled, each complete temporal row uses
+ * the vectorized Manhattan kernel. Both {@code double[][]} and
+ * {@code float[][]} inputs are supported without slicing or conversion.</p>
+ */
+public final class Manhattan_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final Manhattan manhattan;
 
     public Manhattan_I() {
-        this.manhattan = new Manhattan();
+        manhattan = new Manhattan();
     }
 
-    /**
-     * Computes the average Manhattan distance across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * Early abandoning is supported via the bsf threshold.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @return Average Manhattan distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        return distance(first, second, bestSoFar, null);
+    }
 
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
         }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += manhattan.distance(series1[i], series2[i], bsf);
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
         }
+        throw unsupportedPair(first, second);
+    }
 
-        return totalDistance / series1.length;
+    private double distance(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double rowCost = manhattan.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total)
+            );
+            total += rowCost;
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
+        return total;
+    }
+
+    private double distance(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double rowCost = manhattan.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total)
+            );
+            total += rowCost;
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
+        return total;
+    }
+
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Manhattan_I requires matching double[][] or float[][] "
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }
