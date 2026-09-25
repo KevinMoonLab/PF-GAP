@@ -3,153 +3,341 @@ package distance.elastic;
 import core.AppContext;
 import core.contracts.ObjectDataset;
 
-import static java.lang.Math.sqrt;
-
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Random;
 
-//import core.contracts.Dataset;
-
 /**
- * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
- * we might have modified (bug fixes, and improvements for efficiency) the original classes.
- * 
+ * Exact univariate Dynamic Time Warping using squared Euclidean local costs.
+ *
+ * <p>Every overload returns the accumulated squared DTW cost. A finite
+ * {@code bestSoFar} is therefore interpreted in the same squared-cost units.
+ * The implementation uses a Sakoe-Chiba band, two reusable rows, cell pruning,
+ * and row-level early abandonment.</p>
+ *
+ * <p>Both {@code double[]} and {@code float[]} inputs are supported without
+ * conversion or boxing. Float samples are widened before subtraction and
+ * accumulation. The dynamic-programming recurrence is inherently dependent
+ * across adjacent cells, so {@code AppContext.useVectorApi} does not select a
+ * separate Vector API kernel for univariate DTW. The same optimized scalar
+ * recurrence is used in both modes.</p>
+ *
+ * <p>This class is stateless and thread-safe. Input nonemptiness is required.
+ * A negative window denotes an unconstrained alignment. A nonnegative window
+ * is widened when necessary to include a feasible endpoint-to-endpoint path
+ * for unequal-length inputs.</p>
  */
+public final class DTW implements Serializable {
 
-//public class DTW {
-public class DTW implements Serializable {
-	
-	public DTW() {
-		
-	}
-	
-	//A fast DTW implemented by Geoff Webb
-	//public synchronized double distance(double[] series1, double[] series2,double bsf, int windowSize) {
-	public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize) {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-		double[] series1 = (double[]) Series1;
-		double[] series2 = (double[]) Series2;
+    public DTW() {
+    }
 
-		if (windowSize == -1) {
-			windowSize = series1.length;
-		}
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
+        }
 
-		int length1 = series1.length;
-		int length2 = series2.length;
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize
+            );
+        }
 
-		int maxLength = Math.max(length1, length2);
-		
-		double[] prevRow = new double[maxLength];
-		double[] currentRow = new double[maxLength];
-		
-		if (prevRow == null || prevRow.length < maxLength) {
-			prevRow = new double[maxLength];
-		}
-		
-		if (currentRow == null || currentRow.length < maxLength) {
-			currentRow = new double[maxLength];
-		}
+        throw unsupportedPair(first, second);
+    }
 
-		int i, j;
-		double prevVal;
-		double thisSeries1Val = series1[0];
-		
-		// initialising the first row - do this in prevRow so as to save swapping rows before next row
-		prevVal = prevRow[0] = squaredDistance(thisSeries1Val, series2[0]);
+    public double distance(
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                windowSize
+        );
+    }
 
-		for (j = 1; j < Math.min(length2, 1 + windowSize); j++) {
-			prevVal = prevRow[j] = prevVal + squaredDistance(thisSeries1Val, series2[j]);
-		}
+    private static double distance(
+            double[] first,
+            double[] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        requireNonempty(first.length, second.length);
 
-		// the second row is a special case
-		if (length1 >= 2){
-			thisSeries1Val = series1[1];
-			
-			if (windowSize>0){
-				currentRow[0] = prevRow[0]+squaredDistance(thisSeries1Val, series2[0]);
-			}
-			
-			// in this special case, neither matrix[1][0] nor matrix[0][1] can be on the (shortest) minimum path
-			prevVal = currentRow[1]=prevRow[0]+squaredDistance(thisSeries1Val, series2[1]);
-			int jStop = (windowSize + 2 > length2) ? length2 : windowSize + 2;
+        // Use the shorter series for columns to minimize row storage.
+        if (second.length > first.length) {
+            return distanceKernel(
+                    first,
+                    second,
+                    bestSoFar,
+                    windowSize
+            );
+        }
+        return distanceKernel(
+                second,
+                first,
+                bestSoFar,
+                windowSize
+        );
+    }
 
-				for (j = 2; j < jStop; j++) {
-					// for the second row, matrix[0][j - 1] cannot be on a (shortest) minimum path
-					prevVal = currentRow[j] = Math.min(prevVal, prevRow[j - 1]) + squaredDistance(thisSeries1Val, series2[j]);
-				}
-		}
-		
-		// third and subsequent rows
-		for (i = 2; i < length1; i++) {
-			int jStart;
-			int jStop = (i + windowSize >= length2) ? length2-1 : i + windowSize;
-			
-			// the old currentRow becomes this prevRow and so the currentRow needs to use the old prevRow
-			double[] tmp = prevRow;
-			prevRow = currentRow;
-			currentRow = tmp;
-			
-			thisSeries1Val = series1[i];
+    private static double distance(
+            float[] first,
+            float[] second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        requireNonempty(first.length, second.length);
 
-			if (i - windowSize < 1) {
-				jStart = 1;
-				currentRow[0] = prevRow[0] + squaredDistance(thisSeries1Val, series2[0]);
-			}
-			else {
-				jStart = i - windowSize;
-			}
-			
-			if (jStart <= jStop){
-				// If jStart is the start of the window, [i][jStart-1] is outside the window.
-				// Otherwise jStart-1 must be 0 and the path through [i][0] can never be less than the path directly from [i-1][0]
-				prevVal = currentRow[jStart] = Math.min(prevRow[jStart - 1], prevRow[jStart])+ squaredDistance(thisSeries1Val, series2[jStart]);
-				for (j = jStart+1; j < jStop; j++) {
-					prevVal = currentRow[j] = min(prevRow[j - 1], prevVal, prevRow[j])
-									+ squaredDistance(thisSeries1Val, series2[j]);
-				}
-				
-				if (i + windowSize >= length2) {
-					// the window overruns the end of the sequence so can have a path through prevRow[jStop]
-					currentRow[jStop] = min(prevRow[jStop - 1], prevRow[jStop], prevVal) + squaredDistance(thisSeries1Val, series2[jStop]);
-				}
-				else {
-					currentRow[jStop] = Math.min(prevRow[jStop - 1], prevVal) + squaredDistance(thisSeries1Val, series2[jStop]);
-				}
-			}
-		}
-		
-		double res = sqrt(currentRow[length2 - 1]);
-		
-		return res;
-	}
+        if (second.length > first.length) {
+            return distanceKernel(
+                    first,
+                    second,
+                    bestSoFar,
+                    windowSize
+            );
+        }
+        return distanceKernel(
+                second,
+                first,
+                bestSoFar,
+                windowSize
+        );
+    }
 
-	public final double min(double A, double B, double C) {
-		if (A < B) {
-			if (A < C) {
-				// A < B and A < C
-				return A;
-			} else {
-				// C < A < B
-				return C;
-			}
-		} else {
-			if (B < C) {
-				// B < A and B < C
-				return B;
-			} else {
-				// C < B < A
-				return C;
-			}
-		}
-	}
+    /**
+     * Computes DTW with rows from {@code rowSeries} and columns from the
+     * shorter {@code columnSeries}.
+     */
+    private static double distanceKernel(
+            double[] rowSeries,
+            double[] columnSeries,
+            double bestSoFar,
+            int windowSize
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        double cutoff = normalizedCutoff(bestSoFar);
 
-	public final double squaredDistance(double A, double B) {
-		double x = A - B;
-		return x * x;
-	}
-	public int get_random_window(ObjectDataset d, Random r) {
-		//return r.nextInt((d.length() +1) / 4);
-		return r.nextInt((AppContext.length +1) / 4); //TODO
-	}
+        double[] previous = new double[columnCount];
+        double[] current = new double[columnCount];
+        Arrays.fill(previous, Double.POSITIVE_INFINITY);
 
+        for (int row = 0; row < rowCount; row++) {
+            int start = Math.max(0, row - window);
+            int end = Math.min(columnCount - 1, row + window);
+
+            if (start > end) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            if (start > 0) {
+                current[start - 1] = Double.POSITIVE_INFINITY;
+            }
+
+            double rowMinimum = Double.POSITIVE_INFINITY;
+            double rowValue = rowSeries[row];
+
+            for (int column = start; column <= end; column++) {
+                double difference = rowValue - columnSeries[column];
+                double localCost = difference * difference;
+                double accumulated;
+
+                if (row == 0 && column == 0) {
+                    accumulated = localCost;
+                } else {
+                    double diagonal = column == 0
+                            ? Double.POSITIVE_INFINITY
+                            : previous[column - 1];
+                    double above = previous[column];
+                    double left = column == start
+                            ? Double.POSITIVE_INFINITY
+                            : current[column - 1];
+                    accumulated = localCost
+                            + minimum(diagonal, above, left);
+                }
+
+                if (accumulated > cutoff) {
+                    accumulated = Double.POSITIVE_INFINITY;
+                } else if (accumulated < rowMinimum) {
+                    rowMinimum = accumulated;
+                }
+
+                current[column] = accumulated;
+            }
+
+            if (rowMinimum == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return previous[columnCount - 1];
+    }
+
+    private static double distanceKernel(
+            float[] rowSeries,
+            float[] columnSeries,
+            double bestSoFar,
+            int windowSize
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        double cutoff = normalizedCutoff(bestSoFar);
+
+        double[] previous = new double[columnCount];
+        double[] current = new double[columnCount];
+        Arrays.fill(previous, Double.POSITIVE_INFINITY);
+
+        for (int row = 0; row < rowCount; row++) {
+            int start = Math.max(0, row - window);
+            int end = Math.min(columnCount - 1, row + window);
+
+            if (start > end) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            if (start > 0) {
+                current[start - 1] = Double.POSITIVE_INFINITY;
+            }
+
+            double rowMinimum = Double.POSITIVE_INFINITY;
+            double rowValue = rowSeries[row];
+
+            for (int column = start; column <= end; column++) {
+                double difference = rowValue - (double) columnSeries[column];
+                double localCost = difference * difference;
+                double accumulated;
+
+                if (row == 0 && column == 0) {
+                    accumulated = localCost;
+                } else {
+                    double diagonal = column == 0
+                            ? Double.POSITIVE_INFINITY
+                            : previous[column - 1];
+                    double above = previous[column];
+                    double left = column == start
+                            ? Double.POSITIVE_INFINITY
+                            : current[column - 1];
+                    accumulated = localCost
+                            + minimum(diagonal, above, left);
+                }
+
+                if (accumulated > cutoff) {
+                    accumulated = Double.POSITIVE_INFINITY;
+                } else if (accumulated < rowMinimum) {
+                    rowMinimum = accumulated;
+                }
+
+                current[column] = accumulated;
+            }
+
+            if (rowMinimum == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return previous[columnCount - 1];
+    }
+
+    private static int resolveWindow(
+            int configuredWindow,
+            int firstLength,
+            int secondLength
+    ) {
+        if (configuredWindow < 0) {
+            return Math.max(firstLength, secondLength);
+        }
+        return Math.max(
+                configuredWindow,
+                Math.abs(firstLength - secondLength)
+        );
+    }
+
+    private static double normalizedCutoff(double bestSoFar) {
+        if (Double.isNaN(bestSoFar)) {
+            throw new IllegalArgumentException(
+                    "DTW bestSoFar cannot be NaN."
+            );
+        }
+        return bestSoFar < 0.0 ? 0.0 : bestSoFar;
+    }
+
+    private static double minimum(
+            double first,
+            double second,
+            double third
+    ) {
+        double minimum = first < second ? first : second;
+        return minimum < third ? minimum : third;
+    }
+
+    private static void requireNonempty(
+            int firstLength,
+            int secondLength
+    ) {
+        if (firstLength == 0 || secondLength == 0) {
+            throw new IllegalArgumentException(
+                    "DTW requires two nonempty time series."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "DTW requires matching double[] or float[] inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric "
+                        + "arrays are not supported."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
+    }
+
+    public int get_random_window(ObjectDataset dataset, Random random) {
+        int upperExclusive = (AppContext.length + 1) / 4;
+        return upperExclusive <= 1
+                ? 0
+                : random.nextInt(upperExclusive);
+    }
 }

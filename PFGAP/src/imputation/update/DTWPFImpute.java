@@ -37,9 +37,10 @@ import java.util.Objects;
  * static global cache and prevents path state from leaking across datasets,
  * repetitions, or concurrent operations.</p>
  *
- * <p>Numeric updates use Jacobi-style semantics: workers read only the
- * unchanged input datasets and publish completed replacement rows after all
- * row computations finish.</p>
+ * <p>Numeric updates use Jacobi-style semantics and preserve primitive feature
+ * storage. Supported observations are {@code double[]}, {@code float[]},
+ * {@code double[][]}, and {@code float[][]}. Weighted calculations use double
+ * precision; float results are narrowed once when written.</p>
  */
 public final class DTWPFImpute {
 
@@ -79,8 +80,8 @@ public final class DTWPFImpute {
                     data,
                     rawData,
                     rawData,
-                    missing.indices2D,
-                    missing.indices2D,
+                    missing,
+                    missing,
                     neighbors,
                     true,
                     runtime,
@@ -91,8 +92,8 @@ public final class DTWPFImpute {
                     data,
                     rawData,
                     rawData,
-                    missing.indices1D,
-                    missing.indices1D,
+                    missing,
+                    missing,
                     neighbors,
                     true,
                     runtime,
@@ -140,8 +141,8 @@ public final class DTWPFImpute {
                     testData,
                     testRaw,
                     trainRaw,
-                    testMissing.indices2D,
-                    trainMissing == null ? null : trainMissing.indices2D,
+                    testMissing,
+                    trainMissing,
                     neighbors,
                     false,
                     runtime,
@@ -152,8 +153,8 @@ public final class DTWPFImpute {
                     testData,
                     testRaw,
                     trainRaw,
-                    testMissing.indices1D,
-                    trainMissing == null ? null : trainMissing.indices1D,
+                    testMissing,
+                    trainMissing,
                     neighbors,
                     false,
                     runtime,
@@ -166,13 +167,14 @@ public final class DTWPFImpute {
             ListObjectDataset dataToUpdate,
             List<Object> targetData,
             List<Object> neighborData,
-            List<List<Integer>> targetMissing,
-            List<List<Integer>> neighborMissing,
+            MissingIndices targetMissing,
+            MissingIndices neighborMissing,
             NeighborRows neighborRows,
             boolean excludeSelf,
             ParallelRuntime runtime,
             int windowSize
     ) throws Exception {
+        MissingIndices retainedMissing = dataToUpdate.getMissingIndices();
         double[] fallbackMeans = computeObservedMeans1D(
                 neighborData,
                 neighborMissing
@@ -182,8 +184,9 @@ public final class DTWPFImpute {
         forRanges(targetData.size(), runtime, (start, end) -> {
             for (int target = start; target < end; target++) {
                 Object targetSeries = targetData.get(target);
-                double[] replacement = copySeries1DToPrimitive(targetSeries);
-                List<Integer> missingTimes = targetMissing.get(target);
+                Object replacement = copySeries1D(targetSeries);
+                int missingStart = targetMissing.start1D(target);
+                int missingEnd = targetMissing.end1D(target);
 
                 List<AlignedNeighbor> alignedNeighbors = buildAlignedNeighbors(
                         target,
@@ -195,8 +198,11 @@ public final class DTWPFImpute {
                         windowSize
                 );
 
-                for (int targetTime : missingTimes) {
-                    requireIndex(replacement.length, targetTime, target, -1);
+                for (int missingOffset = missingStart;
+                        missingOffset < missingEnd;
+                        missingOffset++) {
+                    int targetTime = targetMissing.positionAt(missingOffset);
+                    requireIndex(length1D(replacement), targetTime, target, -1);
                     WeightedAverage average = new WeightedAverage();
 
                     for (AlignedNeighbor neighbor : alignedNeighbors) {
@@ -211,12 +217,16 @@ public final class DTWPFImpute {
                         }
                     }
 
-                    replacement[targetTime] = average.available()
-                            ? average.value()
-                            : fallbackValue1D(
+                    setNumericValue1D(
                             replacement,
                             targetTime,
-                            fallbackMeans
+                            average.available()
+                                    ? average.value()
+                                    : fallbackValue1D(
+                                            replacement,
+                                            targetTime,
+                                            fallbackMeans
+                                    )
                     );
                 }
 
@@ -225,19 +235,21 @@ public final class DTWPFImpute {
         });
 
         dataToUpdate.setData(asObjectList(updated));
+        dataToUpdate.setMissingIndices(retainedMissing);
     }
 
     private static void impute2D(
             ListObjectDataset dataToUpdate,
             List<Object> targetData,
             List<Object> neighborData,
-            List<List<List<Integer>>> targetMissing,
-            List<List<List<Integer>>> neighborMissing,
+            MissingIndices targetMissing,
+            MissingIndices neighborMissing,
             NeighborRows neighborRows,
             boolean excludeSelf,
             ParallelRuntime runtime,
             int windowSize
     ) throws Exception {
+        MissingIndices retainedMissing = dataToUpdate.getMissingIndices();
         double[][] fallbackMeans = computeObservedMeans2D(
                 neighborData,
                 neighborMissing
@@ -247,8 +259,8 @@ public final class DTWPFImpute {
         forRanges(targetData.size(), runtime, (start, end) -> {
             for (int target = start; target < end; target++) {
                 Object targetSeries = targetData.get(target);
-                double[][] replacement = copySeries2DToPrimitive(targetSeries);
-                List<List<Integer>> missingByDimension = targetMissing.get(target);
+                Object replacement = copySeries2D(targetSeries);
+                int missingDimensions = targetMissing.dimensionCount(target);
 
                 List<AlignedNeighbor> alignedNeighbors = buildAlignedNeighbors(
                         target,
@@ -261,15 +273,26 @@ public final class DTWPFImpute {
                 );
 
                 for (int dimension = 0;
-                     dimension < missingByDimension.size();
+                     dimension < missingDimensions;
                      dimension++) {
-                    if (dimension >= replacement.length) {
+                    if (dimension >= dimensions2D(replacement)) {
                         continue;
                     }
 
-                    for (int targetTime : missingByDimension.get(dimension)) {
+                    int missingStart = targetMissing.start2D(
+                            target,
+                            dimension
+                    );
+                    int missingEnd = targetMissing.end2D(
+                            target,
+                            dimension
+                    );
+                    for (int missingOffset = missingStart;
+                            missingOffset < missingEnd;
+                            missingOffset++) {
+                        int targetTime = targetMissing.positionAt(missingOffset);
                         requireIndex(
-                                replacement[dimension].length,
+                                length2D(replacement, dimension),
                                 targetTime,
                                 target,
                                 dimension
@@ -290,13 +313,18 @@ public final class DTWPFImpute {
                             }
                         }
 
-                        replacement[dimension][targetTime] = average.available()
-                                ? average.value()
-                                : fallbackValue2D(
+                        setNumericValue2D(
                                 replacement,
                                 dimension,
                                 targetTime,
-                                fallbackMeans
+                                average.available()
+                                        ? average.value()
+                                        : fallbackValue2D(
+                                                replacement,
+                                                dimension,
+                                                targetTime,
+                                                fallbackMeans
+                                        )
                         );
                     }
                 }
@@ -306,6 +334,7 @@ public final class DTWPFImpute {
         });
 
         dataToUpdate.setData(asObjectList(updated));
+        dataToUpdate.setMissingIndices(retainedMissing);
     }
 
     private static List<AlignedNeighbor> buildAlignedNeighbors(
@@ -364,8 +393,8 @@ public final class DTWPFImpute {
             }
 
             return new DTW_D().getAlignmentPath(
-                    copySeries2DToPrimitive(first),
-                    copySeries2DToPrimitive(second),
+                    toDoubleSeries2D(first),
+                    toDoubleSeries2D(second),
                     windowSize
             );
         }
@@ -379,8 +408,8 @@ public final class DTWPFImpute {
         }
 
         return new DTWWithPath().getAlignmentPath(
-                copySeries1DToPrimitive(first),
-                copySeries1DToPrimitive(second),
+                toDoubleSeries1D(first),
+                toDoubleSeries1D(second),
                 windowSize
         );
     }
@@ -525,6 +554,24 @@ public final class DTWPFImpute {
             }
             return false;
         }
+        if (series instanceof float[] row) {
+            for (float value : row) {
+                if (Float.isNaN(value)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (series instanceof float[][] matrix) {
+            for (float[] row : matrix) {
+                for (float value : row) {
+                    if (Float.isNaN(value)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
 
         if (series instanceof Object[] row) {
             for (Object value : row) {
@@ -563,6 +610,9 @@ public final class DTWPFImpute {
         if (series instanceof double[] row) {
             return index >= 0 && index < row.length;
         }
+        if (series instanceof float[] row) {
+            return index >= 0 && index < row.length;
+        }
         if (series instanceof Object[] row) {
             return index >= 0 && index < row.length;
         }
@@ -575,6 +625,12 @@ public final class DTWPFImpute {
             int index
     ) {
         if (series instanceof double[][] matrix) {
+            return dimension >= 0
+                    && dimension < matrix.length
+                    && index >= 0
+                    && index < matrix[dimension].length;
+        }
+        if (series instanceof float[][] matrix) {
             return dimension >= 0
                     && dimension < matrix.length
                     && index >= 0
@@ -596,6 +652,9 @@ public final class DTWPFImpute {
         if (series instanceof double[] row) {
             return row[index];
         }
+        if (series instanceof float[] row) {
+            return row[index];
+        }
         if (series instanceof Object[] row) {
             return objectToDouble(row[index]);
         }
@@ -608,6 +667,9 @@ public final class DTWPFImpute {
             int index
     ) {
         if (series instanceof double[][] matrix) {
+            return matrix[dimension][index];
+        }
+        if (series instanceof float[][] matrix) {
             return matrix[dimension][index];
         }
         if (series instanceof Object[][] matrix) {
@@ -632,49 +694,61 @@ public final class DTWPFImpute {
         return number.doubleValue();
     }
 
-    private static double[] copySeries1DToPrimitive(
-            Object series
-    ) {
+    private static Object copySeries1D(Object series) {
         if (series instanceof double[] row) {
             return row.clone();
         }
-        if (series instanceof Object[] row) {
-            double[] copied = new double[row.length];
-            for (int index = 0; index < row.length; index++) {
-                copied[index] = objectToDouble(row[index]);
-            }
-            return copied;
+        if (series instanceof float[] row) {
+            return row.clone();
         }
         throw unsupportedSeries(series, "1D");
     }
 
-    private static double[][] copySeries2DToPrimitive(
-            Object series
-    ) {
+    private static Object copySeries2D(Object series) {
         if (series instanceof double[][] matrix) {
             double[][] copied = new double[matrix.length][];
-            for (int dimension = 0;
-                 dimension < matrix.length;
-                 dimension++) {
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
                 copied[dimension] = matrix[dimension].clone();
             }
             return copied;
         }
-        if (series instanceof Object[][] matrix) {
-            double[][] copied = new double[matrix.length][];
-            for (int dimension = 0;
-                 dimension < matrix.length;
-                 dimension++) {
-                copied[dimension] = new double[matrix[dimension].length];
-                for (int index = 0;
-                     index < matrix[dimension].length;
-                     index++) {
-                    copied[dimension][index] = objectToDouble(
-                            matrix[dimension][index]
-                    );
-                }
+        if (series instanceof float[][] matrix) {
+            float[][] copied = new float[matrix.length][];
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                copied[dimension] = matrix[dimension].clone();
             }
             return copied;
+        }
+        throw unsupportedSeries(series, "2D");
+    }
+
+    private static double[] toDoubleSeries1D(Object series) {
+        if (series instanceof double[] row) {
+            return row;
+        }
+        if (series instanceof float[] row) {
+            double[] converted = new double[row.length];
+            for (int index = 0; index < row.length; index++) {
+                converted[index] = row[index];
+            }
+            return converted;
+        }
+        throw unsupportedSeries(series, "1D");
+    }
+
+    private static double[][] toDoubleSeries2D(Object series) {
+        if (series instanceof double[][] matrix) {
+            return matrix;
+        }
+        if (series instanceof float[][] matrix) {
+            double[][] converted = new double[matrix.length][];
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                converted[dimension] = new double[matrix[dimension].length];
+                for (int index = 0; index < matrix[dimension].length; index++) {
+                    converted[dimension][index] = matrix[dimension][index];
+                }
+            }
+            return converted;
         }
         throw unsupportedSeries(series, "2D");
     }
@@ -717,12 +791,13 @@ public final class DTWPFImpute {
     }
 
     private static double fallbackValue1D(
-            double[] row,
+            Object row,
             int index,
             double[] means
     ) {
-        if (!Double.isNaN(row[index])) {
-            return row[index];
+        double current = getNumericValue1D(row, index);
+        if (!Double.isNaN(current)) {
+            return current;
         }
         if (index < means.length && !Double.isNaN(means[index])) {
             return means[index];
@@ -731,13 +806,14 @@ public final class DTWPFImpute {
     }
 
     private static double fallbackValue2D(
-            double[][] matrix,
+            Object matrix,
             int dimension,
             int index,
             double[][] means
     ) {
-        if (!Double.isNaN(matrix[dimension][index])) {
-            return matrix[dimension][index];
+        double current = getNumericValue2D(matrix, dimension, index);
+        if (!Double.isNaN(current)) {
+            return current;
         }
         if (dimension < means.length
                 && index < means[dimension].length
@@ -747,9 +823,42 @@ public final class DTWPFImpute {
         return 0.0;
     }
 
+    private static void setNumericValue1D(
+            Object series,
+            int index,
+            double value
+    ) {
+        if (series instanceof double[] row) {
+            row[index] = value;
+            return;
+        }
+        if (series instanceof float[] row) {
+            row[index] = (float) value;
+            return;
+        }
+        throw unsupportedSeries(series, "1D");
+    }
+
+    private static void setNumericValue2D(
+            Object series,
+            int dimension,
+            int index,
+            double value
+    ) {
+        if (series instanceof double[][] matrix) {
+            matrix[dimension][index] = value;
+            return;
+        }
+        if (series instanceof float[][] matrix) {
+            matrix[dimension][index] = (float) value;
+            return;
+        }
+        throw unsupportedSeries(series, "2D");
+    }
+
     private static double[] computeObservedMeans1D(
             List<Object> data,
-            List<List<Integer>> missing
+            MissingIndices missing
     ) {
         int maximumLength = 0;
         for (Object series : data) {
@@ -763,9 +872,6 @@ public final class DTWPFImpute {
             Object series = data.get(instance);
             int length = length1D(series);
             for (int index = 0; index < length; index++) {
-                if (isMissing1D(missing, instance, index)) {
-                    continue;
-                }
                 double value = getNumericValue1D(series, index);
                 if (!Double.isNaN(value)) {
                     sums[index] += value;
@@ -785,7 +891,7 @@ public final class DTWPFImpute {
 
     private static double[][] computeObservedMeans2D(
             List<Object> data,
-            List<List<List<Integer>>> missing
+            MissingIndices missing
     ) {
         int maximumDimensions = 0;
         for (Object series : data) {
@@ -824,14 +930,6 @@ public final class DTWPFImpute {
                 for (int index = 0;
                      index < length2D(series, dimension);
                      index++) {
-                    if (isMissing2D(
-                            missing,
-                            instance,
-                            dimension,
-                            index
-                    )) {
-                        continue;
-                    }
 
                     double value = getNumericValue2D(
                             series,
@@ -864,22 +962,23 @@ public final class DTWPFImpute {
     }
 
     private static boolean isMissing1D(
-            List<List<Integer>> missing,
+            MissingIndices missing,
             int instance,
             int index
     ) {
         if (missing == null) {
             return false;
         }
-        if (instance < 0 || instance >= missing.size()) {
+        if (!missing.is1D()
+                || instance < 0
+                || instance >= missing.instanceCount()) {
             return true;
         }
-        List<Integer> positions = missing.get(instance);
-        return positions != null && positions.contains(index);
+        return missing.contains1D(instance, index);
     }
 
     private static boolean isMissing2D(
-            List<List<List<Integer>>> missing,
+            MissingIndices missing,
             int instance,
             int dimension,
             int index
@@ -887,23 +986,23 @@ public final class DTWPFImpute {
         if (missing == null) {
             return false;
         }
-        if (instance < 0 || instance >= missing.size()) {
-            return true;
-        }
-        List<List<Integer>> instanceMissing = missing.get(instance);
-        if (instanceMissing == null
+        if (!missing.is2D()
+                || instance < 0
+                || instance >= missing.instanceCount()
                 || dimension < 0
-                || dimension >= instanceMissing.size()) {
+                || dimension >= missing.dimensionCount(instance)) {
             return true;
         }
-        List<Integer> positions = instanceMissing.get(dimension);
-        return positions != null && positions.contains(index);
+        return missing.contains2D(instance, dimension, index);
     }
 
     private static int length1D(
             Object series
     ) {
         if (series instanceof double[] row) {
+            return row.length;
+        }
+        if (series instanceof float[] row) {
             return row.length;
         }
         if (series instanceof Object[] row) {
@@ -918,6 +1017,9 @@ public final class DTWPFImpute {
         if (series instanceof double[][] matrix) {
             return matrix.length;
         }
+        if (series instanceof float[][] matrix) {
+            return matrix.length;
+        }
         if (series instanceof Object[][] matrix) {
             return matrix.length;
         }
@@ -929,6 +1031,11 @@ public final class DTWPFImpute {
             int dimension
     ) {
         if (series instanceof double[][] matrix) {
+            return dimension >= 0 && dimension < matrix.length
+                    ? matrix[dimension].length
+                    : 0;
+        }
+        if (series instanceof float[][] matrix) {
             return dimension >= 0 && dimension < matrix.length
                     ? matrix[dimension].length
                     : 0;

@@ -2,82 +2,329 @@ package distance.elastic;
 
 import util.Pair;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
-public class DTWWithPath implements Serializable {
+/**
+ * Univariate Dynamic Time Warping with optional alignment-path reconstruction.
+ *
+ * <p>The distance-only method delegates to the optimized squared-cost
+ * {@link DTW} kernel. Path reconstruction uses two cost rows and one byte of
+ * predecessor information per reachable matrix cell. It does not retain a
+ * full matrix of double costs or a three-dimensional integer backtrack array.</p>
+ *
+ * <p>Both {@code double[]} and {@code float[]} inputs are supported. A
+ * negative window means unconstrained alignment. A finite window is widened
+ * when necessary to preserve an endpoint-to-endpoint path for unequal-length
+ * inputs.</p>
+ *
+ * <p>The class is stateless and safe for concurrent use. Path calculations do
+ * not use {@code bestSoFar}: pruning by a competitive distance bound may remove
+ * cells needed to reconstruct the exact unconstrained optimum path.</p>
+ */
+public final class DTWWithPath implements Serializable {
 
-    public DTWWithPath() {}
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    public double distance(double[] series1, double[] series2, int windowSize) {
-        return computeDTW(series1, series2, windowSize, false, null);
+    private static final byte UNREACHABLE = 0;
+    private static final byte START = 1;
+    private static final byte DIAGONAL = 2;
+    private static final byte ABOVE = 3;
+    private static final byte LEFT = 4;
+
+    private final DTW dtw;
+
+    public DTWWithPath() {
+        dtw = new DTW();
     }
 
-    public List<Pair<Integer, Integer>> getAlignmentPath(double[] series1, double[] series2, int windowSize) {
-        List<Pair<Integer, Integer>> path = new ArrayList<>();
-        computeDTW(series1, series2, windowSize, true, path);
-        return path;
+    /** Returns accumulated squared DTW cost. */
+    public double distance(
+            double[] first,
+            double[] second,
+            int windowSize
+    ) {
+        return dtw.distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                windowSize
+        );
     }
 
-    private double computeDTW(double[] s1, double[] s2, int windowSize, boolean trackPath, List<Pair<Integer, Integer>> pathOut) {
-        int n = s1.length;
-        int m = s2.length;
-        if (windowSize == -1) windowSize = Math.max(n, m);
+    /** Returns accumulated squared DTW cost. */
+    public double distance(
+            float[] first,
+            float[] second,
+            int windowSize
+    ) {
+        return dtw.distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                windowSize
+        );
+    }
 
-        double[][] cost = new double[n][m];
-        int[][][] backtrack = trackPath ? new int[n][m][2] : null;
+    /** Returns accumulated squared DTW cost with finite-bound pruning. */
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        return dtw.distance(first, second, bestSoFar, windowSize);
+    }
 
-        for (int i = 0; i < n; i++) {
-            int jStart = Math.max(0, i - windowSize);
-            int jEnd = Math.min(m, i + windowSize + 1);
-            for (int j = jStart; j < jEnd; j++) {
-                double dist = squaredDistance(s1[i], s2[j]);
-                if (i == 0 && j == 0) {
-                    cost[i][j] = dist;
+    public List<Pair<Integer, Integer>> getAlignmentPath(
+            double[] first,
+            double[] second,
+            int windowSize
+    ) {
+        requireNonempty(first.length, second.length);
+        return alignmentPath(first, second, windowSize);
+    }
+
+    public List<Pair<Integer, Integer>> getAlignmentPath(
+            float[] first,
+            float[] second,
+            int windowSize
+    ) {
+        requireNonempty(first.length, second.length);
+        return alignmentPath(first, second, windowSize);
+    }
+
+    public List<Pair<Integer, Integer>> getAlignmentPath(
+            Object first,
+            Object second,
+            int windowSize
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return getAlignmentPath(
+                    firstValues,
+                    secondValues,
+                    windowSize
+            );
+        }
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return getAlignmentPath(
+                    firstValues,
+                    secondValues,
+                    windowSize
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    private static List<Pair<Integer, Integer>> alignmentPath(
+            double[] first,
+            double[] second,
+            int windowSize
+    ) {
+        int rowCount = first.length;
+        int columnCount = second.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        double[] previous = new double[columnCount];
+        double[] current = new double[columnCount];
+        byte[][] predecessors = new byte[rowCount][columnCount];
+
+        for (int index = 0; index < columnCount; index++) {
+            previous[index] = Double.POSITIVE_INFINITY;
+        }
+
+        for (int row = 0; row < rowCount; row++) {
+            int start = Math.max(0, row - window);
+            int end = Math.min(columnCount - 1, row + window);
+            if (start > 0) {
+                current[start - 1] = Double.POSITIVE_INFINITY;
+            }
+
+            double rowValue = first[row];
+            for (int column = start; column <= end; column++) {
+                double difference = rowValue - second[column];
+                double localCost = difference * difference;
+
+                if (row == 0 && column == 0) {
+                    current[column] = localCost;
+                    predecessors[row][column] = START;
+                    continue;
+                }
+
+                double diagonal = row > 0 && column > 0
+                        ? previous[column - 1]
+                        : Double.POSITIVE_INFINITY;
+                double above = row > 0
+                        ? previous[column]
+                        : Double.POSITIVE_INFINITY;
+                double left = column > start
+                        ? current[column - 1]
+                        : Double.POSITIVE_INFINITY;
+
+                if (diagonal <= above && diagonal <= left) {
+                    current[column] = localCost + diagonal;
+                    predecessors[row][column] = DIAGONAL;
+                } else if (above <= left) {
+                    current[column] = localCost + above;
+                    predecessors[row][column] = ABOVE;
                 } else {
-                    double minPrev = Double.POSITIVE_INFINITY;
-                    int pi = -1, pj = -1;
-                    if (i > 0 && j > 0 && cost[i - 1][j - 1] < minPrev) {
-                        minPrev = cost[i - 1][j - 1];
-                        pi = i - 1; pj = j - 1;
-                    }
-                    if (i > 0 && cost[i - 1][j] < minPrev) {
-                        minPrev = cost[i - 1][j];
-                        pi = i - 1; pj = j;
-                    }
-                    if (j > 0 && cost[i][j - 1] < minPrev) {
-                        minPrev = cost[i][j - 1];
-                        pi = i; pj = j - 1;
-                    }
-                    cost[i][j] = dist + minPrev;
-                    if (trackPath) {
-                        backtrack[i][j][0] = pi;
-                        backtrack[i][j][1] = pj;
-                    }
+                    current[column] = localCost + left;
+                    predecessors[row][column] = LEFT;
                 }
             }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
         }
 
-        if (trackPath && pathOut != null) {
-            int i = n - 1, j = m - 1;
-            while (i >= 0 && j >= 0) {
-                pathOut.add(0, new Pair<>(i, j));
-                int ni = backtrack[i][j][0];
-                int nj = backtrack[i][j][1];
-                if (ni == i && nj == j) break;
-                i = ni;
-                j = nj;
+        return reconstruct(predecessors, rowCount, columnCount);
+    }
+
+    private static List<Pair<Integer, Integer>> alignmentPath(
+            float[] first,
+            float[] second,
+            int windowSize
+    ) {
+        int rowCount = first.length;
+        int columnCount = second.length;
+        int window = resolveWindow(windowSize, rowCount, columnCount);
+        double[] previous = new double[columnCount];
+        double[] current = new double[columnCount];
+        byte[][] predecessors = new byte[rowCount][columnCount];
+
+        for (int index = 0; index < columnCount; index++) {
+            previous[index] = Double.POSITIVE_INFINITY;
+        }
+
+        for (int row = 0; row < rowCount; row++) {
+            int start = Math.max(0, row - window);
+            int end = Math.min(columnCount - 1, row + window);
+            if (start > 0) {
+                current[start - 1] = Double.POSITIVE_INFINITY;
+            }
+
+            double rowValue = first[row];
+            for (int column = start; column <= end; column++) {
+                double difference = rowValue - (double) second[column];
+                double localCost = difference * difference;
+
+                if (row == 0 && column == 0) {
+                    current[column] = localCost;
+                    predecessors[row][column] = START;
+                    continue;
+                }
+
+                double diagonal = row > 0 && column > 0
+                        ? previous[column - 1]
+                        : Double.POSITIVE_INFINITY;
+                double above = row > 0
+                        ? previous[column]
+                        : Double.POSITIVE_INFINITY;
+                double left = column > start
+                        ? current[column - 1]
+                        : Double.POSITIVE_INFINITY;
+
+                if (diagonal <= above && diagonal <= left) {
+                    current[column] = localCost + diagonal;
+                    predecessors[row][column] = DIAGONAL;
+                } else if (above <= left) {
+                    current[column] = localCost + above;
+                    predecessors[row][column] = ABOVE;
+                } else {
+                    current[column] = localCost + left;
+                    predecessors[row][column] = LEFT;
+                }
+            }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return reconstruct(predecessors, rowCount, columnCount);
+    }
+
+    private static List<Pair<Integer, Integer>> reconstruct(
+            byte[][] predecessors,
+            int rowCount,
+            int columnCount
+    ) {
+        int row = rowCount - 1;
+        int column = columnCount - 1;
+        if (predecessors[row][column] == UNREACHABLE) {
+            return Collections.emptyList();
+        }
+
+        List<Pair<Integer, Integer>> reversed = new ArrayList<>(
+                rowCount + columnCount - 1
+        );
+
+        while (true) {
+            reversed.add(new Pair<>(row, column));
+            byte direction = predecessors[row][column];
+
+            if (direction == START) {
+                break;
+            }
+            if (direction == DIAGONAL) {
+                row--;
+                column--;
+            } else if (direction == ABOVE) {
+                row--;
+            } else if (direction == LEFT) {
+                column--;
+            } else {
+                return Collections.emptyList();
             }
         }
 
-        return Math.sqrt(cost[n - 1][m - 1]);
+        Collections.reverse(reversed);
+        return reversed;
     }
 
-    private double squaredDistance(double a, double b) {
-        double diff = a - b;
-        return diff * diff;
+    private static int resolveWindow(
+            int configuredWindow,
+            int firstLength,
+            int secondLength
+    ) {
+        if (configuredWindow < 0) {
+            return Math.max(firstLength, secondLength);
+        }
+        return Math.max(
+                configuredWindow,
+                Math.abs(firstLength - secondLength)
+        );
     }
 
+    private static void requireNonempty(
+            int firstLength,
+            int secondLength
+    ) {
+        if (firstLength == 0 || secondLength == 0) {
+            throw new IllegalArgumentException(
+                    "DTWWithPath requires two nonempty series."
+            );
+        }
+    }
 
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "DTWWithPath requires matching double[] or float[] inputs. "
+                        + "Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
+    }
 }

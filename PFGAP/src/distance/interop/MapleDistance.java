@@ -1,152 +1,142 @@
 package distance.interop;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Serial;
+import java.io.Serializable;
 
-public class MapleDistance implements Serializable {
+/**
+ * User-defined distance backed by a persistent Maple process.
+ *
+ * <p>The configured Maple procedure continues to receive two Maple lists and
+ * must return one numeric distance. Matching {@code double[]} and
+ * {@code float[]} inputs are supported. Calls remain serialized because all
+ * instances share one Maple process and its input/output streams.</p>
+ */
+public final class MapleDistance implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    private static final Object MAPLE_LOCK = new Object();
+    private static final String READY_MARKER = "READY";
+    private static final String LOADED_MARKER = "LOADED";
+    private static final String RESULT_MARKER = "RESULT:";
+
     private static Process mapleProcess;
     private static BufferedWriter mapleInput;
     private static BufferedReader mapleOutput;
-    private static final Object mapleLock = new Object();
-    private static boolean initialized = false;
+    private static boolean initialized;
 
     private final String scriptPath;
     private final String functionName;
 
     public MapleDistance(String descriptor) throws IOException {
-        String[] parts = descriptor.split(":");
-        if (parts.length < 2) {
-            throw new IllegalArgumentException("Invalid maple descriptor format. Use maple:path/to/file.mpl[:FunctionName]");
+        String[] parts = parseDescriptor(descriptor);
+        scriptPath = parts[1].trim();
+        functionName = parts.length >= 3 && !parts[2].isBlank()
+                ? parts[2].trim()
+                : "Distance";
+
+        synchronized (MAPLE_LOCK) {
+            initialize();
         }
-
-        this.scriptPath = parts[1].trim();
-        this.functionName = (parts.length >= 3) ? parts[2].trim() : "Distance";
-
-        initialize();
     }
 
-    private void initialize() throws IOException {
-        if (initialized) return;
+    public double distance(Object first, Object second) throws IOException {
+        String firstList = toMapleList(first);
+        String secondList = toMapleList(second);
 
-        ProcessBuilder pb = new ProcessBuilder("maple", "-q");
-        mapleProcess = pb.redirectErrorStream(true).start();
-        mapleInput = new BufferedWriter(new OutputStreamWriter(mapleProcess.getOutputStream()));
-        mapleOutput = new BufferedReader(new InputStreamReader(mapleProcess.getInputStream()));
-
-        mapleInput.write("printf(\"READY\\n\"):\n");
-        mapleInput.flush();
-        waitForMarker("READY");
-
-        mapleInput.write("read(\"" + scriptPath + "\"):\n");
-        mapleInput.flush();
-
-        mapleInput.write("printf(\"LOADED\\n\"):\n");
-        mapleInput.flush();
-        waitForMarker("LOADED");
-
-        initialized = true;
-    }
-
-    private void waitForMarker(String marker) throws IOException {
-        String line;
-        while ((line = mapleOutput.readLine()) != null) {
-            if (line.contains(marker)) {
-                return;
-            }
-        }
-        throw new IOException("Did not receive expected marker from Maple: " + marker);
-    }
-
-    public double distance(Object T1, Object T2) throws IOException {
-        double[] t1 = (double[]) T1;
-        double[] t2 = (double[]) T2;
-
-        synchronized (mapleLock) {
-            if (!initialized) {
-                initialize();
-            }
-
-            mapleInput.write("t1 := " + arrayToMapleList(t1) + ":\n");
-            mapleInput.write("t2 := " + arrayToMapleList(t2) + ":\n");
-            mapleInput.write("res := " + functionName + "(t1, t2):\n");
-            mapleInput.write("printf(\"RESULT: %.15f\\n\", res):\n");
+        synchronized (MAPLE_LOCK) {
+            reinitializeIfNeeded();
+            mapleInput.write("t1 := " + firstList + ":\n");
+            mapleInput.write("t2 := " + secondList + ":\n");
+            mapleInput.write(
+                    "res := " + functionName + "(t1, t2):\n"
+            );
+            mapleInput.write(
+                    "printf(\"RESULT: %.15f\\n\", res):\n"
+            );
             mapleInput.flush();
 
             String line;
             while ((line = mapleOutput.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("RESULT:")) {
-                    String result = line.substring("RESULT:".length()).trim();
-                    return Double.parseDouble(result);
+                String trimmed = line.trim();
+                if (trimmed.startsWith(RESULT_MARKER)) {
+                    return Double.parseDouble(
+                            trimmed.substring(RESULT_MARKER.length()).trim()
+                    );
                 }
             }
 
+            initialized = false;
             throw new IOException("Failed to read distance result from Maple.");
         }
     }
 
     public static void close() throws IOException {
-        if (!initialized) return;
-
-        mapleInput.write("quit:\n");
-        mapleInput.flush();
-        mapleProcess.destroy();
-        initialized = false;
-    }
-
-    private static String arrayToMapleList(double[] arr) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < arr.length; i++) {
-            sb.append(arr[i]);
-            if (i < arr.length - 1) {
-                sb.append(",");
+        synchronized (MAPLE_LOCK) {
+            IOException failure = null;
+            if (mapleInput != null) {
+                try {
+                    mapleInput.write("quit:\n");
+                    mapleInput.flush();
+                } catch (IOException exception) {
+                    failure = exception;
+                }
+            }
+            closeProcessResources();
+            initialized = false;
+            if (failure != null) {
+                throw failure;
             }
         }
-        sb.append("]");
-        return sb.toString();
     }
-}
 
-/*package distance.interop;
-
-import java.io.*;
-
-public class MapleDistance implements Serializable {
-    private static Process mapleProcess;
-    private static BufferedWriter mapleInput;
-    private static BufferedReader mapleOutput;
-    private static boolean initialized = false;
-
-    static {
-        try {
-            initialize();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to start Maple process", e);
+    private void initialize() throws IOException {
+        if (initialized
+                && mapleProcess != null
+                && mapleProcess.isAlive()
+                && mapleInput != null
+                && mapleOutput != null) {
+            return;
         }
-    }
 
-    private static void initialize() throws IOException {
-        if (initialized) return;
+        ProcessBuilder processBuilder = new ProcessBuilder("maple", "-q");
+        mapleProcess = processBuilder.redirectErrorStream(true).start();
+        mapleInput = new BufferedWriter(
+                new OutputStreamWriter(mapleProcess.getOutputStream())
+        );
+        mapleOutput = new BufferedReader(
+                new InputStreamReader(mapleProcess.getInputStream())
+        );
 
-        ProcessBuilder pb = new ProcessBuilder("maple", "-q");
-        mapleProcess = pb.redirectErrorStream(true).start();
-        mapleInput = new BufferedWriter(new OutputStreamWriter(mapleProcess.getOutputStream()));
-        mapleOutput = new BufferedReader(new InputStreamReader(mapleProcess.getInputStream()));
-
-        // Wait for initial READY marker
         mapleInput.write("printf(\"READY\\n\"):\n");
         mapleInput.flush();
-        waitForMarker("READY");
+        waitForMarker(READY_MARKER);
 
-        // ✅ Load the distance function script
-        mapleInput.write("read(\"MapleDistance.mpl\"):\n"); // Adjust path if needed
-        mapleInput.flush();
-
-        // Wait for confirmation after loading the script
+        mapleInput.write(
+                "read(\"" + mapleStringContent(scriptPath) + "\"):\n"
+        );
         mapleInput.write("printf(\"LOADED\\n\"):\n");
         mapleInput.flush();
-        waitForMarker("LOADED");
-
+        waitForMarker(LOADED_MARKER);
         initialized = true;
+    }
+
+    private void reinitializeIfNeeded() throws IOException {
+        if (!initialized
+                || mapleProcess == null
+                || !mapleProcess.isAlive()
+                || mapleInput == null
+                || mapleOutput == null) {
+            closeProcessResources();
+            initialized = false;
+            initialize();
+        }
     }
 
     private static void waitForMarker(String marker) throws IOException {
@@ -156,57 +146,91 @@ public class MapleDistance implements Serializable {
                 return;
             }
         }
-        throw new IOException("Did not receive expected marker from Maple: " + marker);
+        throw new IOException(
+                "Did not receive expected marker from Maple: " + marker
+        );
     }
 
-    //public static double distance(double[] t1, double[] t2) throws IOException {
-    public static double distance(Object T1, Object T2) throws IOException {
-
-        double[] t1 = (double[]) T1;
-        double[] t2 = (double[]) T2;
-
-        if (!initialized) {
-            initialize();
-        }
-
-        mapleInput.write("t1 := " + arrayToMapleList(t1) + ":\n");
-        mapleInput.write("t2 := " + arrayToMapleList(t2) + ":\n");
-        //mapleInput.write("t1 := Vector(" + arrayToMapleList(t1) + "):\n");
-        //mapleInput.write("t2 := Vector(" + arrayToMapleList(t2) + "):\n");
-        mapleInput.write("res := Distance(t1, t2):\n");
-        mapleInput.write("printf(\"RESULT: %.15f\\n\", res):\n");
-        mapleInput.flush();
-
-        // Wait for the result
-        String line;
-        while ((line = mapleOutput.readLine()) != null) {
-            if (line.startsWith("RESULT:")) {
-                return Double.parseDouble(line.substring(7).trim());
+    private static String toMapleList(Object input) {
+        if (input instanceof double[] values) {
+            StringBuilder builder = new StringBuilder(
+                    Math.max(2, values.length * 10)
+            );
+            builder.append('[');
+            for (int index = 0; index < values.length; index++) {
+                if (index > 0) {
+                    builder.append(',');
+                }
+                builder.append(Double.toString(values[index]));
             }
+            return builder.append(']').toString();
         }
-
-        throw new IOException("Failed to read distance result from Maple.");
-    }
-
-    public static void close() throws IOException { // This may not actually be needed.
-        if (!initialized) return;
-
-        mapleInput.write("quit:\n");
-        mapleInput.flush();
-        mapleProcess.destroy();
-        initialized = false;
-    }
-
-    private static String arrayToMapleList(double[] arr) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < arr.length; i++) {
-            sb.append(arr[i]);
-            if (i < arr.length - 1) {
-                sb.append(",");
+        if (input instanceof float[] values) {
+            StringBuilder builder = new StringBuilder(
+                    Math.max(2, values.length * 8)
+            );
+            builder.append('[');
+            for (int index = 0; index < values.length; index++) {
+                if (index > 0) {
+                    builder.append(',');
+                }
+                builder.append(Float.toString(values[index]));
             }
+            return builder.append(']').toString();
         }
-        sb.append("]");
-        return sb.toString();
+        throw new IllegalArgumentException(
+                "MapleDistance requires double[] or float[] input. Received "
+                        + typeName(input) + "."
+        );
     }
 
-}*/
+    private static String[] parseDescriptor(String descriptor) {
+        if (descriptor == null) {
+            throw new IllegalArgumentException(
+                    "Maple distance descriptor cannot be null."
+            );
+        }
+        String[] parts = descriptor.split(":", 3);
+        if (parts.length < 2 || parts[1].isBlank()) {
+            throw new IllegalArgumentException(
+                    "Use maple:path/to/file.mpl[:FunctionName]"
+            );
+        }
+        return parts;
+    }
+
+    private static String mapleStringContent(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
+    }
+
+    private static void closeProcessResources() {
+        try {
+            if (mapleInput != null) {
+                mapleInput.close();
+            }
+        } catch (IOException ignored) {
+            // The process is being discarded.
+        }
+        try {
+            if (mapleOutput != null) {
+                mapleOutput.close();
+            }
+        } catch (IOException ignored) {
+            // The process is being discarded.
+        }
+        if (mapleProcess != null) {
+            mapleProcess.destroyForcibly();
+        }
+        mapleInput = null;
+        mapleOutput = null;
+        mapleProcess = null;
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
+    }
+}

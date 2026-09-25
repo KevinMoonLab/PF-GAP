@@ -3,49 +3,154 @@ package distance.multiTS;
 import core.contracts.ObjectDataset;
 import distance.elastic.LCSS;
 
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Random;
 
-public class LCSS_I implements Serializable {
+/** Independent multivariate LCSS with summed selected-channel distances. */
+public final class LCSS_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final LCSS lcss;
 
     public LCSS_I() {
-        this.lcss = new LCSS();
+        lcss = new LCSS();
     }
 
-    /**
-     * Computes the average LCSS distance across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * LCSS uses a similarity threshold (epsilon) and a Sakoe-Chiba window.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @param windowSize Sakoe-Chiba window size
-     * @param epsilon Similarity threshold
-     * @return Average LCSS distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize, double epsilon) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize,
+            double epsilon
+    ) {
+        return distance(
+                first,
+                second,
+                bestSoFar,
+                windowSize,
+                epsilon,
+                null
+        );
+    }
 
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize,
+            double epsilon,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    epsilon,
+                    selectedDimensions
+            );
         }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += lcss.distance(series1[i], series2[i], bsf, windowSize, epsilon);
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    windowSize,
+                    epsilon,
+                    selectedDimensions
+            );
         }
-
-        return totalDistance / series1.length;
+        throw unsupportedPair(first, second);
     }
 
-    public int get_random_window(ObjectDataset d, java.util.Random r) {
-        return lcss.get_random_window(d, r);
+    private double distance(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            int windowSize,
+            double epsilon,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            total += lcss.distance(
+                    first[dimension],
+                    second[dimension],
+                    Double.POSITIVE_INFINITY,
+                    windowSize,
+                    epsilon
+            );
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
     }
 
-    public double get_random_epsilon(ObjectDataset d, java.util.Random r) {
-        return lcss.get_random_epsilon(d, r);
+    private double distance(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            int windowSize,
+            double epsilon,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            total += lcss.distance(
+                    first[dimension],
+                    second[dimension],
+                    Double.POSITIVE_INFINITY,
+                    windowSize,
+                    epsilon
+            );
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    public int get_random_window(ObjectDataset dataset, Random random) {
+        return lcss.get_random_window(dataset, random);
+    }
+
+    public double get_random_epsilon(ObjectDataset dataset, Random random) {
+        return lcss.get_random_epsilon(dataset, random);
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Independent LCSS requires matching double[][] or float[][] "
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

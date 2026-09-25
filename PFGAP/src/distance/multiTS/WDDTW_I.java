@@ -3,44 +3,220 @@ package distance.multiTS;
 import core.contracts.ObjectDataset;
 import distance.elastic.WDDTW;
 
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Random;
 
-public class WDDTW_I implements Serializable {
+/**
+ * Independent multivariate Weighted Derivative Dynamic Time Warping.
+ *
+ * <p>Each selected channel is transformed with the unified derivative
+ * convention and aligned independently with WDDTW. The resulting weighted
+ * squared costs are summed. A finite {@code bestSoFar} is reduced by each
+ * completed channel cost, allowing later channels to prune against the
+ * remaining budget.</p>
+ */
+public final class WDDTW_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final WDDTW wddtw;
 
     public WDDTW_I() {
-        this.wddtw = new WDDTW();
+        wddtw = new WDDTW();
     }
 
-    /**
-     * Computes the average WDDTW distance across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * WDDTW applies derivative transformation before computing weighted DTW.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @param g Weighting parameter for logistic curve
-     * @return Average WDDTW distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf, double g) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
-
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double g
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceAll(firstValues, secondValues, bestSoFar, g);
         }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += wddtw.distance(series1[i], series2[i], bsf, g);
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceAll(firstValues, secondValues, bestSoFar, g);
         }
-
-        return totalDistance / series1.length;
+        throw unsupportedPair(first, second);
     }
 
-    public double get_random_g(ObjectDataset d, java.util.Random r) {
-        return wddtw.get_random_g(d, r);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        if (selectedDimensions == null) {
+            return distance(first, second, bestSoFar, g);
+        }
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    g,
+                    selectedDimensions
+            );
+        }
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    g,
+                    selectedDimensions
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    private double distanceAll(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double g
+    ) {
+        double total = 0.0;
+        for (int dimension = 0; dimension < first.length; dimension++) {
+            double channelCost = wddtw.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    g
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private double distanceAll(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double g
+    ) {
+        double total = 0.0;
+        for (int dimension = 0; dimension < first.length; dimension++) {
+            double channelCost = wddtw.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    g
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private double distanceSelected(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        for (int position = 0;
+             position < selectedDimensions.length;
+             position++) {
+            int dimension = selectedDimensions[position];
+            double channelCost = wddtw.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    g
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private double distanceSelected(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        for (int position = 0;
+             position < selectedDimensions.length;
+             position++) {
+            int dimension = selectedDimensions[position];
+            double channelCost = wddtw.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    g
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    public double get_random_g(ObjectDataset dataset, Random random) {
+        return wddtw.get_random_g(dataset, random);
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Independent WDDTW requires matching double[][] or float[][] "
+                        + "inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
     }
 }

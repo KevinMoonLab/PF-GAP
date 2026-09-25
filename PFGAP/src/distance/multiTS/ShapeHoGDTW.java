@@ -1,38 +1,120 @@
 package distance.multiTS;
 
-import transformation.FirstOrderDifference;
+import distance.elastic.DTW;
+import transformation.DerivativeTransform;
 import transformation.MultivariateHistogramOfGradients;
 import transformation.MultivariateHistogramOfGradients.Strategy;
 
+import java.io.Serial;
 import java.io.Serializable;
 
-public class ShapeHoGDTW implements Serializable {
+/**
+ * DTW over a multivariate histogram-of-gradient representation.
+ *
+ * <p>The unified derivative transform is applied exactly once. Selected
+ * channels are compacted during derivative transformation before the
+ * multivariate histogram is built.</p>
+ */
+public final class ShapeHoGDTW implements Serializable {
 
-    public ShapeHoGDTW() {}
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    /**
-     * Computes the DTW distance between two multivariate time series after applying
-     * first-order differencing and multivariate histogram of gradients.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @param windowSize Sakoe-Chiba window size
-     * @return DTW distance between histogram representations
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf, int windowSize) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    private final DTW dtw;
 
-        // Apply first-order difference
-        double[][] diff1 = FirstOrderDifference.computeFirstOrderDifference(series1);
-        double[][] diff2 = FirstOrderDifference.computeFirstOrderDifference(series2);
+    public ShapeHoGDTW() {
+        dtw = new DTW();
+    }
 
-        // Compute multivariate histograms using default strategy
-        double[] hist1 = MultivariateHistogramOfGradients.computeHistogram(diff1, Strategy.CONCATENATE_GRADIENTS);
-        double[] hist2 = MultivariateHistogramOfGradients.computeHistogram(diff2, Strategy.CONCATENATE_GRADIENTS);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize
+    ) {
+        return distance(first, second, bestSoFar, windowSize, null);
+    }
 
-        // Apply univariate DTW to the histogram vectors
-        return new distance.elastic.DTW().distance(hist1, hist2, bsf, windowSize);
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int windowSize,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            double[][] firstDerivative = selectedDimensions == null
+                    ? DerivativeTransform.transform(firstValues)
+                    : DerivativeTransform.transformSelected(
+                            firstValues, selectedDimensions
+                    );
+            double[][] secondDerivative = selectedDimensions == null
+                    ? DerivativeTransform.transform(secondValues)
+                    : DerivativeTransform.transformSelected(
+                            secondValues, selectedDimensions
+                    );
+            return histogramDistance(
+                    firstDerivative, secondDerivative,
+                    bestSoFar, windowSize
+            );
+        }
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            double[][] firstDerivative = selectedDimensions == null
+                    ? DerivativeTransform.transform(firstValues)
+                    : DerivativeTransform.transformSelected(
+                            firstValues, selectedDimensions
+                    );
+            double[][] secondDerivative = selectedDimensions == null
+                    ? DerivativeTransform.transform(secondValues)
+                    : DerivativeTransform.transformSelected(
+                            secondValues, selectedDimensions
+                    );
+            return histogramDistance(
+                    firstDerivative, secondDerivative,
+                    bestSoFar, windowSize
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    private double histogramDistance(
+            double[][] firstDerivative,
+            double[][] secondDerivative,
+            double bestSoFar,
+            int windowSize
+    ) {
+        double[] firstHistogram =
+                MultivariateHistogramOfGradients.computeHistogram(
+                        firstDerivative,
+                        Strategy.CONCATENATE_GRADIENTS
+                );
+        double[] secondHistogram =
+                MultivariateHistogramOfGradients.computeHistogram(
+                        secondDerivative,
+                        Strategy.CONCATENATE_GRADIENTS
+                );
+        return dtw.distance(
+                firstHistogram,
+                secondHistogram,
+                bestSoFar,
+                windowSize
+        );
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "ShapeHoGDTW requires matching double[][] or float[][] inputs. "
+                        + "Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

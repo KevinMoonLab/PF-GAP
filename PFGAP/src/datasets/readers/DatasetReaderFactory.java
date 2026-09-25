@@ -104,6 +104,8 @@ public final class DatasetReaderFactory {
 
             case NUMERIC_DELIMITED:
                 return new NumericDelimitedFileReader(options);
+            case NPY:
+                return createNpyReader(options);
 
             default:
                 throw new IllegalArgumentException(
@@ -213,6 +215,16 @@ public final class DatasetReaderFactory {
         );
 
         return new HDF5Reader(options);
+    }
+
+    private static DatasetReader createNpyReader(
+            ReaderOptions options
+    ) {
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "NPY reader requires dataPath."
+        );
+        return new NpyReader(options);
     }
 
     private static void requireNonNullOrEmpty(

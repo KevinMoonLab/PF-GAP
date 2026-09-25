@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 //import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
 import core.contracts.*;
+import datasets.NumericStorageType;
 import datasets.readers.ReaderType;
 import datasets.readers.lazy.LazySeriesReader;
 import datasets.readers.lazy.LazySeriesReaderFactory;
@@ -137,6 +138,18 @@ public class AppContext {
 			MEASURE.msm
 	};
 
+	/**
+	 * Controls the primitive storage type produced by numeric dataset readers.
+	 *
+	 * <p>AUTO preserves a supported source dtype when the format provides one,
+	 * such as NPY float32 or float64. Readers for untyped text data default to
+	 * FLOAT64 unless documented otherwise.</p>
+	 *
+	 * <p>This setting controls feature storage only. Distances, statistics,
+	 * proximities, predictions, and scores may continue to use double precision.</p>
+	 */
+	public static NumericStorageType numericStorageType = NumericStorageType.AUTO;
+
 	public static Runtime runtime = Runtime.getRuntime();
 	public static boolean savemodel;
 	public static boolean getprox;
@@ -154,6 +167,7 @@ public class AppContext {
 	 * >1 enables bounded parallel execution with the specified worker count.
 	 */
 	public static int num_workers = 1;
+	public static boolean useVectorApi = false;
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;

@@ -1,5 +1,6 @@
 package core;
 
+import datasets.NumericStorageType;
 import datasets.readers.lazy.LazySeriesReaderSpec;
 import distance.MEASURE;
 import preprocessing.standardization.StandardizationConfig;
@@ -30,6 +31,7 @@ public class AppContextSnapshot implements Serializable {
 
     public boolean is2D;
     public boolean isNumeric;
+    public NumericStorageType numericStorageType;
     //public boolean hasMissingValues;
     //public int numImputes;
     //public String entry_separator;

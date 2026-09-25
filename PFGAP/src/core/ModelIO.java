@@ -98,6 +98,7 @@ public class ModelIO {
         //AppContext.testing_labels = snapshot.testing_labels;
         AppContext.is2D = snapshot.is2D;
         AppContext.isNumeric = snapshot.isNumeric;
+        AppContext.numericStorageType = snapshot.numericStorageType;
         //AppContext.hasMissingValues = snapshot.hasMissingValues;
         //AppContext.numImputes = snapshot.numImputes;
         //AppContext.entry_separator = snapshot.entry_separator;

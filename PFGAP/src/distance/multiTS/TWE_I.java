@@ -3,49 +3,173 @@ package distance.multiTS;
 import core.contracts.ObjectDataset;
 import distance.elastic.TWE;
 
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Random;
 
-public class TWE_I implements Serializable {
+/** Independent multivariate TWE with summed selected-channel costs. */
+public final class TWE_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final TWE twe;
 
     public TWE_I() {
-        this.twe = new TWE();
+        twe = new TWE();
     }
 
-    /**
-     * Computes the average TWE distance across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * TWE uses edit-based operations with stiffness (nu) and penalty (lambda).
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @param nu Stiffness parameter
-     * @param lambda Penalty parameter
-     * @return Average TWE distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf, double nu, double lambda) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double nu,
+            double lambda
+    ) {
+        return distance(
+                first,
+                second,
+                bestSoFar,
+                nu,
+                lambda,
+                null
+        );
+    }
 
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double nu,
+            double lambda,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    nu,
+                    lambda,
+                    selectedDimensions
+            );
         }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += twe.distance(series1[i], series2[i], bsf, nu, lambda);
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    nu,
+                    lambda,
+                    selectedDimensions
+            );
         }
-
-        return totalDistance / series1.length;
+        throw unsupportedPair(first, second);
     }
 
-    public double get_random_nu(ObjectDataset d, java.util.Random r) {
-        return twe.get_random_nu(d, r);
+    private double distance(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double nu,
+            double lambda,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = twe.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    nu,
+                    lambda
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
     }
 
-    public double get_random_lambda(ObjectDataset d, java.util.Random r) {
-        return twe.get_random_lambda(d, r);
+    private double distance(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double nu,
+            double lambda,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = twe.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total),
+                    nu,
+                    lambda
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    public double get_random_nu(ObjectDataset dataset, Random random) {
+        return twe.get_random_nu(dataset, random);
+    }
+
+    public double get_random_lambda(ObjectDataset dataset, Random random) {
+        return twe.get_random_lambda(dataset, random);
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Independent TWE requires matching double[][] or float[][] "
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
     }
 }

@@ -2,6 +2,7 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
+import datasets.NumericStorageType;
 import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
@@ -174,6 +175,54 @@ public class PFApplication {
 					exception
 			);
 		}
+	}
+
+	/**
+	 * Parses the requested primitive numeric feature-storage type.
+	 *
+	 * <p>Canonical values are {@code auto}, {@code float32}, and
+	 * {@code float64}. The aliases {@code float}, {@code single},
+	 * {@code double}, and {@code fp32}/{@code fp64} are accepted for
+	 * convenience.</p>
+	 *
+	 * @param value configured numeric-storage value
+	 * @return parsed numeric storage type
+	 * @throws IllegalArgumentException if the value is null, blank, or unknown
+	 */
+	private static NumericStorageType parseStorageType(
+			String value
+	) {
+		if (value == null || value.isBlank()) {
+			throw new IllegalArgumentException(
+					"-numeric_storage requires one of: "
+							+ "auto, float32, or float64."
+			);
+		}
+
+		return switch (
+				value.trim().toLowerCase(java.util.Locale.ROOT)
+				) {
+			case "auto" ->
+					NumericStorageType.AUTO;
+
+			case "float32",
+					"float",
+					"single",
+					"fp32" ->
+					NumericStorageType.FLOAT32;
+
+			case "float64",
+					"double",
+					"fp64" ->
+					NumericStorageType.FLOAT64;
+
+			default ->
+					throw new IllegalArgumentException(
+							"Unknown numeric storage type: '"
+									+ value
+									+ "'. Expected auto, float32, or float64."
+					);
+		};
 	}
 
 	/**
@@ -429,6 +478,9 @@ public class PFApplication {
 						break;
 					case "-file_pattern":
 						AppContext.file_pattern = parseNullableString(options[1]);
+						break;
+					case "-numeric_storage":
+						AppContext.numericStorageType = parseStorageType(options[1]);
 						break;
 					case "-custom_reader_descriptor":
 						AppContext.customReaderDescriptor = parseNullableString(options[1]);
@@ -693,6 +745,9 @@ public class PFApplication {
 						break;*/
 					case "-num_workers":
 						AppContext.num_workers = Integer.parseInt(options[1]);
+						break;
+					case "-use_vector_api":
+						AppContext.useVectorApi = Boolean.parseBoolean(options[1]);
 						break;
 					case "-knn_distances":
 						//String[] distanceNames = options[1].split(",");

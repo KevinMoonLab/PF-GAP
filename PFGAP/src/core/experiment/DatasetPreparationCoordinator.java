@@ -266,6 +266,9 @@ public final class DatasetPreparationCoordinator {
                 )
                 .setStandardizationStats(
                         AppContext.standardizationStats
+                )
+                .setNumericStorageType(
+                        AppContext.numericStorageType
                 );
     }
 

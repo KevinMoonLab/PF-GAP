@@ -1,90 +1,182 @@
 package distance.multiTS;
 
-import transformation.FirstOrderDifference;
+import transformation.DerivativeTransform;
 
+import java.io.Serial;
 import java.io.Serializable;
 
-public class WDDTW_D implements Serializable {
+/**
+ * Dependent multivariate Weighted Derivative Dynamic Time Warping.
+ *
+ * <p>Inputs are transformed with the unified derivative convention, after
+ * which one shared dependent WDTW alignment is evaluated across all selected
+ * channels. Every overload returns accumulated weighted squared cost, and a
+ * finite {@code bestSoFar} is interpreted in the same units.</p>
+ *
+ * <p>When dimensions are selected, only those channels are transformed into
+ * compact derivative matrices. This avoids transforming unselected channels
+ * and avoids selected-index lookup inside every dynamic-programming cell.</p>
+ */
+public final class WDDTW_D implements Serializable {
 
-    private double g;
-    private double[] weightVector;
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-    public WDDTW_D() {}
+    private final WDTW_D wdtw;
 
-    public synchronized double distance(Object Series1, Object Series2, double bsf, double g) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
-
-        int dims1 = series1.length;
-        int dims2 = series2.length;
-
-        if (dims1 != dims2) {
-            throw new IllegalArgumentException("Both series must have the same number of dimensions (rows).");
-        }
-
-        int len1 = series1[0].length;
-        int len2 = series2[0].length;
-
-        for (int d = 0; d < dims1; d++) {
-            if (series1[d].length != len1 || series2[d].length != len2) {
-                throw new IllegalArgumentException("All dimensions must have consistent time lengths.");
-            }
-        }
-
-        // Apply first-order difference transformation
-        double[][] deriv1 = FirstOrderDifference.computeFirstOrderDifference(series1);
-        double[][] deriv2 = FirstOrderDifference.computeFirstOrderDifference(series2);
-
-        int lenDeriv1 = deriv1[0].length;
-        int lenDeriv2 = deriv2[0].length;
-
-        int maxLength = Math.max(lenDeriv1, lenDeriv2);
-        initWeights(g, maxLength);
-
-        double[][] cost = new double[lenDeriv1][lenDeriv2];
-
-        for (int i = 0; i < lenDeriv1; i++) {
-            for (int j = 0; j < lenDeriv2; j++) {
-                double dist = squaredDistanceAt(deriv1, deriv2, i, j);
-                double weight = weightVector[Math.abs(i - j)];
-
-                if (i == 0 && j == 0) {
-                    cost[i][j] = weight * dist;
-                } else {
-                    double minPrev = Double.POSITIVE_INFINITY;
-                    if (i > 0 && j > 0) minPrev = Math.min(minPrev, cost[i - 1][j - 1]);
-                    if (i > 0) minPrev = Math.min(minPrev, cost[i - 1][j]);
-                    if (j > 0) minPrev = Math.min(minPrev, cost[i][j - 1]);
-
-                    cost[i][j] = weight * dist + minPrev;
-                }
-
-                if (cost[i][j] > bsf * bsf) return Double.POSITIVE_INFINITY;
-            }
-        }
-
-        double finalDist = Math.sqrt(cost[lenDeriv1 - 1][lenDeriv2 - 1]);
-        return finalDist > bsf ? Double.POSITIVE_INFINITY : finalDist;
+    public WDDTW_D() {
+        wdtw = new WDTW_D();
     }
 
-    private double squaredDistanceAt(double[][] s1, double[][] s2, int t1, int t2) {
-        double sum = 0.0;
-        for (int d = 0; d < s1.length; d++) {
-            double diff = s1[d][t1] - s2[d][t2];
-            sum += diff * diff;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double g
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceAll(firstValues, secondValues, bestSoFar, g);
         }
-        return sum;
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceAll(firstValues, secondValues, bestSoFar, g);
+        }
+        throw unsupportedPair(first, second);
     }
 
-    private void initWeights(double g, int seriesLength) {
-        if (this.g == g && this.weightVector != null && this.weightVector.length == seriesLength) return;
-
-        this.g = g;
-        this.weightVector = new double[seriesLength];
-        double halfLength = (double) seriesLength / 2;
-
-        for (int i = 0; i < seriesLength; i++) {
-            weightVector[i] = 1.0 / (1 + Math.exp(-g * (i - halfLength)));
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        if (selectedDimensions == null) {
+            return distance(first, second, bestSoFar, g);
         }
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    g,
+                    selectedDimensions
+            );
+        }
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distanceSelected(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    g,
+                    selectedDimensions
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
+
+    private double distanceAll(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double g
+    ) {
+        double[][] firstDerivative = DerivativeTransform.transform(first);
+        double[][] secondDerivative = DerivativeTransform.transform(second);
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    private double distanceAll(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double g
+    ) {
+        double[][] firstDerivative = DerivativeTransform.transform(first);
+        double[][] secondDerivative = DerivativeTransform.transform(second);
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    private double distanceSelected(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        double[][] firstDerivative =
+                DerivativeTransform.transformSelected(
+                        first,
+                        selectedDimensions
+                );
+        double[][] secondDerivative =
+                DerivativeTransform.transformSelected(
+                        second,
+                        selectedDimensions
+                );
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    private double distanceSelected(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            double g,
+            int[] selectedDimensions
+    ) {
+        double[][] firstDerivative =
+                DerivativeTransform.transformSelected(
+                        first,
+                        selectedDimensions
+                );
+        double[][] secondDerivative =
+                DerivativeTransform.transformSelected(
+                        second,
+                        selectedDimensions
+                );
+        return wdtw.distance(
+                firstDerivative,
+                secondDerivative,
+                bestSoFar,
+                g
+        );
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Dependent WDDTW requires matching double[][] or float[][] "
+                        + "inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
     }
 }

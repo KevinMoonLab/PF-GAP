@@ -1183,11 +1183,12 @@ public class DistanceMeasure implements Serializable {
 			int[] selectedDimensions
 	) throws IOException, InterruptedException {
 
-		if (selectedDimensions.length == 0) {
+		// redundant, given Splitter.java checks.
+		/*if (selectedDimensions.length == 0) {
 			throw new IllegalArgumentException(
 					"Selected dimensions cannot be empty."
 			);
-		}
+		}*/
 
 		switch (distance_measure) {
 			/*
@@ -1210,6 +1211,237 @@ public class DistanceMeasure implements Serializable {
 						second,
 						selectedDimensions
 				);
+
+			case manhattan:
+				return manhattan.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case cosine:
+				return cosine.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case dtw_i:
+				return dtw_i.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								this.windowSizeDTW
+						),
+						selectedDimensions
+				);
+
+			case dtw_d:
+				return dtw_d.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								this.windowSizeDTW
+						),
+						selectedDimensions
+				);
+			case wdtw_i:
+			case shifazWDTW_I:
+				return wdtw_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.weightWDTW,
+						selectedDimensions
+				);
+
+			case wdtw_d:
+				return wdtw_d.distance(
+						first,
+						second,
+						bestSoFar,
+						this.weightWDTW,
+						selectedDimensions
+				);
+
+			case ddtw_i:
+			case shifazDDTW_I:
+				return ddtw_i.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								this.windowSizeDDTW
+						),
+						selectedDimensions
+				);
+
+			case ddtw_d:
+				return ddtw_d.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								this.windowSizeDDTW
+						),
+						selectedDimensions
+				);
+
+			case wddtw_i:
+			case shifazWDDTW_I:
+				return wddtw_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.weightWDDTW,
+						selectedDimensions
+				);
+
+			case wddtw_d:
+				return wddtw_d.distance(
+						first,
+						second,
+						bestSoFar,
+						this.weightWDDTW,
+						selectedDimensions
+				);
+
+			case shapeHoGdtw_d:
+				return shapeHoGdtw_d.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								this.windowSizeDDTW
+						)
+				);
+			//TODO: fix shapeHOGdtw_i
+
+			case cid_i:
+			case shifazCID_I:
+				return cid_i.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case sbd_i:
+			case shifazSBD_I:
+				return sbd_i.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case msm_i:
+			case shifazMSM_I:
+				return msm_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.cMSM,
+						selectedDimensions
+				);
+
+			case twe_i:
+			case shifazTWE_I:
+				return twe_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.nuTWE,
+						this.lambdaTWE,
+						selectedDimensions
+				);
+
+			case erp_i:
+			case shifazERP_I:
+				return erp_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.windowSizeERP,
+						this.gERP,
+						selectedDimensions
+				);
+
+			case lcss_i:
+			case shifazLCSS_I:
+				return lcss_i.distance(
+						first,
+						second,
+						bestSoFar,
+						this.windowSizeLCSS,
+						this.epsilonLCSS,
+						selectedDimensions
+				);
+
+			case euclidean_i:
+				return euclidean_i.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case manhattan_i:
+				return manhattan_i.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
+			case dtwarow_i:
+				return dtwarow_i.distance(
+						first,
+						second,
+						bestSoFar,
+						resolveWindowSize(
+								first,
+								second,
+								-1//this.windowSizeDTWAROW
+						),
+						selectedDimensions
+				);
+
+			case dtwarow_d:
+			    return dtwarow_d.distance(
+					first,
+					second,
+					bestSoFar,
+					resolveWindowSize(
+							first,
+							second,
+							-1//this.windowSizeDTWAROW
+					),
+					selectedDimensions
+			);
+
+			case nan_euclidean_i:
+				return nan_euclidean_i.distance(
+						first,
+						second,
+						bestSoFar,
+						selectedDimensions
+				);
+
 
 			default:
 				throw new UnsupportedOperationException(
@@ -1625,48 +1857,58 @@ public class DistanceMeasure implements Serializable {
 	}*/
 
 
-	private int timeLengthOf(Object series) {
-		if (series instanceof double[] x) {
-			return x.length;
+	private int timeLengthOf(
+			Object series
+	) {
+		if (series instanceof double[] values) {
+			return values.length;
 		}
 
-		if (series instanceof Double[] x) {
-			return x.length;
+		if (series instanceof float[] values) {
+			return values.length;
 		}
 
-		if (series instanceof double[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof double[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Double[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof float[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Object[][] x) {
-			return x.length == 0 ? 0 : x[0].length;
+		if (series instanceof Object[][] matrix) {
+			return matrix.length == 0
+					? 0
+					: matrix[0].length;
 		}
 
-		if (series instanceof Object[] x) {
-			return x.length;
+		if (series instanceof Object[] values) {
+			return values.length;
 		}
 
 		throw new IllegalArgumentException(
 				"Cannot infer time length from series type: "
-						+ series.getClass().getName()
+						+ series.getClass().getTypeName()
 		);
 	}
 
-	private int dimensionCountOf(Object series) {
-		if (series instanceof double[][] x) {
-			return x.length;
+	private int dimensionCountOf(
+			Object series
+	) {
+		if (series instanceof double[][] matrix) {
+			return matrix.length;
 		}
 
-		if (series instanceof Double[][] x) {
-			return x.length;
+		if (series instanceof float[][] matrix) {
+			return matrix.length;
 		}
 
-		if (series instanceof Object[][] x) {
-			return x.length;
+		if (series instanceof Object[][] matrix) {
+			return matrix.length;
 		}
 
 		return 1;

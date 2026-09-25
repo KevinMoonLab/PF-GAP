@@ -1,328 +1,423 @@
 package distance.missing;
 
+import java.util.Objects;
+
 /**
- * Generic utilities for missing-value-aware distance functions.
+ * Primitive numeric utilities shared by missing-value-aware distances.
  *
- * This class is intentionally limited to reusable missing-value,
- * numeric conversion, and shape-validation helpers. It does not
- * implement any distance-specific logic such as DTW recurrences,
- * alignment rules, or imputation behavior.
+ * <p>Supported numeric representations are {@code double[]}, {@code float[]},
+ * {@code double[][]}, and {@code float[][]}. Missing numeric values are encoded
+ * only as {@link Double#NaN} or {@link Float#NaN}. Boxed numeric arrays, null
+ * numeric values, and generic numeric {@code Object[]} arrays are not part of
+ * the supported numeric contract.</p>
  *
- * Supported missing-value conventions:
- * - null
- * - Double.NaN
- * - Float.NaN
- *
- * Supported numeric conventions:
- * - primitive double values
- * - boxed Number values, including Double, Float, Integer, etc.
- *
- * The public distance classes in this package should continue to
- * accept Object arguments, matching the rest of the distance package.
+ * <p>This class contains representation-neutral primitives such as missingness
+ * tests, local squared costs, shape validation, availability counts, and the
+ * NaN-Euclidean scaling factor. It deliberately contains no DTW recurrence,
+ * alignment, normalization, or imputation policy.</p>
  */
 public final class MissingDistanceTools {
 
     private MissingDistanceTools() {
-        // Utility class; do not instantiate.
+        // Utility class.
     }
 
-    /**
-     * Returns true if the supplied value should be treated as missing.
-     *
-     * For numeric values, Double.NaN and Float.NaN are treated as missing.
-     * For object-valued arrays, null is treated as missing.
-     * Other non-null objects are not considered missing by this method.
-     */
-    public static boolean isMissing(Object value) {
-
-        if (value == null) {
-            return true;
-        }
-
-        if (value instanceof Double) {
-            return Double.isNaN((Double) value);
-        }
-
-        if (value instanceof Float) {
-            return Float.isNaN((Float) value);
-        }
-
-        return false;
-    }
-
-    /**
-     * Returns true if the primitive value is missing.
-     */
+    /** Returns whether a primitive double value is missing. */
     public static boolean isMissing(double value) {
         return Double.isNaN(value);
     }
 
-    /**
-     * Returns true if the supplied value is present and numeric.
-     */
-    public static boolean isPresentNumber(Object value) {
-        return !isMissing(value) && value instanceof Number;
+    /** Returns whether a primitive float value is missing. */
+    public static boolean isMissing(float value) {
+        return Float.isNaN(value);
+    }
+
+    /** Returns the squared difference between two present double values. */
+    public static double squaredDifference(
+            double first,
+            double second
+    ) {
+        double difference = first - second;
+        return difference * difference;
     }
 
     /**
-     * Converts a present numeric object to double.
+     * Returns the squared difference between two present float values.
      *
-     * Throws an IllegalArgumentException if the value is missing
-     * or not numeric.
+     * <p>Each source value is widened before subtraction, and the result is
+     * accumulated as double by the calling distance.</p>
      */
-    public static double toDouble(Object value) {
-
-        if (isMissing(value)) {
-            throw new IllegalArgumentException(
-                    "Cannot convert missing value to double.");
-        }
-
-        if (!(value instanceof Number)) {
-            throw new IllegalArgumentException(
-                    "Expected a numeric value but received: "
-                            + value.getClass().getName());
-        }
-
-        return ((Number) value).doubleValue();
+    public static double squaredDifference(
+            float first,
+            float second
+    ) {
+        double difference =
+                (double) first - (double) second;
+        return difference * difference;
     }
 
     /**
-     * Returns the squared difference between two primitive values.
-     *
-     * Both values are assumed to be present.
+     * Returns the squared difference when both double values are present;
+     * otherwise returns zero.
      */
-    public static double squaredDifference(double a, double b) {
-
-        double diff = a - b;
-        return diff * diff;
-    }
-
-    /**
-     * Returns the squared difference between two numeric object values.
-     *
-     * Both values are assumed to be present and numeric.
-     */
-    public static double squaredDifference(Object a, Object b) {
-        return squaredDifference(toDouble(a), toDouble(b));
-    }
-
-    /**
-     * Returns the squared difference if both values are present;
-     * otherwise returns 0.0.
-     *
-     * This is useful for missing-aware local costs where missing
-     * numeric comparisons should contribute no squared error.
-     */
-    public static double squaredDifferenceIfPresent(Object a, Object b) {
-
-        if (isMissing(a) || isMissing(b)) {
+    public static double squaredDifferenceIfPresent(
+            double first,
+            double second
+    ) {
+        if (Double.isNaN(first) || Double.isNaN(second)) {
             return 0.0;
         }
-
-        return squaredDifference(a, b);
+        return squaredDifference(first, second);
     }
 
     /**
-     * Returns the squared difference if both primitive values are present;
-     * otherwise returns 0.0.
+     * Returns the squared difference when both float values are present;
+     * otherwise returns zero.
      */
-    public static double squaredDifferenceIfPresent(double a, double b) {
-
-        if (Double.isNaN(a) || Double.isNaN(b)) {
+    public static double squaredDifferenceIfPresent(
+            float first,
+            float second
+    ) {
+        if (Float.isNaN(first) || Float.isNaN(second)) {
             return 0.0;
         }
-
-        return squaredDifference(a, b);
+        return squaredDifference(first, second);
     }
 
-    /**
-     * Validates that two primitive 1D series have equal length.
-     */
-    public static void validateSameLength(double[] series1, double[] series2) {
+    /** Validates equal lengths for two double vectors. */
+    public static void validateSameLength(
+            double[] first,
+            double[] second
+    ) {
+        Objects.requireNonNull(first, "First series cannot be null.");
+        Objects.requireNonNull(second, "Second series cannot be null.");
+        requireSameLength(first.length, second.length);
+    }
 
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException(
-                    "Both series must have the same length.");
+    /** Validates equal lengths for two float vectors. */
+    public static void validateSameLength(
+            float[] first,
+            float[] second
+    ) {
+        Objects.requireNonNull(first, "First series cannot be null.");
+        Objects.requireNonNull(second, "Second series cannot be null.");
+        requireSameLength(first.length, second.length);
+    }
+
+    /** Validates equal dimension counts for two double matrices. */
+    public static void validateSameRows(
+            double[][] first,
+            double[][] second
+    ) {
+        Objects.requireNonNull(first, "First series cannot be null.");
+        Objects.requireNonNull(second, "Second series cannot be null.");
+        requireSameRows(first.length, second.length);
+    }
+
+    /** Validates equal dimension counts for two float matrices. */
+    public static void validateSameRows(
+            float[][] first,
+            float[][] second
+    ) {
+        Objects.requireNonNull(first, "First series cannot be null.");
+        Objects.requireNonNull(second, "Second series cannot be null.");
+        requireSameRows(first.length, second.length);
+    }
+
+    /** Validates equal dimension counts and corresponding row lengths. */
+    public static void validateSameShape(
+            double[][] first,
+            double[][] second
+    ) {
+        validateSameRows(first, second);
+        for (int dimension = 0;
+                dimension < first.length;
+                dimension++) {
+            double[] firstRow = requireRow(
+                    first[dimension],
+                    "first",
+                    dimension
+            );
+            double[] secondRow = requireRow(
+                    second[dimension],
+                    "second",
+                    dimension
+            );
+            requireSameRowLength(
+                    firstRow.length,
+                    secondRow.length,
+                    dimension
+            );
         }
     }
 
-    /**
-     * Validates that two object 1D series have equal length.
-     */
-    public static void validateSameLength(Object[] series1, Object[] series2) {
-
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException(
-                    "Both series must have the same length.");
+    /** Validates equal dimension counts and corresponding row lengths. */
+    public static void validateSameShape(
+            float[][] first,
+            float[][] second
+    ) {
+        validateSameRows(first, second);
+        for (int dimension = 0;
+                dimension < first.length;
+                dimension++) {
+            float[] firstRow = requireRow(
+                    first[dimension],
+                    "first",
+                    dimension
+            );
+            float[] secondRow = requireRow(
+                    second[dimension],
+                    "second",
+                    dimension
+            );
+            requireSameRowLength(
+                    firstRow.length,
+                    secondRow.length,
+                    dimension
+            );
         }
     }
 
-    /**
-     * Validates that two primitive 2D series have the same number of rows.
-     */
-    public static void validateSameRows(double[][] series1, double[][] series2) {
-
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException(
-                    "Both multivariate series must have the same number of rows.");
-        }
-    }
-
-    /**
-     * Validates that two object 2D series have the same number of rows.
-     */
-    public static void validateSameRows(Object[][] series1, Object[][] series2) {
-
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException(
-                    "Both multivariate series must have the same number of rows.");
-        }
-    }
-
-    /**
-     * Validates that all corresponding rows in two primitive 2D series
-     * have equal length.
-     */
-    public static void validateSameShape(double[][] series1, double[][] series2) {
-
-        validateSameRows(series1, series2);
-
-        for (int i = 0; i < series1.length; i++) {
-            if (series1[i].length != series2[i].length) {
-                throw new IllegalArgumentException(
-                        "Corresponding rows must have the same length.");
-            }
-        }
-    }
-
-    /**
-     * Validates that all corresponding rows in two object 2D series
-     * have equal length.
-     */
-    public static void validateSameShape(Object[][] series1, Object[][] series2) {
-
-        validateSameRows(series1, series2);
-
-        for (int i = 0; i < series1.length; i++) {
-            if (series1[i].length != series2[i].length) {
-                throw new IllegalArgumentException(
-                        "Corresponding rows must have the same length.");
-            }
-        }
-    }
-
-    /**
-     * Counts present entries in a primitive 1D series.
-     */
+    /** Counts present values in a double vector. */
     public static int countAvailable(double[] series) {
-
+        Objects.requireNonNull(series, "Series cannot be null.");
         int count = 0;
-
         for (double value : series) {
             if (!Double.isNaN(value)) {
                 count++;
             }
         }
-
         return count;
     }
 
-    /**
-     * Counts present entries in an object 1D series.
-     */
-    public static int countAvailable(Object[] series) {
-
+    /** Counts present values in a float vector. */
+    public static int countAvailable(float[] series) {
+        Objects.requireNonNull(series, "Series cannot be null.");
         int count = 0;
-
-        for (Object value : series) {
-            if (!isMissing(value)) {
+        for (float value : series) {
+            if (!Float.isNaN(value)) {
                 count++;
             }
         }
-
         return count;
     }
 
-    /**
-     * Counts present entries in a primitive 2D series.
-     */
+    /** Counts present values across a double matrix. */
     public static int countAvailable(double[][] series) {
-
+        Objects.requireNonNull(series, "Series cannot be null.");
         int count = 0;
-
-        for (double[] row : series) {
-            count += countAvailable(row);
+        for (int dimension = 0;
+                dimension < series.length;
+                dimension++) {
+            count += countAvailable(
+                    requireRow(series[dimension], "series", dimension)
+            );
         }
-
         return count;
     }
 
-    /**
-     * Counts present entries in an object 2D series.
-     */
-    public static int countAvailable(Object[][] series) {
-
+    /** Counts present values across a float matrix. */
+    public static int countAvailable(float[][] series) {
+        Objects.requireNonNull(series, "Series cannot be null.");
         int count = 0;
-
-        for (Object[] row : series) {
-            count += countAvailable(row);
+        for (int dimension = 0;
+                dimension < series.length;
+                dimension++) {
+            count += countAvailable(
+                    requireRow(series[dimension], "series", dimension)
+            );
         }
-
         return count;
     }
 
-    /**
-     * Counts jointly observed positions in two primitive 1D series.
-     */
-    public static int countJointlyObserved(double[] series1, double[] series2) {
-
-        validateSameLength(series1, series2);
-
+    /** Counts jointly observed positions in equal-length double vectors. */
+    public static int countJointlyObserved(
+            double[] first,
+            double[] second
+    ) {
+        validateSameLength(first, second);
         int count = 0;
-
-        for (int i = 0; i < series1.length; i++) {
-            if (!Double.isNaN(series1[i]) && !Double.isNaN(series2[i])) {
+        for (int index = 0; index < first.length; index++) {
+            if (!Double.isNaN(first[index])
+                    && !Double.isNaN(second[index])) {
                 count++;
             }
         }
-
         return count;
     }
 
-    /**
-     * Counts jointly observed positions in two object 1D series.
-     */
-    public static int countJointlyObserved(Object[] series1, Object[] series2) {
-
-        validateSameLength(series1, series2);
-
+    /** Counts jointly observed positions in equal-length float vectors. */
+    public static int countJointlyObserved(
+            float[] first,
+            float[] second
+    ) {
+        validateSameLength(first, second);
         int count = 0;
-
-        for (int i = 0; i < series1.length; i++) {
-            if (!isMissing(series1[i]) && !isMissing(series2[i])) {
+        for (int index = 0; index < first.length; index++) {
+            if (!Float.isNaN(first[index])
+                    && !Float.isNaN(second[index])) {
                 count++;
             }
         }
-
         return count;
     }
 
     /**
-     * Returns the NaN-Euclidean scale factor:
+     * Counts jointly observed positions across equal-shaped double matrices.
+     */
+    public static int countJointlyObserved(
+            double[][] first,
+            double[][] second
+    ) {
+        validateSameShape(first, second);
+        int count = 0;
+        for (int dimension = 0;
+                dimension < first.length;
+                dimension++) {
+            count += countJointlyObserved(
+                    first[dimension],
+                    second[dimension]
+            );
+        }
+        return count;
+    }
+
+    /**
+     * Counts jointly observed positions across equal-shaped float matrices.
+     */
+    public static int countJointlyObserved(
+            float[][] first,
+            float[][] second
+    ) {
+        validateSameShape(first, second);
+        int count = 0;
+        for (int dimension = 0;
+                dimension < first.length;
+                dimension++) {
+            count += countJointlyObserved(
+                    first[dimension],
+                    second[dimension]
+            );
+        }
+        return count;
+    }
+
+    /**
+     * Returns the NaN-Euclidean scale factor
+     * {@code fullLength / jointlyObservedLength}.
      *
-     * fullLength / jointlyObservedLength
-     *
-     * If there are no jointly observed positions, returns
-     * Double.POSITIVE_INFINITY.
+     * <p>If no positions are jointly observed, positive infinity is returned.
+     * This makes the absence of comparable evidence explicit to the calling
+     * distance.</p>
      */
     public static double scaleFactor(
             int fullLength,
-            int jointlyObservedLength) {
-
+            int jointlyObservedLength
+    ) {
+        if (fullLength < 0) {
+            throw new IllegalArgumentException(
+                    "Full length cannot be negative: " + fullLength
+            );
+        }
+        if (jointlyObservedLength < 0) {
+            throw new IllegalArgumentException(
+                    "Jointly observed length cannot be negative: "
+                            + jointlyObservedLength
+            );
+        }
+        if (jointlyObservedLength > fullLength) {
+            throw new IllegalArgumentException(
+                    "Jointly observed length cannot exceed full length. "
+                            + "Received jointlyObservedLength="
+                            + jointlyObservedLength
+                            + " and fullLength="
+                            + fullLength
+                            + "."
+            );
+        }
         if (jointlyObservedLength == 0) {
             return Double.POSITIVE_INFINITY;
         }
+        return (double) fullLength / jointlyObservedLength;
+    }
 
-        return ((double) fullLength) / jointlyObservedLength;
+    private static void requireSameLength(
+            int firstLength,
+            int secondLength
+    ) {
+        if (firstLength != secondLength) {
+            throw new IllegalArgumentException(
+                    "Both series must have the same length. Received "
+                            + firstLength
+                            + " and "
+                            + secondLength
+                            + "."
+            );
+        }
+    }
+
+    private static void requireSameRows(
+            int firstRows,
+            int secondRows
+    ) {
+        if (firstRows != secondRows) {
+            throw new IllegalArgumentException(
+                    "Both multivariate series must have the same number "
+                            + "of dimensions. Received "
+                            + firstRows
+                            + " and "
+                            + secondRows
+                            + "."
+            );
+        }
+    }
+
+    private static void requireSameRowLength(
+            int firstLength,
+            int secondLength,
+            int dimension
+    ) {
+        if (firstLength != secondLength) {
+            throw new IllegalArgumentException(
+                    "Corresponding rows must have the same length at "
+                            + "dimension "
+                            + dimension
+                            + ". Received "
+                            + firstLength
+                            + " and "
+                            + secondLength
+                            + "."
+            );
+        }
+    }
+
+    private static double[] requireRow(
+            double[] row,
+            String seriesName,
+            int dimension
+    ) {
+        return Objects.requireNonNull(
+                row,
+                "The "
+                        + seriesName
+                        + " series contains a null row at dimension "
+                        + dimension
+                        + "."
+        );
+    }
+
+    private static float[] requireRow(
+            float[] row,
+            String seriesName,
+            int dimension
+    ) {
+        return Objects.requireNonNull(
+                row,
+                "The "
+                        + seriesName
+                        + " series contains a null row at dimension "
+                        + dimension
+                        + "."
+        );
     }
 }

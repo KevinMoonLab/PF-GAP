@@ -1,44 +1,46 @@
 package datasets.readers;
 
 import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
+import ch.randelshofer.fastdoubleparser.JavaFloatParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import de.siegmar.fastcsv.reader.AbstractBaseCsvCallbackHandler;
 import de.siegmar.fastcsv.reader.CsvReader;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * High-throughput reader for row-oriented numeric delimited datasets.
  *
- * <p>Physical layout:</p>
- *
- * <pre>
- * one delimited record = one dataset instance
- * one feature field    = one entry in a primitive double[]
- * </pre>
- *
- * <p>The reader supports a single-character delimiter, including an actual tab
- * or the escaped-tab configuration value {@code "\\t"}. A label may be embedded
- * in the first or last field, supplied in a separate label file, or omitted for
- * isolation and unlabeled testing workflows.</p>
+ * <p>One delimited record becomes one dataset instance. Under
+ * {@link NumericStorageType#FLOAT32}, each instance is stored as a primitive
+ * {@code float[]}. Under {@link NumericStorageType#FLOAT64}, each instance is
+ * stored as a primitive {@code double[]}. Because delimited text has no source
+ * binary dtype, {@link NumericStorageType#AUTO} resolves to FLOAT64.</p>
  *
  * <p>Numeric fields are parsed directly from FastCSV's character buffer with
- * {@link JavaDoubleParser}. Except for the first headerless record, this avoids
- * creating {@code CsvRecord}, {@code List<String>}, and one {@code String} per
- * numeric value. Each completed record is added directly to the final
- * {@link ListObjectDataset} as a primitive {@code double[]}.</p>
+ * {@link JavaFloatParser} or {@link JavaDoubleParser}. The selected callback
+ * has a type-specialized hot path, so parsing a numeric field does not perform
+ * a per-value storage-type branch and does not create a temporary String.
+ * Except for the first headerless record, the reader also avoids creating a
+ * CsvRecord, a List of field strings, or one String per numeric value.</p>
  *
- * <p>When {@code hasMissingValues=true}, configured missing tokens and blank
- * numeric fields are represented by {@link Double#NaN}. When it is false, the
- * same inputs produce a descriptive failure. This class never creates boxed
- * numeric arrays.</p>
+ * <p>Configured missing tokens and blank numeric fields become
+ * {@link Float#NaN} or {@link Double#NaN} when missing values are enabled.
+ * This reader never creates boxed numeric arrays.</p>
  *
- * <p>This reader returns raw eager data. Standardization and other preprocessing
- * remain owned by PFGAP's preprocessing pipeline.</p>
+ * <p>The reader returns raw eager data. Standardization, missing-index
+ * construction, and imputation remain owned by PFGAP's preparation pipeline.</p>
  */
 public class NumericDelimitedFileReader implements DatasetReader {
 
@@ -51,6 +53,7 @@ public class NumericDelimitedFileReader implements DatasetReader {
     private final boolean targetColumnIsFirst;
     private final boolean isTest;
     private final boolean isRegression;
+    private final NumericStorageType numericStorageType;
     private final Set<String> missingStrings;
 
     public NumericDelimitedFileReader(
@@ -67,7 +70,35 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 options.hasMissingValues(),
                 options.targetColumnIsFirst(),
                 options.isTest(),
-                options.isRegression()
+                options.isRegression(),
+                options.getNumericStorageType()
+        );
+    }
+
+    /**
+     * Compatibility constructor for direct Java callers. Delimited text
+     * defaults to FLOAT64 under AUTO.
+     */
+    public NumericDelimitedFileReader(
+            String dataFileName,
+            String labelFileName,
+            String entrySeparator,
+            boolean hasHeader,
+            boolean hasMissingValues,
+            boolean targetColumnIsFirst,
+            boolean isTest,
+            boolean isRegression
+    ) {
+        this(
+                dataFileName,
+                labelFileName,
+                entrySeparator,
+                hasHeader,
+                hasMissingValues,
+                targetColumnIsFirst,
+                isTest,
+                isRegression,
+                NumericStorageType.AUTO
         );
     }
 
@@ -79,46 +110,46 @@ public class NumericDelimitedFileReader implements DatasetReader {
             boolean hasMissingValues,
             boolean targetColumnIsFirst,
             boolean isTest,
-            boolean isRegression
+            boolean isRegression,
+            NumericStorageType numericStorageType
     ) {
-        this.dataFileName = requireNonblank(dataFileName, "dataFileName");
+        this.dataFileName = requireNonblank(
+                dataFileName,
+                "dataFileName"
+        );
         this.labelFileName = normalizeNullableString(labelFileName);
-        this.entrySeparator = validateAndNormalizeSeparator(entrySeparator);
+        this.entrySeparator =
+                validateAndNormalizeSeparator(entrySeparator);
         this.fieldSeparator = this.entrySeparator.charAt(0);
         this.hasHeader = hasHeader;
         this.hasMissingValues = hasMissingValues;
         this.targetColumnIsFirst = targetColumnIsFirst;
         this.isTest = isTest;
         this.isRegression = isRegression;
+        this.numericStorageType = resolveDelimitedStorageType(
+                numericStorageType
+        );
         this.missingStrings = snapshotMissingStrings();
     }
 
     @Override
     public ListObjectDataset read() throws IOException {
         long start = System.nanoTime();
-
         Path dataPath = Path.of(dataFileName);
         validateDataFile(dataPath);
 
         List<Object> labels = labelFileName == null
                 ? List.of()
                 : DelimitedFileReader.readGenericLabels(
-                labelFileName,
-                hasHeader,
-                isRegression
-        );
-
+                        labelFileName,
+                        hasHeader,
+                        isRegression
+                );
         ListObjectDataset dataset = new ListObjectDataset();
-        NumericDatasetCallbackHandler handler = new NumericDatasetCallbackHandler(
+        NumericDatasetCallbackHandler handler = createHandler(
                 dataPath,
                 dataset,
-                labels,
-                hasHeader,
-                hasMissingValues,
-                shouldParseEmbeddedLabel(),
-                targetColumnIsFirst,
-                isRegression,
-                missingStrings
+                labels
         );
 
         try (CsvReader<Boolean> csvReader = CsvReader.builder()
@@ -133,7 +164,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
             throw e;
         } catch (RuntimeException e) {
             throw new IOException(
-                    "Failed while parsing numeric delimited dataset: " + dataPath,
+                    "Failed while parsing numeric delimited dataset: "
+                            + dataPath,
                     e
             );
         }
@@ -141,28 +173,54 @@ public class NumericDelimitedFileReader implements DatasetReader {
         int instanceCount = handler.getInstanceCount();
         if (instanceCount == 0) {
             throw new IOException(
-                    "Numeric delimited dataset contains no data records: " + dataPath
+                    "Numeric delimited dataset contains no data records: "
+                            + dataPath
             );
         }
-
         validateSeparateLabelCount(labels, instanceCount);
 
-        /*
-         * Preserve the legacy AppContext metadata contract without incorrectly
-         * reporting the final row's length for unequal-length data.
-         */
         int commonLength = handler.hasCommonFeatureCount()
                 ? handler.getCommonFeatureCount()
                 : 0;
-
         dataset.setLength(commonLength);
         AppContext.length = commonLength;
-
         DelimitedFileReader.ProgressLogger.logDuration(
                 start,
                 System.nanoTime()
         );
         return dataset;
+    }
+
+    private NumericDatasetCallbackHandler createHandler(
+            Path dataPath,
+            ListObjectDataset dataset,
+            List<Object> labels
+    ) {
+        boolean embeddedLabel = shouldParseEmbeddedLabel();
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            return new FloatNumericDatasetCallbackHandler(
+                    dataPath,
+                    dataset,
+                    labels,
+                    hasHeader,
+                    hasMissingValues,
+                    embeddedLabel,
+                    targetColumnIsFirst,
+                    isRegression,
+                    missingStrings
+            );
+        }
+        return new DoubleNumericDatasetCallbackHandler(
+                dataPath,
+                dataset,
+                labels,
+                hasHeader,
+                hasMissingValues,
+                embeddedLabel,
+                targetColumnIsFirst,
+                isRegression,
+                missingStrings
+        );
     }
 
     private boolean shouldParseEmbeddedLabel() {
@@ -181,26 +239,46 @@ public class NumericDelimitedFileReader implements DatasetReader {
         if (labels.size() != instanceCount) {
             throw new IllegalArgumentException(
                     "Separate label count does not match the number of data "
-                            + "instances. Labels=" + labels.size()
-                            + ", instances=" + instanceCount + "."
+                            + "instances. Labels="
+                            + labels.size()
+                            + ", instances="
+                            + instanceCount
+                            + "."
             );
         }
     }
 
-    private static void validateDataFile(Path dataPath) throws IOException {
+    private static NumericStorageType resolveDelimitedStorageType(
+            NumericStorageType requested
+    ) {
+        NumericStorageType nonnull = Objects.requireNonNull(
+                requested,
+                "numericStorageType cannot be null."
+        );
+        return nonnull == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64
+                : nonnull;
+    }
+
+    private static void validateDataFile(
+            Path dataPath
+    ) throws IOException {
         if (!Files.exists(dataPath)) {
             throw new IOException(
-                    "Numeric delimited data file does not exist: " + dataPath
+                    "Numeric delimited data file does not exist: "
+                            + dataPath
             );
         }
         if (!Files.isRegularFile(dataPath)) {
             throw new IOException(
-                    "Numeric delimited data path is not a regular file: " + dataPath
+                    "Numeric delimited data path is not a regular file: "
+                            + dataPath
             );
         }
         if (!Files.isReadable(dataPath)) {
             throw new IOException(
-                    "Numeric delimited data file is not readable: " + dataPath
+                    "Numeric delimited data file is not readable: "
+                            + dataPath
             );
         }
     }
@@ -217,42 +295,48 @@ public class NumericDelimitedFileReader implements DatasetReader {
         return value.trim();
     }
 
-    private static String normalizeNullableString(String value) {
+    private static String normalizeNullableString(
+            String value
+    ) {
         if (value == null) {
             return null;
         }
         String trimmed = value.trim();
-        if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")) {
+        if (trimmed.isEmpty()
+                || trimmed.equalsIgnoreCase("None")) {
             return null;
         }
         return trimmed;
     }
 
-    private static String validateAndNormalizeSeparator(String separator) {
+    private static String validateAndNormalizeSeparator(
+            String separator
+    ) {
         if (separator == null || separator.isEmpty()) {
             throw new IllegalArgumentException(
-                    "NumericDelimitedFileReader requires a non-empty entry separator."
+                    "NumericDelimitedFileReader requires a non-empty "
+                            + "entry separator."
             );
         }
-
         String normalized = switch (separator) {
             case "\\t" -> "\t";
             case "\\n" -> "\n";
             case "\\r" -> "\r";
             default -> separator;
         };
-
         if (normalized.length() != 1) {
             throw new IllegalArgumentException(
-                    "NumericDelimitedFileReader requires a single-character "
-                            + "entry separator. Received: '" + separator + "'."
+                    "NumericDelimitedFileReader requires a "
+                            + "single-character entry separator. Received: '"
+                            + separator
+                            + "'."
             );
         }
-
         char delimiter = normalized.charAt(0);
         if (delimiter == '\n' || delimiter == '\r') {
             throw new IllegalArgumentException(
-                    "A line-separator character cannot be used as the entry separator."
+                    "A line-separator character cannot be used as the "
+                            + "entry separator."
             );
         }
         return normalized;
@@ -263,7 +347,6 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 || AppContext.MissingStrings.isEmpty()) {
             return Set.of();
         }
-
         Set<String> normalized = new HashSet<>();
         for (String value : AppContext.MissingStrings) {
             if (value == null) {
@@ -271,27 +354,30 @@ public class NumericDelimitedFileReader implements DatasetReader {
             }
             String trimmed = value.trim();
             if (!trimmed.isEmpty()) {
-                normalized.add(trimmed.toUpperCase(Locale.ROOT));
+                normalized.add(
+                        trimmed.toUpperCase(Locale.ROOT)
+                );
             }
         }
-
         return normalized.isEmpty()
                 ? Set.of()
                 : Collections.unmodifiableSet(normalized);
     }
 
     /**
-     * FastCSV callback that constructs primitive rows directly in the dataset.
+     * Shared record/schema/label handling. Numeric field parsing and primitive
+     * row storage remain type-specialized in the concrete callback classes.
      */
-    private static final class NumericDatasetCallbackHandler
+    private abstract static class NumericDatasetCallbackHandler
             extends AbstractBaseCsvCallbackHandler<Boolean> {
 
-        private final Path file;
-        private final ListObjectDataset dataset;
+        protected final Path file;
+        protected final ListObjectDataset dataset;
+        protected final boolean hasMissingValues;
+        protected final boolean embeddedLabel;
+
         private final List<Object> separateLabels;
         private final boolean hasHeader;
-        private final boolean hasMissingValues;
-        private final boolean embeddedLabel;
         private final boolean targetColumnIsFirst;
         private final boolean isRegression;
         private final Set<String> missingStrings;
@@ -301,14 +387,11 @@ public class NumericDelimitedFileReader implements DatasetReader {
         private int expectedFeatureCount = -1;
         private int instanceCount;
         private int commonFeatureCount = -1;
+        private String currentLabelToken;
         private boolean commonFeatureCountValid = true;
         private boolean schemaResolved;
 
-        private double[] currentFeatures;
-        private String currentLabelToken;
-        private int currentOutputIndex;
-
-        private NumericDatasetCallbackHandler(
+        protected NumericDatasetCallbackHandler(
                 Path file,
                 ListObjectDataset dataset,
                 List<Object> separateLabels,
@@ -331,7 +414,7 @@ public class NumericDelimitedFileReader implements DatasetReader {
         }
 
         @Override
-        public void handleField(
+        public final void handleField(
                 int fieldIndex,
                 char[] buffer,
                 int offset,
@@ -339,26 +422,21 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 boolean quoted
         ) {
             if (!schemaResolved) {
-                firstRecordFields.add(new String(buffer, offset, length));
+                firstRecordFields.add(
+                        new String(buffer, offset, length)
+                );
                 return;
             }
-
             if (fieldIndex >= expectedFieldCount) {
                 throw inconsistentColumnCount(fieldIndex + 1);
             }
-
-            if (currentFeatures == null) {
-                currentFeatures = new double[expectedFeatureCount];
-                currentOutputIndex = 0;
-                currentLabelToken = null;
-            }
-
+            ensureCurrentRow();
             if (embeddedLabel && isLabelField(fieldIndex)) {
-                currentLabelToken = new String(buffer, offset, length).trim();
+                currentLabelToken =
+                        new String(buffer, offset, length).trim();
                 return;
             }
-
-            currentFeatures[currentOutputIndex++] = parseNumericField(
+            appendNumericField(
                     buffer,
                     offset,
                     length,
@@ -367,18 +445,15 @@ public class NumericDelimitedFileReader implements DatasetReader {
         }
 
         @Override
-        protected Boolean buildRecord() {
+        protected final Boolean buildRecord() {
             int actualFieldCount = getFieldCount();
-
             if (!schemaResolved) {
                 resolveSchema(actualFieldCount);
                 schemaResolved = true;
-
                 if (hasHeader) {
                     firstRecordFields = null;
                     return null;
                 }
-
                 appendBufferedFirstDataRecord();
                 firstRecordFields = null;
                 return Boolean.TRUE;
@@ -387,74 +462,213 @@ public class NumericDelimitedFileReader implements DatasetReader {
             if (actualFieldCount != expectedFieldCount) {
                 throw inconsistentColumnCount(actualFieldCount);
             }
-            if (currentFeatures == null) {
+            if (!hasCurrentRow()) {
                 throw new IllegalArgumentException(
-                        "Encountered an empty numeric record in file " + file
-                                + " at CSV line " + getStartingLineNumber() + "."
+                        "Encountered an empty numeric record in file "
+                                + file
+                                + " at CSV line "
+                                + getStartingLineNumber()
+                                + "."
                 );
             }
-            if (currentOutputIndex != expectedFeatureCount) {
+            if (getCurrentOutputIndex() != expectedFeatureCount) {
                 throw new IllegalStateException(
-                        "Numeric record in file " + file + " produced "
-                                + currentOutputIndex + " features; expected "
-                                + expectedFeatureCount + "."
+                        "Numeric record in file "
+                                + file
+                                + " produced "
+                                + getCurrentOutputIndex()
+                                + " features; expected "
+                                + expectedFeatureCount
+                                + "."
                 );
             }
 
             Object label = resolveCurrentLabel();
-            addInstance(label, currentFeatures);
-
-            currentFeatures = null;
+            finishCurrentRow(label);
             currentLabelToken = null;
-            currentOutputIndex = 0;
             return Boolean.TRUE;
         }
 
+        protected abstract void ensureCurrentRow();
+
+        protected abstract boolean hasCurrentRow();
+
+        protected abstract int getCurrentOutputIndex();
+
+        protected abstract void appendNumericField(
+                char[] buffer,
+                int offset,
+                int length,
+                int fieldIndex
+        );
+
+        protected abstract void appendNumericToken(
+                String token,
+                int fieldIndex
+        );
+
+        protected abstract void finishCurrentRow(Object label);
+
+        protected final int getExpectedFeatureCount() {
+            return expectedFeatureCount;
+        }
+
+        protected final double parseDoubleField(
+                char[] buffer,
+                int offset,
+                int length,
+                int fieldIndex
+        ) {
+            int start = trimStart(buffer, offset, length);
+            int end = trimEnd(buffer, start, offset + length);
+            if (isMissingToken(buffer, start, end - start)) {
+                if (hasMissingValues) {
+                    return Double.NaN;
+                }
+                throw missingValue(fieldIndex);
+            }
+            try {
+                return JavaDoubleParser.parseDouble(
+                        buffer,
+                        start,
+                        end - start
+                );
+            } catch (NumberFormatException e) {
+                throw numericParseFailure(fieldIndex, e);
+            }
+        }
+
+        protected final float parseFloatField(
+                char[] buffer,
+                int offset,
+                int length,
+                int fieldIndex
+        ) {
+            int start = trimStart(buffer, offset, length);
+            int end = trimEnd(buffer, start, offset + length);
+            if (isMissingToken(buffer, start, end - start)) {
+                if (hasMissingValues) {
+                    return Float.NaN;
+                }
+                throw missingValue(fieldIndex);
+            }
+            try {
+                return JavaFloatParser.parseFloat(
+                        buffer,
+                        start,
+                        end - start
+                );
+            } catch (NumberFormatException e) {
+                throw numericParseFailure(fieldIndex, e);
+            }
+        }
+
+        protected final double parseDoubleToken(
+                String token,
+                int fieldIndex
+        ) {
+            String trimmed = token == null ? "" : token.trim();
+            if (isMissingToken(trimmed)) {
+                if (hasMissingValues) {
+                    return Double.NaN;
+                }
+                throw missingValue(fieldIndex);
+            }
+            try {
+                return JavaDoubleParser.parseDouble(trimmed);
+            } catch (NumberFormatException e) {
+                throw firstRecordParseFailure(
+                        trimmed,
+                        fieldIndex,
+                        e
+                );
+            }
+        }
+
+        protected final float parseFloatToken(
+                String token,
+                int fieldIndex
+        ) {
+            String trimmed = token == null ? "" : token.trim();
+            if (isMissingToken(trimmed)) {
+                if (hasMissingValues) {
+                    return Float.NaN;
+                }
+                throw missingValue(fieldIndex);
+            }
+            try {
+                return JavaFloatParser.parseFloat(trimmed);
+            } catch (NumberFormatException e) {
+                throw firstRecordParseFailure(
+                        trimmed,
+                        fieldIndex,
+                        e
+                );
+            }
+        }
+
+        protected final void addInstance(
+                Object label,
+                Object features,
+                int featureCount
+        ) {
+            dataset.add(label, features, instanceCount);
+            if (commonFeatureCount < 0) {
+                commonFeatureCount = featureCount;
+            } else if (featureCount != commonFeatureCount) {
+                commonFeatureCountValid = false;
+            }
+            DelimitedFileReader.ProgressLogger.logProgress(
+                    instanceCount
+            );
+            instanceCount++;
+        }
+
         private void resolveSchema(int fieldCount) {
-            if (fieldCount <= 0 || firstRecordFields.size() != fieldCount) {
+            if (fieldCount <= 0
+                    || firstRecordFields.size() != fieldCount) {
                 throw new IllegalArgumentException(
-                        "Numeric delimited file has no valid columns: " + file
+                        "Numeric delimited file has no valid columns: "
+                                + file
                 );
             }
             if (embeddedLabel && fieldCount < 2) {
                 throw new IllegalArgumentException(
-                        "Numeric delimited records in file " + file
-                                + " must contain at least one feature and one label."
+                        "Numeric delimited records in file "
+                                + file
+                                + " must contain at least one feature and "
+                                + "one label."
                 );
             }
-
             expectedFieldCount = fieldCount;
             expectedFeatureCount = embeddedLabel
                     ? fieldCount - 1
                     : fieldCount;
-
             if (expectedFeatureCount <= 0) {
                 throw new IllegalArgumentException(
-                        "No numeric feature columns are available in file: " + file
+                        "No numeric feature columns are available in file: "
+                                + file
                 );
             }
         }
 
         private void appendBufferedFirstDataRecord() {
-            double[] features = new double[expectedFeatureCount];
-            int outputIndex = 0;
+            ensureCurrentRow();
             String labelToken = null;
-
             for (int fieldIndex = 0;
-                 fieldIndex < expectedFieldCount;
-                 fieldIndex++) {
+                    fieldIndex < expectedFieldCount;
+                    fieldIndex++) {
                 String token = firstRecordFields.get(fieldIndex);
                 if (embeddedLabel && isLabelField(fieldIndex)) {
                     labelToken = token == null ? "" : token.trim();
                     continue;
                 }
-                features[outputIndex++] = parseNumericToken(token, fieldIndex);
+                appendNumericToken(token, fieldIndex);
             }
-
             Object label = embeddedLabel
                     ? parseEmbeddedLabel(labelToken)
                     : getSeparateLabel(instanceCount);
-            addInstance(label, features);
+            finishCurrentRow(label);
         }
 
         private boolean isLabelField(int fieldIndex) {
@@ -463,65 +677,31 @@ public class NumericDelimitedFileReader implements DatasetReader {
                     : fieldIndex == expectedFieldCount - 1;
         }
 
-        private double parseNumericField(
+        private static int trimStart(
                 char[] buffer,
                 int offset,
-                int length,
-                int fieldIndex
+                int length
         ) {
             int start = offset;
             int end = offset + length;
-            while (start < end && Character.isWhitespace(buffer[start])) {
+            while (start < end
+                    && Character.isWhitespace(buffer[start])) {
                 start++;
             }
-            while (end > start && Character.isWhitespace(buffer[end - 1])) {
-                end--;
-            }
-
-            if (isMissingToken(buffer, start, end - start)) {
-                if (hasMissingValues) {
-                    return Double.NaN;
-                }
-                throw missingValue(fieldIndex);
-            }
-
-            try {
-                return JavaDoubleParser.parseDouble(
-                        buffer,
-                        start,
-                        end - start
-                );
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        "Could not parse numeric value in file " + file
-                                + " at instance " + instanceCount
-                                + ", field " + fieldIndex
-                                + ", starting CSV line "
-                                + getStartingLineNumber() + ".",
-                        e
-                );
-            }
+            return start;
         }
 
-        private double parseNumericToken(String token, int fieldIndex) {
-            String trimmed = token == null ? "" : token.trim();
-            if (isMissingToken(trimmed)) {
-                if (hasMissingValues) {
-                    return Double.NaN;
-                }
-                throw missingValue(fieldIndex);
+        private static int trimEnd(
+                char[] buffer,
+                int start,
+                int endExclusive
+        ) {
+            int end = endExclusive;
+            while (end > start
+                    && Character.isWhitespace(buffer[end - 1])) {
+                end--;
             }
-
-            try {
-                return JavaDoubleParser.parseDouble(trimmed);
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        "Could not parse numeric value '" + trimmed
-                                + "' in file " + file
-                                + " at instance 0, field " + fieldIndex + ".",
-                        e
-                );
-            }
+            return end;
         }
 
         private boolean isMissingToken(
@@ -535,14 +715,15 @@ public class NumericDelimitedFileReader implements DatasetReader {
             if (missingStrings.isEmpty()) {
                 return false;
             }
-
             for (String indicator : missingStrings) {
                 if (indicator.length() != length) {
                     continue;
                 }
                 boolean matches = true;
                 for (int index = 0; index < length; index++) {
-                    char actual = Character.toUpperCase(buffer[offset + index]);
+                    char actual = Character.toUpperCase(
+                            buffer[offset + index]
+                    );
                     if (actual != indicator.charAt(index)) {
                         matches = false;
                         break;
@@ -558,15 +739,57 @@ public class NumericDelimitedFileReader implements DatasetReader {
         private boolean isMissingToken(String token) {
             return token == null
                     || token.isEmpty()
-                    || missingStrings.contains(token.toUpperCase(Locale.ROOT));
+                    || missingStrings.contains(
+                            token.toUpperCase(Locale.ROOT)
+                    );
         }
 
-        private IllegalArgumentException missingValue(int fieldIndex) {
+        private IllegalArgumentException missingValue(
+                int fieldIndex
+        ) {
             return new IllegalArgumentException(
-                    "Encountered a missing numeric value in file " + file
-                            + " at instance " + instanceCount
-                            + ", field " + fieldIndex
+                    "Encountered a missing numeric value in file "
+                            + file
+                            + " at instance "
+                            + instanceCount
+                            + ", field "
+                            + fieldIndex
                             + ", but hasMissingValues is false."
+            );
+        }
+
+        private IllegalArgumentException numericParseFailure(
+                int fieldIndex,
+                NumberFormatException cause
+        ) {
+            return new IllegalArgumentException(
+                    "Could not parse numeric value in file "
+                            + file
+                            + " at instance "
+                            + instanceCount
+                            + ", field "
+                            + fieldIndex
+                            + ", starting CSV line "
+                            + getStartingLineNumber()
+                            + ".",
+                    cause
+            );
+        }
+
+        private IllegalArgumentException firstRecordParseFailure(
+                String token,
+                int fieldIndex,
+                NumberFormatException cause
+        ) {
+            return new IllegalArgumentException(
+                    "Could not parse numeric value '"
+                            + token
+                            + "' in file "
+                            + file
+                            + " at instance 0, field "
+                            + fieldIndex
+                            + ".",
+                    cause
             );
         }
 
@@ -580,19 +803,25 @@ public class NumericDelimitedFileReader implements DatasetReader {
         private Object parseEmbeddedLabel(String token) {
             if (token == null || token.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Embedded label cannot be missing in file " + file
-                                + " at instance " + instanceCount + "."
+                        "Embedded label cannot be missing in file "
+                                + file
+                                + " at instance "
+                                + instanceCount
+                                + "."
                 );
             }
-
             if (isRegression) {
                 try {
                     return JavaDoubleParser.parseDouble(token);
                 } catch (NumberFormatException e) {
                     throw new IllegalArgumentException(
-                            "Could not parse regression label '" + token
-                                    + "' in file " + file
-                                    + " at instance " + instanceCount + ".",
+                            "Could not parse regression label '"
+                                    + token
+                                    + "' in file "
+                                    + file
+                                    + " at instance "
+                                    + instanceCount
+                                    + ".",
                             e
                     );
                 }
@@ -608,38 +837,26 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 throw new IllegalArgumentException(
                         "The separate label file contains fewer labels than "
                                 + "the data file. Missing label for instance "
-                                + index + "."
+                                + index
+                                + "."
                 );
             }
             return separateLabels.get(index);
-        }
-
-        private void addInstance(Object label, double[] features) {
-            dataset.add(
-                    label,
-                    features,
-                    instanceCount
-            );
-
-            if (commonFeatureCount < 0) {
-                commonFeatureCount = features.length;
-            } else if (features.length != commonFeatureCount) {
-                commonFeatureCountValid = false;
-            }
-
-            DelimitedFileReader.ProgressLogger.logProgress(instanceCount);
-            instanceCount++;
         }
 
         private IllegalArgumentException inconsistentColumnCount(
                 int actualFieldCount
         ) {
             return new IllegalArgumentException(
-                    "Inconsistent column count in file " + file
+                    "Inconsistent column count in file "
+                            + file
                             + " at CSV record beginning on line "
                             + getStartingLineNumber()
-                            + ". Expected " + expectedFieldCount
-                            + " columns but found " + actualFieldCount + "."
+                            + ". Expected "
+                            + expectedFieldCount
+                            + " columns but found "
+                            + actualFieldCount
+                            + "."
             );
         }
 
@@ -648,11 +865,184 @@ public class NumericDelimitedFileReader implements DatasetReader {
         }
 
         private boolean hasCommonFeatureCount() {
-            return commonFeatureCountValid && commonFeatureCount >= 0;
+            return commonFeatureCountValid
+                    && commonFeatureCount >= 0;
         }
 
         private int getCommonFeatureCount() {
             return commonFeatureCount;
+        }
+    }
+
+    private static final class DoubleNumericDatasetCallbackHandler
+            extends NumericDatasetCallbackHandler {
+
+        private double[] currentFeatures;
+        private int currentOutputIndex;
+
+        private DoubleNumericDatasetCallbackHandler(
+                Path file,
+                ListObjectDataset dataset,
+                List<Object> separateLabels,
+                boolean hasHeader,
+                boolean hasMissingValues,
+                boolean embeddedLabel,
+                boolean targetColumnIsFirst,
+                boolean isRegression,
+                Set<String> missingStrings
+        ) {
+            super(
+                    file,
+                    dataset,
+                    separateLabels,
+                    hasHeader,
+                    hasMissingValues,
+                    embeddedLabel,
+                    targetColumnIsFirst,
+                    isRegression,
+                    missingStrings
+            );
+        }
+
+        @Override
+        protected void ensureCurrentRow() {
+            if (currentFeatures == null) {
+                currentFeatures =
+                        new double[getExpectedFeatureCount()];
+                currentOutputIndex = 0;
+            }
+        }
+
+        @Override
+        protected boolean hasCurrentRow() {
+            return currentFeatures != null;
+        }
+
+        @Override
+        protected int getCurrentOutputIndex() {
+            return currentOutputIndex;
+        }
+
+        @Override
+        protected void appendNumericField(
+                char[] buffer,
+                int offset,
+                int length,
+                int fieldIndex
+        ) {
+            currentFeatures[currentOutputIndex++] =
+                    parseDoubleField(
+                            buffer,
+                            offset,
+                            length,
+                            fieldIndex
+                    );
+        }
+
+        @Override
+        protected void appendNumericToken(
+                String token,
+                int fieldIndex
+        ) {
+            currentFeatures[currentOutputIndex++] =
+                    parseDoubleToken(token, fieldIndex);
+        }
+
+        @Override
+        protected void finishCurrentRow(Object label) {
+            addInstance(
+                    label,
+                    currentFeatures,
+                    currentFeatures.length
+            );
+            currentFeatures = null;
+            currentOutputIndex = 0;
+        }
+    }
+
+    private static final class FloatNumericDatasetCallbackHandler
+            extends NumericDatasetCallbackHandler {
+
+        private float[] currentFeatures;
+        private int currentOutputIndex;
+
+        private FloatNumericDatasetCallbackHandler(
+                Path file,
+                ListObjectDataset dataset,
+                List<Object> separateLabels,
+                boolean hasHeader,
+                boolean hasMissingValues,
+                boolean embeddedLabel,
+                boolean targetColumnIsFirst,
+                boolean isRegression,
+                Set<String> missingStrings
+        ) {
+            super(
+                    file,
+                    dataset,
+                    separateLabels,
+                    hasHeader,
+                    hasMissingValues,
+                    embeddedLabel,
+                    targetColumnIsFirst,
+                    isRegression,
+                    missingStrings
+            );
+        }
+
+        @Override
+        protected void ensureCurrentRow() {
+            if (currentFeatures == null) {
+                currentFeatures =
+                        new float[getExpectedFeatureCount()];
+                currentOutputIndex = 0;
+            }
+        }
+
+        @Override
+        protected boolean hasCurrentRow() {
+            return currentFeatures != null;
+        }
+
+        @Override
+        protected int getCurrentOutputIndex() {
+            return currentOutputIndex;
+        }
+
+        @Override
+        protected void appendNumericField(
+                char[] buffer,
+                int offset,
+                int length,
+                int fieldIndex
+        ) {
+            currentFeatures[currentOutputIndex++] =
+                    parseFloatField(
+                            buffer,
+                            offset,
+                            length,
+                            fieldIndex
+                    );
+        }
+
+        @Override
+        protected void appendNumericToken(
+                String token,
+                int fieldIndex
+        ) {
+            currentFeatures[currentOutputIndex++] =
+                    parseFloatToken(token, fieldIndex);
+        }
+
+        @Override
+        protected void finishCurrentRow(Object label) {
+            addInstance(
+                    label,
+                    currentFeatures,
+                    currentFeatures.length
+            );
+            currentFeatures = null;
+            currentOutputIndex = 0;
         }
     }
 }

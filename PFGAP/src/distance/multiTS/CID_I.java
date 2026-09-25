@@ -1,41 +1,151 @@
 package distance.multiTS;
 
-import core.contracts.ObjectDataset;
 import distance.elastic.CID;
 
+import java.io.Serial;
 import java.io.Serializable;
 
-public class CID_I implements Serializable {
+/**
+ * Independent multivariate Complexity-Invariant Distance.
+ *
+ * <p>CID is computed independently for every selected channel and the squared
+ * channel costs are summed. A finite {@code bestSoFar} is reduced by each
+ * completed channel cost. Both {@code double[][]} and {@code float[][]} inputs
+ * are supported without slicing or conversion.</p>
+ */
+public final class CID_I implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private final CID cid;
 
     public CID_I() {
-        this.cid = new CID();
+        cid = new CID();
     }
 
-    /**
-     * Computes the average CID (Complexity-Invariant Distance) across all rows of the input matrices.
-     * Each row in series1 is compared to the corresponding row in series2.
-     * CID scales Euclidean distance by a complexity correction factor.
-     *
-     * @param Series1 Object expected to be double[][]
-     * @param Series2 Object expected to be double[][]
-     * @param bsf Early abandoning threshold
-     * @return Average CID distance across all rows
-     */
-    public synchronized double distance(Object Series1, Object Series2, double bsf) {
-        double[][] series1 = (double[][]) Series1;
-        double[][] series2 = (double[][]) Series2;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        return distance(first, second, bestSoFar, null);
+    }
 
-        if (series1.length != series2.length) {
-            throw new IllegalArgumentException("Both series must have the same number of rows.");
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        if (first instanceof double[][] firstValues
+                && second instanceof double[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
         }
-
-        double totalDistance = 0.0;
-        for (int i = 0; i < series1.length; i++) {
-            totalDistance += cid.distance(series1[i], series2[i], bsf);
+        if (first instanceof float[][] firstValues
+                && second instanceof float[][] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
         }
+        throw unsupportedPair(first, second);
+    }
 
-        return totalDistance / series1.length;
+    private double distance(
+            double[][] first,
+            double[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = cid.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total)
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private double distance(
+            float[][] first,
+            float[][] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
+        int count = selectedDimensions == null
+                ? first.length
+                : selectedDimensions.length;
+
+        for (int position = 0; position < count; position++) {
+            int dimension = selectedDimensions == null
+                    ? position
+                    : selectedDimensions[position];
+            double channelCost = cid.distance(
+                    first[dimension],
+                    second[dimension],
+                    remainingBudget(bestSoFar, total)
+            );
+            if (channelCost == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+            total += channelCost;
+            if (total > bestSoFar) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return total;
+    }
+
+    private static double remainingBudget(
+            double bestSoFar,
+            double accumulated
+    ) {
+        if (bestSoFar == Double.POSITIVE_INFINITY) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double remaining = bestSoFar - accumulated;
+        return remaining < 0.0 ? 0.0 : remaining;
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Independent CID requires matching double[][] or float[][] "
+                        + "inputs. Received " + typeName(first) + " and "
+                        + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
     }
 }

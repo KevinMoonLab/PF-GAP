@@ -273,6 +273,7 @@ def train(
     #parallel_split_assignments=False,
     #parallel_split_assignment_threshold=128,
     num_workers=1,
+    use_vector_api=False,
 
     # Missing/imputation controls
     has_missing_values=None,
@@ -305,6 +306,8 @@ def train(
     custom_reader_descriptor=None,
     custom_reader_parameters=None,
     custom_reader_thread_safe=False,
+    numeric_storage="auto",
+    
     
     # Standardization controls
     standardization="none",
@@ -399,8 +402,11 @@ def train(
     )
         
     model_name = os.path.basename(os.path.normpath(str(model_name)))
-
-    msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
+    
+    if use_vector_api:
+        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
+    else:
+        msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
 
     msgList.extend([
         "-train=" + str(train_file),
@@ -443,6 +449,7 @@ def train(
         #"-parallelSplit=" + _bool(parallel_split_assignments),
         #"-parallelSplitThreshold=" + str(parallel_split_assignment_threshold),
         "-num_workers=" + str(num_workers),
+        "-use_vector_api=" + _bool(use_vector_api),
 
         "-hasMissingValues=" + _bool(has_missing_values),
         "-perform_train_imputation=" + _bool(impute_training_data),
@@ -453,6 +460,7 @@ def train(
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),
+        "-numeric_storage=" + numeric_storage,
 
         "-get_training_outlier_scores=" + _bool(return_training_outlier_scores),
         "-initial_imputer=" + initial_imputer,
@@ -538,6 +546,7 @@ def predict(
     #parallel_prox=False,
     #parallel_predict=False,
     num_workers=1,
+    use_vector_api=False,
     memory="1g",
 
     # Data controls
@@ -619,8 +628,11 @@ def predict(
     entry_separator = _separator_arg(entry_separator)
     array_separator = _separator_arg(array_separator)
     output_directory = _ensure_output_directory(output_directory)
-
-    msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
+    
+    if use_vector_api:
+        msgList = ["java", "--add-modules jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
+    else:
+        msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
 
     msgList.extend([
         "-train=" + str(testfile),
@@ -646,6 +658,7 @@ def predict(
         #"-parallelProx=" + _bool(parallel_prox),
         #"-parallelPredict=" + _bool(parallel_predict),
         "-num_workers=" + str(num_workers),
+        "-use_vector_api=" + _bool(use_vector_api),
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),

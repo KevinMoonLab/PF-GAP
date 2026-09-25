@@ -1,230 +1,373 @@
 package distance.elastic;
 
+import core.AppContext;
+
 import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * Euclidean distance implementations for primitive and boxed numeric vectors.
+ * Squared Euclidean distance kernels for primitive double and float vectors.
  *
- * <p>The primitive overloads used by proximity-tree routing return squared
- * Euclidean distance. This preserves the existing behavior and avoids an
- * unnecessary square-root operation when only relative distance ordering is
- * required.</p>
+ * <p>Every overload returns squared Euclidean distance. Float inputs remain
+ * stored as {@code float[]} and are widened only for scalar arithmetic; no
+ * temporary {@code double[]} is allocated.</p>
  *
- * <p>The selected-dimension primitive overload interprets positions in a
- * {@code double[]} instance as tabular features. It evaluates only the
- * supplied feature indices and does not allocate a reduced copy of either
- * input vector.</p>
+ * <p>When {@code AppContext.useVectorApi} is true, contiguous all-feature
+ * calculations use the JDK Vector API. Selected-feature calculations remain
+ * scalar because their indexed access pattern is not normally a good SIMD
+ * fit. A finite {@code bestSoFar} is checked after each vector block and each
+ * scalar tail element. Consequently, vector early abandoning may evaluate up
+ * to one complete SIMD block beyond the first element that crosses the bound,
+ * while preserving the returned squared-distance semantics.</p>
  *
- * <p>The boxed overload used by existing KNN-imputation workflows returns
- * ordinary Euclidean distance.</p>
- *
- * <p>Methods remain synchronized pending a project-wide audit of distance
- * instance ownership and concurrency behavior.</p>
+ * <p>This class is stateless and thread-safe. Input shape and selected-index
+ * validity are trusted preconditions established by the dataset and splitter
+ * layers rather than revalidated in the pairwise hot path.</p>
  */
-public class Euclidean implements Serializable {
+public final class Euclidean implements Serializable {
 
-	@Serial
-	private static final long serialVersionUID =
-			1L;
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-	public Euclidean() {
-	}
+    public Euclidean() {
+    }
 
-	/**
-	 * Computes squared Euclidean distance over every primitive vector
-	 * component.
-	 *
-	 * <p>The calculation may stop after the accumulated squared distance
-	 * exceeds {@code bestSoFar}. The returned value is therefore sufficient
-	 * for nearest-exemplar comparison, but it may be a partially accumulated
-	 * value when early abandoning occurs.</p>
-	 *
-	 * @param first primitive first vector
-	 * @param second primitive second vector
-	 * @param bestSoFar current best squared distance
-	 * @return squared Euclidean distance, possibly early-abandoned
-	 */
-	public synchronized double distance(
-			Object first,
-			Object second,
-			double bestSoFar
-	) {
-		double[] firstValues =
-				(double[]) first;
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar
+    ) {
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return AppContext.useVectorApi
+                    ? VectorKernels.squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    )
+                    : squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    );
+        }
 
-		double[] secondValues =
-				(double[]) second;
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return AppContext.useVectorApi
+                    ? VectorKernels.squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    )
+                    : squaredDistance(
+                            firstValues,
+                            secondValues,
+                            bestSoFar
+                    );
+        }
 
-		double total =
-				0.0;
+        throw unsupportedPair(first, second);
+    }
 
-		for (int index = 0;
-			 index < firstValues.length
-					 && total <= bestSoFar;
-			 index++) {
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        if (selectedDimensions == null) {
+            return distance(first, second, bestSoFar);
+        }
 
-			double difference =
-					firstValues[index]
-							- secondValues[index];
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return squaredDistance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
+        }
 
-			total +=
-					difference * difference;
-		}
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return squaredDistance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    selectedDimensions
+            );
+        }
 
-		return total;
-	}
+        throw unsupportedPair(first, second);
+    }
 
-	/**
-	 * Computes squared Euclidean distance over selected primitive vector
-	 * components.
-	 *
-	 * <p>No subarray, mask, or reduced vector is allocated. The supplied
-	 * selected-dimension array is expected to contain valid, distinct indices
-	 * and is treated as read-only.</p>
-	 *
-	 * @param first primitive first vector
-	 * @param second primitive second vector
-	 * @param bestSoFar current best squared distance
-	 * @param selectedDimensions selected tabular-feature indices, or null to
-	 *                           use every feature
-	 * @return selected-feature squared Euclidean distance, possibly
-	 *         early-abandoned
-	 */
-	public synchronized double distance(
-			Object first,
-			Object second,
-			double bestSoFar,
-			int[] selectedDimensions
-	) {
-		if (selectedDimensions == null) {
-			return distance(
-					first,
-					second,
-					bestSoFar
-			);
-		}
+    public double distance(
+            Object first,
+            Object second
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY
+        );
+    }
 
-		double[] firstValues =
-				(double[]) first;
+    public double distance(
+            Object first,
+            Object second,
+            int[] selectedDimensions
+    ) {
+        return distance(
+                first,
+                second,
+                Double.POSITIVE_INFINITY,
+                selectedDimensions
+        );
+    }
 
-		double[] secondValues =
-				(double[]) second;
+    private static double squaredDistance(
+            double[] first,
+            double[] second,
+            double bestSoFar
+    ) {
+        double total = 0.0;
 
-		double total =
-				0.0;
+        for (int index = 0; index < first.length; index++) {
+            double difference = first[index] - second[index];
+            total += difference * difference;
 
-		for (int selectedPosition = 0;
-			 selectedPosition < selectedDimensions.length
-					 && total <= bestSoFar;
-			 selectedPosition++) {
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
 
-			int feature =
-					selectedDimensions[selectedPosition];
+        return total;
+    }
 
-			double difference =
-					firstValues[feature]
-							- secondValues[feature];
+    private static double squaredDistance(
+            float[] first,
+            float[] second,
+            double bestSoFar
+    ) {
+        double total = 0.0;
 
-			total +=
-					difference * difference;
-		}
+        for (int index = 0; index < first.length; index++) {
+            double difference =
+                    (double) first[index] - (double) second[index];
+            total += difference * difference;
 
-		return total;
-	}
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
 
-	/**
-	 * Computes ordinary Euclidean distance over every boxed vector component.
-	 *
-	 * <p>This overload retains the existing behavior used by KNN-imputation
-	 * workflows.</p>
-	 *
-	 * @param first boxed first vector
-	 * @param second boxed second vector
-	 * @return ordinary Euclidean distance
-	 */
-	public synchronized double distance(
-			Object first,
-			Object second
-	) {
-		Double[] firstValues =
-				(Double[]) first;
+        return total;
+    }
 
-		Double[] secondValues =
-				(Double[]) second;
+    private static double squaredDistance(
+            double[] first,
+            double[] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
 
-		double total =
-				0.0;
+        for (int position = 0;
+             position < selectedDimensions.length;
+             position++) {
+            int feature = selectedDimensions[position];
+            double difference = first[feature] - second[feature];
+            total += difference * difference;
 
-		for (int index = 0;
-			 index < firstValues.length;
-			 index++) {
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
 
-			double difference =
-					firstValues[index]
-							- secondValues[index];
+        return total;
+    }
 
-			total +=
-					difference * difference;
-		}
+    private static double squaredDistance(
+            float[] first,
+            float[] second,
+            double bestSoFar,
+            int[] selectedDimensions
+    ) {
+        double total = 0.0;
 
-		return Math.sqrt(
-				total
-		);
-	}
+        for (int position = 0;
+             position < selectedDimensions.length;
+             position++) {
+            int feature = selectedDimensions[position];
+            double difference =
+                    (double) first[feature]
+                            - (double) second[feature];
+            total += difference * difference;
 
-	/**
-	 * Computes ordinary Euclidean distance over selected boxed vector
-	 * components.
-	 *
-	 * <p>This overload is provided for selected-feature boxed-data workflows.
-	 * It preserves the ordinary, rather than squared, Euclidean result of the
-	 * existing boxed overload.</p>
-	 *
-	 * @param first boxed first vector
-	 * @param second boxed second vector
-	 * @param selectedDimensions selected tabular-feature indices, or null to
-	 *                           use every feature
-	 * @return selected-feature ordinary Euclidean distance
-	 */
-	public synchronized double distance(
-			Object first,
-			Object second,
-			int[] selectedDimensions
-	) {
-		if (selectedDimensions == null) {
-			return distance(
-					first,
-					second
-			);
-		}
+            if (total > bestSoFar) {
+                return total;
+            }
+        }
 
-		Double[] firstValues =
-				(Double[]) first;
+        return total;
+    }
 
-		Double[] secondValues =
-				(Double[]) second;
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "Euclidean distance requires matching double[] or float[] "
+                        + "inputs. Received "
+                        + typeName(first)
+                        + " and "
+                        + typeName(second)
+                        + ". Mixed float/double pairs and boxed numeric "
+                        + "arrays are not supported."
+        );
+    }
 
-		double total =
-				0.0;
+    private static String typeName(Object value) {
+        return value == null
+                ? "null"
+                : value.getClass().getTypeName();
+    }
 
-		for (int selectedPosition = 0;
-			 selectedPosition < selectedDimensions.length;
-			 selectedPosition++) {
+    /**
+     * Isolates all incubator-module references in a lazily initialized nested
+     * class. The scalar path can therefore run without loading this class.
+     */
+    private static final class VectorKernels {
 
-			int feature =
-					selectedDimensions[selectedPosition];
+        private static final jdk.incubator.vector.VectorSpecies<Double>
+                DOUBLE_SPECIES =
+                jdk.incubator.vector.DoubleVector.SPECIES_PREFERRED;
 
-			double difference =
-					firstValues[feature]
-							- secondValues[feature];
+        private static final jdk.incubator.vector.VectorSpecies<Float>
+                FLOAT_SPECIES =
+                jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
 
-			total +=
-					difference * difference;
-		}
+        private VectorKernels() {
+        }
 
-		return Math.sqrt(
-				total
-		);
-	}
+        private static double squaredDistance(
+                double[] first,
+                double[] second,
+                double bestSoFar
+        ) {
+            int upperBound = DOUBLE_SPECIES.loopBound(first.length);
+            int index = 0;
+            double total = 0.0;
+
+            if (Double.isInfinite(bestSoFar)) {
+                jdk.incubator.vector.DoubleVector accumulated =
+                        jdk.incubator.vector.DoubleVector.zero(DOUBLE_SPECIES);
+
+                for (; index < upperBound;
+                     index += DOUBLE_SPECIES.length()) {
+                    jdk.incubator.vector.DoubleVector difference =
+                            jdk.incubator.vector.DoubleVector.fromArray(
+                                    DOUBLE_SPECIES,
+                                    first,
+                                    index
+                            ).sub(
+                                    jdk.incubator.vector.DoubleVector.fromArray(
+                                            DOUBLE_SPECIES,
+                                            second,
+                                            index
+                                    )
+                            );
+                    accumulated = accumulated.add(
+                            difference.mul(difference)
+                    );
+                }
+
+                total = accumulated.reduceLanes(
+                        jdk.incubator.vector.VectorOperators.ADD
+                );
+            } else {
+                for (; index < upperBound;
+                     index += DOUBLE_SPECIES.length()) {
+                    jdk.incubator.vector.DoubleVector difference =
+                            jdk.incubator.vector.DoubleVector.fromArray(
+                                    DOUBLE_SPECIES,
+                                    first,
+                                    index
+                            ).sub(
+                                    jdk.incubator.vector.DoubleVector.fromArray(
+                                            DOUBLE_SPECIES,
+                                            second,
+                                            index
+                                    )
+                            );
+                    total += difference.mul(difference).reduceLanes(
+                            jdk.incubator.vector.VectorOperators.ADD
+                    );
+
+                    if (total > bestSoFar) {
+                        return total;
+                    }
+                }
+            }
+
+            for (; index < first.length; index++) {
+                double difference = first[index] - second[index];
+                total += difference * difference;
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            return total;
+        }
+
+        private static double squaredDistance(
+                float[] first,
+                float[] second,
+                double bestSoFar
+        ) {
+            int upperBound = FLOAT_SPECIES.loopBound(first.length);
+            int index = 0;
+            double total = 0.0;
+
+            for (; index < upperBound;
+                 index += FLOAT_SPECIES.length()) {
+                jdk.incubator.vector.FloatVector difference =
+                        jdk.incubator.vector.FloatVector.fromArray(
+                                FLOAT_SPECIES,
+                                first,
+                                index
+                        ).sub(
+                                jdk.incubator.vector.FloatVector.fromArray(
+                                        FLOAT_SPECIES,
+                                        second,
+                                        index
+                                )
+                        );
+
+                total += (double) difference.mul(difference).reduceLanes(
+                        jdk.incubator.vector.VectorOperators.ADD
+                );
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            for (; index < first.length; index++) {
+                double difference =
+                        (double) first[index] - (double) second[index];
+                total += difference * difference;
+
+                if (total > bestSoFar) {
+                    return total;
+                }
+            }
+
+            return total;
+        }
+    }
 }

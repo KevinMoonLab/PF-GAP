@@ -1,164 +1,347 @@
 package distance.elastic;
 
+import core.contracts.ObjectDataset;
+
+import java.io.Serial;
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Random;
 
-//import core.contracts.Dataset;
-import core.contracts.ObjectDataset;
-import distance.MemorySpaceProvider;
-
 /**
- * Some classes in this package may contain borrowed code from the timeseriesweka project (Bagnall, 2017), 
- * we might have modified (bug fixes, and improvements for efficiency) the original classes.
- * 
+ * Time Warp Edit distance for primitive univariate series.
+ *
+ * <p>This implementation uses implicit unit-spaced timestamps, a virtual zero
+ * value at timestamp zero, squared pointwise value costs (p = 2), stiffness
+ * {@code nu}, and edit penalty {@code lambda}. It follows the standard
+ * three-operation recurrence: match/substitute, delete from the first series,
+ * and delete from the second series.</p>
+ *
+ * <p>Distance evaluation uses two rows, finite-bound cell pruning, and safe
+ * row-level early abandonment. Both {@code double[]} and {@code float[]}
+ * inputs are supported without whole-array conversion. TWE returns its ordinary
+ * accumulated edit cost; no square root is applied.</p>
  */
+public final class TWE implements Serializable {
 
-public class TWE implements Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
 
-	public TWE() {
-		
-	}
-	
-	//public double distance(double[] ta, double[] tb, double bsf, double nu, double lambda) {
-	public double distance(Object Ta, Object Tb, double bsf, double nu, double lambda) {
+    private static final double[] NU_PARAMETERS = {
+            0.00001, 0.0001, 0.0005, 0.001, 0.005,
+            0.01, 0.05, 0.1, 0.5, 1.0
+    };
 
-		double[] ta = (double[]) Ta;
-		double[] tb = (double[]) Tb;
+    private static final double[] LAMBDA_PARAMETERS = {
+            0.0, 0.011111111, 0.022222222, 0.033333333,
+            0.044444444, 0.055555556, 0.066666667,
+            0.077777778, 0.088888889, 0.1
+    };
 
-		int m = ta.length;
-		int n = tb.length;
-		int maxLength = Math.max(m, n);
-		
-		double dist, disti1, distj1;
+    public TWE() {
+    }
 
-		int r = ta.length; // this is just m?!
-		int c = tb.length; // so is this, but surely it should actually
-				   // be n anyway
-		
-		int i, j;
-		/*
-		 * allocations in c double **D = (double **)calloc(r+1,
-		 * sizeof(double*)); double *Di1 = (double *)calloc(r+1,
-		 * sizeof(double)); double *Dj1 = (double *)calloc(c+1,
-		 * sizeof(double)); for(i=0; i<=r; i++) { D[i]=(double
-		 * *)calloc(c+1, sizeof(double)); }
-		 */
+    public double distance(
+            Object first,
+            Object second,
+            double bestSoFar,
+            double nu,
+            double lambda
+    ) {
+        validateParameters(nu, lambda);
 
-		double[][]D = MemorySpaceProvider.getInstance(maxLength+1).getDoubleMatrix();
-		double[]Di1 = MemorySpaceProvider.getInstance(maxLength+1).getDoubleArray();
-		double[]Dj1 = MemorySpaceProvider.getInstance(maxLength+1).getDoubleArray();
-//		double[][] D = MemoryManager.getInstance().getDoubleMatrix(0);
-//		double[] Di1 = MemoryManager.getInstance().getDoubleArray(0);
-//		double[] Dj1 = MemoryManager.getInstance().getDoubleArray(1);
+        if (first instanceof double[] firstValues
+                && second instanceof double[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    nu,
+                    lambda
+            );
+        }
+        if (first instanceof float[] firstValues
+                && second instanceof float[] secondValues) {
+            return distance(
+                    firstValues,
+                    secondValues,
+                    bestSoFar,
+                    nu,
+                    lambda
+            );
+        }
+        throw unsupportedPair(first, second);
+    }
 
-		// FPH adding initialisation given that using matrices as fields
-		Di1[0] = 0.0;
-		Dj1[0] = 0.0;
-		// local costs initializations
-		for (j = 1; j <= c; j++) {
-			distj1 = 0;
-			if (j > 1) {
-				// CHANGE AJB 8/1/16: Only use power of
-				// 2 for speed
-				distj1 += (tb[j - 2] - tb[j - 1]) * (tb[j - 2] - tb[j - 1]);
-				// OLD VERSION
-				// distj1+=Math.pow(Math.abs(tb[j-2][k]-tb[j-1][k]),degree);
-				// in c:
-				// distj1+=pow(fabs(tb[j-2][k]-tb[j-1][k]),degree);
-			} else {
-				distj1 += tb[j - 1] * tb[j - 1];
-			}
-			// OLD distj1+=Math.pow(Math.abs(tb[j-1][k]),degree);
-			Dj1[j] = (distj1);
-		}
+    private static double distance(
+            double[] first,
+            double[] second,
+            double bestSoFar,
+            double nu,
+            double lambda
+    ) {
+        requireNonempty(first.length, second.length);
+        double cutoff = normalizedCutoff(bestSoFar);
 
-		for (i = 1; i <= r; i++) {
-			disti1 = 0;
-			if (i > 1) {
-				disti1 += (ta[i - 2] - ta[i - 1]) * (ta[i - 2] - ta[i - 1]);
-			} // OLD
-			  // disti1+=Math.pow(Math.abs(ta[i-2][k]-ta[i-1][k]),degree);
-			else {
-				disti1 += (ta[i - 1]) * (ta[i - 1]);
-			}
-			// OLD disti1+=Math.pow(Math.abs(ta[i-1][k]),degree);
+        if (first.length >= second.length) {
+            return distanceKernel(first, second, cutoff, nu, lambda);
+        }
+        return distanceKernel(second, first, cutoff, nu, lambda);
+    }
 
-			Di1[i] = (disti1);
+    private static double distance(
+            float[] first,
+            float[] second,
+            double bestSoFar,
+            double nu,
+            double lambda
+    ) {
+        requireNonempty(first.length, second.length);
+        double cutoff = normalizedCutoff(bestSoFar);
 
-			for (j = 1; j <= c; j++) {
-				dist = 0;
-				dist += (ta[i - 1] - tb[j - 1]) * (ta[i - 1] - tb[j - 1]);
-				// dist+=Math.pow(Math.abs(ta[i-1][k]-tb[j-1][k]),degree);
-				if (i > 1 && j > 1) {
-					dist += (ta[i - 2] - tb[j - 2]) * (ta[i - 2] - tb[j - 2]);
-				}
-				// dist+=Math.pow(Math.abs(ta[i-2][k]-tb[j-2][k]),degree);
-				D[i][j] = (dist);
-			}
-		} // for i
+        if (first.length >= second.length) {
+            return distanceKernel(first, second, cutoff, nu, lambda);
+        }
+        return distanceKernel(second, first, cutoff, nu, lambda);
+    }
 
-		// border of the cost matrix initialization
-		D[0][0] = 0;
-		for (i = 1; i <= r; i++) {
-			D[i][0] = D[i - 1][0] + Di1[i];
-		}
-		for (j = 1; j <= c; j++) {
-			D[0][j] = D[0][j - 1] + Dj1[j];
-		}
+    private static double distanceKernel(
+            double[] rowSeries,
+            double[] columnSeries,
+            double cutoff,
+            double nu,
+            double lambda
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        double[] previous = new double[columnCount + 1];
+        double[] current = new double[columnCount + 1];
+        Arrays.fill(previous, Double.POSITIVE_INFINITY);
+        previous[0] = 0.0;
 
-		double dmin, htrans, dist0;
+        for (int row = 1; row <= rowCount; row++) {
+            current[0] = Double.POSITIVE_INFINITY;
+            double rowMinimum = Double.POSITIVE_INFINITY;
+            double rowValue = rowSeries[row - 1];
+            double previousRowValue = row > 1
+                    ? rowSeries[row - 2]
+                    : 0.0;
+            double rowDeletionCost = square(
+                    rowValue - previousRowValue
+            ) + lambda + nu;
 
-		for (i = 1; i <= r; i++) {
-			for (j = 1; j <= c; j++) {
-				htrans = Math.abs(i- j);
-				if (j > 1 && i > 1) {
-					htrans += Math.abs((i-1) - (j-1));
-				}
-				dist0 = D[i - 1][j - 1] + nu * htrans + D[i][j];
-				dmin = dist0;
-				if (i > 1) {
-					htrans = 1;
-				} else {
-					htrans = i;
-				}
-				dist = Di1[i] + D[i - 1][j] + lambda + nu * htrans;
-				if (dmin > dist) {
-					dmin = dist;
-				}
-				if (j > 1) {
-					htrans = 1;
-				} else {
-					htrans = j;
-				}
-				dist = Dj1[j] + D[i][j - 1] + lambda + nu * htrans;
-				if (dmin > dist) {
-					dmin = dist;
-				}
-				D[i][j] = dmin;
-			}
-		}
+            for (int column = 1;
+                 column <= columnCount;
+                 column++) {
+                double columnValue = columnSeries[column - 1];
+                double previousColumnValue = column > 1
+                        ? columnSeries[column - 2]
+                        : 0.0;
 
-		dist = D[r][c];
-		MemorySpaceProvider.getInstance().returnDoubleMatrix(D);
-		MemorySpaceProvider.getInstance().returnDoubleArray(Di1);
-		MemorySpaceProvider.getInstance().returnDoubleArray(Dj1);
-		return dist;
-	}
-	
-	public double get_random_nu(ObjectDataset d, Random r) {
-		double nu = twe_nuParams[r.nextInt(twe_nuParams.length)];
-		return nu;
-	} 	
-	
-	public double get_random_lambda(ObjectDataset d, Random r) {
-		double lambda = twe_lamdaParams[r.nextInt(twe_lamdaParams.length)];
-		return lambda;
-	} 		
-	
-	protected static final double[] twe_nuParams = { 0.00001, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1 };
+                double match = previous[column - 1]
+                        + square(rowValue - columnValue)
+                        + square(
+                                previousRowValue
+                                        - previousColumnValue
+                        )
+                        + nu * (
+                                Math.abs(row - column)
+                                        + Math.abs(
+                                                (row - 1)
+                                                        - (column - 1)
+                                        )
+                        );
 
-	protected static final double[] twe_lamdaParams = { 0, 0.011111111, 0.022222222, 0.033333333, 0.044444444, 0.055555556, 0.066666667,
-			0.077777778, 0.088888889, 0.1 };
-	
-	
+                double deleteRow = previous[column]
+                        + rowDeletionCost;
+
+                double deleteColumn = current[column - 1]
+                        + square(
+                                columnValue
+                                        - previousColumnValue
+                        )
+                        + lambda
+                        + nu;
+
+                double value = minimum(
+                        match,
+                        deleteRow,
+                        deleteColumn
+                );
+                if (value > cutoff) {
+                    value = Double.POSITIVE_INFINITY;
+                }
+                current[column] = value;
+                if (value < rowMinimum) {
+                    rowMinimum = value;
+                }
+            }
+
+            if (rowMinimum == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return previous[columnCount];
+    }
+
+    private static double distanceKernel(
+            float[] rowSeries,
+            float[] columnSeries,
+            double cutoff,
+            double nu,
+            double lambda
+    ) {
+        int rowCount = rowSeries.length;
+        int columnCount = columnSeries.length;
+        double[] previous = new double[columnCount + 1];
+        double[] current = new double[columnCount + 1];
+        Arrays.fill(previous, Double.POSITIVE_INFINITY);
+        previous[0] = 0.0;
+
+        for (int row = 1; row <= rowCount; row++) {
+            current[0] = Double.POSITIVE_INFINITY;
+            double rowMinimum = Double.POSITIVE_INFINITY;
+            double rowValue = rowSeries[row - 1];
+            double previousRowValue = row > 1
+                    ? rowSeries[row - 2]
+                    : 0.0;
+            double rowDeletionCost = square(
+                    rowValue - previousRowValue
+            ) + lambda + nu;
+
+            for (int column = 1;
+                 column <= columnCount;
+                 column++) {
+                double columnValue = columnSeries[column - 1];
+                double previousColumnValue = column > 1
+                        ? columnSeries[column - 2]
+                        : 0.0;
+
+                double match = previous[column - 1]
+                        + square(rowValue - columnValue)
+                        + square(
+                                previousRowValue
+                                        - previousColumnValue
+                        )
+                        + nu * (
+                                Math.abs(row - column)
+                                        + Math.abs(
+                                                (row - 1)
+                                                        - (column - 1)
+                                        )
+                        );
+
+                double deleteRow = previous[column]
+                        + rowDeletionCost;
+
+                double deleteColumn = current[column - 1]
+                        + square(
+                                columnValue
+                                        - previousColumnValue
+                        )
+                        + lambda
+                        + nu;
+
+                double value = minimum(
+                        match,
+                        deleteRow,
+                        deleteColumn
+                );
+                if (value > cutoff) {
+                    value = Double.POSITIVE_INFINITY;
+                }
+                current[column] = value;
+                if (value < rowMinimum) {
+                    rowMinimum = value;
+                }
+            }
+
+            if (rowMinimum == Double.POSITIVE_INFINITY) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            double[] temporary = previous;
+            previous = current;
+            current = temporary;
+        }
+
+        return previous[columnCount];
+    }
+
+    private static double square(double value) {
+        return value * value;
+    }
+
+    private static double minimum(
+            double first,
+            double second,
+            double third
+    ) {
+        double minimum = first < second ? first : second;
+        return minimum < third ? minimum : third;
+    }
+
+    private static double normalizedCutoff(double bestSoFar) {
+        if (Double.isNaN(bestSoFar)) {
+            throw new IllegalArgumentException(
+                    "TWE bestSoFar cannot be NaN."
+            );
+        }
+        return bestSoFar < 0.0 ? 0.0 : bestSoFar;
+    }
+
+    private static void validateParameters(
+            double nu,
+            double lambda
+    ) {
+        if (!Double.isFinite(nu) || nu < 0.0) {
+            throw new IllegalArgumentException(
+                    "TWE nu must be finite and nonnegative."
+            );
+        }
+        if (!Double.isFinite(lambda) || lambda < 0.0) {
+            throw new IllegalArgumentException(
+                    "TWE lambda must be finite and nonnegative."
+            );
+        }
+    }
+
+    private static void requireNonempty(
+            int firstLength,
+            int secondLength
+    ) {
+        if (firstLength == 0 || secondLength == 0) {
+            throw new IllegalArgumentException(
+                    "TWE requires two nonempty time series."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedPair(
+            Object first,
+            Object second
+    ) {
+        return new IllegalArgumentException(
+                "TWE requires matching double[] or float[] inputs. Received "
+                        + typeName(first) + " and " + typeName(second) + "."
+        );
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getTypeName();
+    }
+
+    public double get_random_nu(ObjectDataset dataset, Random random) {
+        return NU_PARAMETERS[random.nextInt(NU_PARAMETERS.length)];
+    }
+
+    public double get_random_lambda(ObjectDataset dataset, Random random) {
+        return LAMBDA_PARAMETERS[
+                random.nextInt(LAMBDA_PARAMETERS.length)
+        ];
+    }
 }

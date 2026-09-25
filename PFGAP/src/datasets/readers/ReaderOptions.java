@@ -1,5 +1,6 @@
 package datasets.readers;
 
+import datasets.NumericStorageType;
 import preprocessing.standardization.StandardizationStats;
 
 import java.util.*;
@@ -24,6 +25,7 @@ import java.util.*;
  *      hasHeader
  *      is2D
  *      isNumeric
+ *      numericStorageType
  *      hasMissingValues
  *      targetColumnIsFirst
  *      isTest
@@ -65,6 +67,7 @@ public class ReaderOptions {
     private boolean hasHeader = false;
     private boolean is2D = false;
     private boolean isNumeric = true;
+    private NumericStorageType numericStorageType = NumericStorageType.AUTO;
     private boolean hasMissingValues = false;
     private boolean targetColumnIsFirst = false;
     private boolean isTest = false;
@@ -215,6 +218,41 @@ public class ReaderOptions {
 
     public ReaderOptions setNumeric(boolean numeric) {
         isNumeric = numeric;
+        return this;
+    }
+
+    /**
+     * Returns the requested primitive storage policy for numeric features.
+     *
+     * <p>The default is {@link NumericStorageType#AUTO}. Numeric readers for
+     * typed formats may preserve a supported source type under AUTO, while
+     * readers for untyped text formats should default AUTO to
+     * {@link NumericStorageType#FLOAT64}.</p>
+     */
+    public NumericStorageType getNumericStorageType() {
+        return numericStorageType;
+    }
+
+    /**
+     * Sets the requested primitive storage policy for numeric features.
+     *
+     * <p>Numeric readers must emit primitive {@code float[]} or
+     * {@code float[][]} observations for FLOAT32 and primitive
+     * {@code double[]} or {@code double[][]} observations for FLOAT64.
+     * Numeric missing values are represented by the corresponding NaN value.
+     * Boxed numeric arrays are not supported.</p>
+     *
+     * @param numericStorageType requested storage policy; must not be null
+     * @return this options object
+     */
+    public ReaderOptions setNumericStorageType(
+            NumericStorageType numericStorageType
+    ) {
+        this.numericStorageType =
+                Objects.requireNonNull(
+                        numericStorageType,
+                        "numericStorageType cannot be null."
+                );
         return this;
     }
 
@@ -506,6 +544,7 @@ public class ReaderOptions {
                 .setHasHeader(hasHeader)
                 .set2D(is2D)
                 .setNumeric(isNumeric)
+                .setNumericStorageType(numericStorageType)
                 .setHasMissingValues(hasMissingValues)
                 .setTargetColumnIsFirst(targetColumnIsFirst)
                 .setTest(isTest)
