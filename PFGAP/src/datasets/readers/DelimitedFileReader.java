@@ -3,6 +3,7 @@ package datasets.readers;
 import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import de.siegmar.fastcsv.reader.CsvReader;
 import de.siegmar.fastcsv.reader.CsvRecord;
 import org.apache.commons.lang3.time.DurationFormatUtils;
@@ -32,13 +33,13 @@ import java.util.stream.Collectors;
  * <p>Supported instance shapes:</p>
  *
  * <ol>
- *     <li>Numeric 1D without missing values: {@code double[]}</li>
- *     <li>Numeric 1D with missing values: {@code Double[]}</li>
- *     <li>Numeric 2D without missing values: {@code double[][]}</li>
- *     <li>Numeric 2D with missing values: {@code Double[][]}</li>
- *     <li>Generic 1D: {@code Object[]}</li>
- *     <li>Generic 2D: {@code Object[][]}</li>
+ *     <li>Numeric FLOAT64 1D/2D: {@code double[]} / {@code double[][]}</li>
+ *     <li>Numeric FLOAT32 1D/2D: {@code float[]} / {@code float[][]}</li>
+ *     <li>Generic 1D/2D: {@code Object[]} / {@code Object[][]}</li>
  * </ol>
+ *
+ * <p>Numeric output is always primitive. Missing numeric values are NaN.
+ * Boxed numeric arrays are intentionally unsupported.</p>
  *
  * <p>For 1D files, {@code entrySeparator} separates the entries in a record.</p>
  *
@@ -80,6 +81,7 @@ public class DelimitedFileReader
     private final boolean targetColumnIsFirst;
     private final boolean isTest;
     private final boolean isRegression;
+    private final NumericStorageType numericStorageType;
 
     public DelimitedFileReader(
             String dataFileName,
@@ -93,6 +95,28 @@ public class DelimitedFileReader
             boolean targetColumnIsFirst,
             boolean isTest,
             boolean isRegression
+    ) {
+        this(
+                dataFileName, labelFileName, entrySeparator, arraySeparator,
+                hasHeader, is2D, isNumeric, hasMissingValues,
+                targetColumnIsFirst, isTest, isRegression,
+                NumericStorageType.AUTO
+        );
+    }
+
+    public DelimitedFileReader(
+            String dataFileName,
+            String labelFileName,
+            String entrySeparator,
+            String arraySeparator,
+            boolean hasHeader,
+            boolean is2D,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean targetColumnIsFirst,
+            boolean isTest,
+            boolean isRegression,
+            NumericStorageType numericStorageType
     ) {
         this.dataFileName =
                 requireNonblank(
@@ -135,6 +159,8 @@ public class DelimitedFileReader
 
         this.isRegression =
                 isRegression;
+
+        this.numericStorageType = resolveStorageType(numericStorageType);
 
         this.innerSeparator =
                 requireSingleCharacterSeparator(
@@ -286,60 +312,19 @@ public class DelimitedFileReader
             Path dataPath
     ) {
         if (isNumeric) {
-            if (hasMissingValues) {
-                if (is2D) {
-                    Double[][] data =
-                            parseBoxedDoubleMatrix(
-                                    fields,
-                                    dataPath,
-                                    instanceIndex
-                            );
-
-                    return new ParsedInstance(
-                            getSeparateLabel(
-                                    labels,
-                                    instanceIndex
-                            ),
-                            data,
-                            requireMatrixLength(
-                                    data,
-                                    dataPath,
-                                    instanceIndex
-                            )
-                    );
-                }
-
-                return parseBoxedDoubleVector(
-                        fields,
-                        labels,
-                        instanceIndex,
-                        dataPath
-                );
-            }
-
             if (is2D) {
-                double[][] data =
-                        parseDoubleMatrix(
-                                fields,
-                                dataPath,
-                                instanceIndex
-                        );
-
+                Object data = parsePrimitiveNumericMatrix(
+                        fields,
+                        dataPath,
+                        instanceIndex
+                );
                 return new ParsedInstance(
-                        getSeparateLabel(
-                                labels,
-                                instanceIndex
-                        ),
+                        getSeparateLabel(labels, instanceIndex),
                         data,
-                        requireMatrixLength(
-                                data,
-                                dataPath,
-                                instanceIndex
-                        )
+                        numericMatrixLength(data, instanceIndex)
                 );
             }
-
-            return parseDoubleVector(
+            return parsePrimitiveNumericVector(
                     fields,
                     labels,
                     instanceIndex,
@@ -348,312 +333,201 @@ public class DelimitedFileReader
         }
 
         if (is2D) {
-            Object[][] data =
-                    parseObjectMatrix(
-                            fields,
-                            dataPath,
-                            instanceIndex
-                    );
-
+            Object[][] data = parseObjectMatrix(
+                    fields,
+                    dataPath,
+                    instanceIndex
+            );
             return new ParsedInstance(
-                    getSeparateLabel(
-                            labels,
-                            instanceIndex
-                    ),
+                    getSeparateLabel(labels, instanceIndex),
                     data,
-                    requireMatrixLength(
-                            data,
-                            dataPath,
-                            instanceIndex
-                    )
+                    data.length == 0 ? 0 : data[0].length
             );
         }
 
-        Object[] data =
-                parseObjectVector(
-                        fields
-                );
-
+        Object[] data = parseObjectVector(fields);
         return new ParsedInstance(
-                getSeparateLabel(
-                        labels,
-                        instanceIndex
-                ),
+                getSeparateLabel(labels, instanceIndex),
                 data,
                 data.length
         );
     }
 
-    private ParsedInstance parseDoubleVector(
+    private ParsedInstance parsePrimitiveNumericVector(
             List<String> fields,
             List<Object> labels,
             int instanceIndex,
             Path dataPath
     ) {
-        boolean parseEmbeddedLabel =
-                shouldParseEmbeddedLabel();
-
-        if (!parseEmbeddedLabel) {
-            double[] data =
-                    new double[fields.size()];
-
-            for (int fieldIndex = 0;
-                 fieldIndex < fields.size();
-                 fieldIndex++) {
-
-                data[fieldIndex] =
-                        parseRequiredDouble(
-                                fields.get(fieldIndex),
-                                dataPath,
-                                instanceIndex,
-                                fieldIndex
-                        );
-            }
-
-            return new ParsedInstance(
-                    getSeparateLabel(
-                            labels,
-                            instanceIndex
-                    ),
-                    data,
-                    data.length
-            );
+        boolean embedded = shouldParseEmbeddedLabel();
+        if (embedded) {
+            validateEmbeddedLabelRecord(fields, dataPath, instanceIndex);
         }
+        int labelIndex = embedded
+                ? (targetColumnIsFirst ? 0 : fields.size() - 1)
+                : -1;
+        int dataLength = fields.size() - (embedded ? 1 : 0);
+        Object label = embedded
+                ? parseLabel(fields.get(labelIndex))
+                : getSeparateLabel(labels, instanceIndex);
 
-        validateEmbeddedLabelRecord(
-                fields,
-                dataPath,
-                instanceIndex
-        );
-
-        int labelIndex =
-                targetColumnIsFirst
-                        ? 0
-                        : fields.size() - 1;
-
-        Object label =
-                parseLabel(
-                        fields.get(labelIndex)
-                );
-
-        double[] data =
-                new double[fields.size() - 1];
-
-        int outputIndex =
-                0;
-
-        for (int fieldIndex = 0;
-             fieldIndex < fields.size();
-             fieldIndex++) {
-
-            if (fieldIndex == labelIndex) {
-                continue;
-            }
-
-            data[outputIndex++] =
-                    parseRequiredDouble(
-                            fields.get(fieldIndex),
-                            dataPath,
-                            instanceIndex,
-                            fieldIndex
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[] data = new float[dataLength];
+            int output = 0;
+            for (int field = 0; field < fields.size(); field++) {
+                if (field != labelIndex) {
+                    data[output++] = (float) parsePrimitiveNumericToken(
+                            fields.get(field), dataPath, instanceIndex, field
                     );
+                }
+            }
+            return new ParsedInstance(label, data, data.length);
         }
 
-        return new ParsedInstance(
-                label,
-                data,
-                data.length
-        );
+        double[] data = new double[dataLength];
+        int output = 0;
+        for (int field = 0; field < fields.size(); field++) {
+            if (field != labelIndex) {
+                data[output++] = parsePrimitiveNumericToken(
+                        fields.get(field), dataPath, instanceIndex, field
+                );
+            }
+        }
+        return new ParsedInstance(label, data, data.length);
     }
 
-    private ParsedInstance parseBoxedDoubleVector(
-            List<String> fields,
-            List<Object> labels,
+    private Object parsePrimitiveNumericMatrix(
+            List<String> dimensions,
+            Path dataPath,
+            int instanceIndex
+    ) {
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[][] data = new float[dimensions.size()][];
+            int expectedLength = -1;
+            for (int dimension = 0;
+                 dimension < dimensions.size();
+                 dimension++) {
+                String[] tokens = splitLiteral(
+                        dimensions.get(dimension), innerSeparator
+                );
+                float[] values = new float[tokens.length];
+                for (int time = 0; time < tokens.length; time++) {
+                    values[time] = (float) parsePrimitiveNumericToken(
+                            tokens[time], dataPath, instanceIndex,
+                            dimension, time
+                    );
+                }
+                expectedLength = validateDimensionLength(
+                        expectedLength, values.length, dataPath,
+                        instanceIndex, dimension
+                );
+                data[dimension] = values;
+            }
+            return data;
+        }
+
+        double[][] data = new double[dimensions.size()][];
+        int expectedLength = -1;
+        for (int dimension = 0;
+             dimension < dimensions.size();
+             dimension++) {
+            String[] tokens = splitLiteral(
+                    dimensions.get(dimension), innerSeparator
+            );
+            double[] values = new double[tokens.length];
+            for (int time = 0; time < tokens.length; time++) {
+                values[time] = parsePrimitiveNumericToken(
+                        tokens[time], dataPath, instanceIndex,
+                        dimension, time
+                );
+            }
+            expectedLength = validateDimensionLength(
+                    expectedLength, values.length, dataPath,
+                    instanceIndex, dimension
+            );
+            data[dimension] = values;
+        }
+        return data;
+    }
+
+    private double parsePrimitiveNumericToken(
+            String token,
+            Path dataPath,
             int instanceIndex,
-            Path dataPath
+            int fieldIndex
     ) {
-        boolean parseEmbeddedLabel =
-                shouldParseEmbeddedLabel();
-
-        if (!parseEmbeddedLabel) {
-            Double[] data =
-                    new Double[fields.size()];
-
-            for (int fieldIndex = 0;
-                 fieldIndex < fields.size();
-                 fieldIndex++) {
-
-                data[fieldIndex] =
-                        parseNullableDouble(
-                                fields.get(fieldIndex),
-                                dataPath,
-                                instanceIndex,
-                                fieldIndex
-                        );
-            }
-
-            return new ParsedInstance(
-                    getSeparateLabel(
-                            labels,
-                            instanceIndex
-                    ),
-                    data,
-                    data.length
-            );
-        }
-
-        validateEmbeddedLabelRecord(
-                fields,
-                dataPath,
-                instanceIndex
-        );
-
-        int labelIndex =
-                targetColumnIsFirst
-                        ? 0
-                        : fields.size() - 1;
-
-        Object label =
-                parseLabel(
-                        fields.get(labelIndex)
+        String value = token == null ? "" : token.trim();
+        if (RowParser.isMissingToken(value)) {
+            if (!hasMissingValues) {
+                throw new IllegalArgumentException(
+                        "Missing numeric value at instance "
+                                + instanceIndex
+                                + ", field "
+                                + fieldIndex
+                                + " in "
+                                + dataPath
+                                + ", but hasMissingValues=false."
                 );
-
-        Double[] data =
-                new Double[fields.size() - 1];
-
-        int outputIndex =
-                0;
-
-        for (int fieldIndex = 0;
-             fieldIndex < fields.size();
-             fieldIndex++) {
-
-            if (fieldIndex == labelIndex) {
-                continue;
             }
-
-            data[outputIndex++] =
-                    parseNullableDouble(
-                            fields.get(fieldIndex),
-                            dataPath,
-                            instanceIndex,
-                            fieldIndex
-                    );
+            return Double.NaN;
         }
+        return JavaDoubleParser.parseDouble(value);
+    }
 
-        return new ParsedInstance(
-                label,
-                data,
-                data.length
+    private double parsePrimitiveNumericToken(
+            String token,
+            Path dataPath,
+            int instanceIndex,
+            int dimension,
+            int timeIndex
+    ) {
+        String value = token == null ? "" : token.trim();
+        if (RowParser.isMissingToken(value)) {
+            if (!hasMissingValues) {
+                throw new IllegalArgumentException(
+                        "Missing numeric value at instance "
+                                + instanceIndex
+                                + ", dimension "
+                                + dimension
+                                + ", time "
+                                + timeIndex
+                                + " in "
+                                + dataPath
+                                + ", but hasMissingValues=false."
+                );
+            }
+            return Double.NaN;
+        }
+        return JavaDoubleParser.parseDouble(value);
+    }
+
+    private static int numericMatrixLength(
+            Object matrix,
+            int instanceIndex
+    ) {
+        if (matrix instanceof double[][] values) {
+            if (values.length == 0) {
+                throw new IllegalArgumentException(
+                        "Numeric matrix has no dimensions at instance "
+                                + instanceIndex
+                                + "."
+                );
+            }
+            return values[0].length;
+        }
+        if (matrix instanceof float[][] values) {
+            if (values.length == 0) {
+                throw new IllegalArgumentException(
+                        "Numeric matrix has no dimensions at instance "
+                                + instanceIndex
+                                + "."
+                );
+            }
+            return values[0].length;
+        }
+        throw new IllegalArgumentException(
+                "Unsupported numeric matrix representation."
         );
-    }
-
-    private double[][] parseDoubleMatrix(
-            List<String> dimensions,
-            Path dataPath,
-            int instanceIndex
-    ) {
-        double[][] data =
-                new double[dimensions.size()][];
-
-        int expectedLength =
-                -1;
-
-        for (int dimension = 0;
-             dimension < dimensions.size();
-             dimension++) {
-
-            String[] tokens =
-                    splitLiteral(
-                            dimensions.get(dimension),
-                            innerSeparator
-                    );
-
-            double[] values =
-                    new double[tokens.length];
-
-            for (int timeIndex = 0;
-                 timeIndex < tokens.length;
-                 timeIndex++) {
-
-                values[timeIndex] =
-                        parseRequiredDouble(
-                                tokens[timeIndex],
-                                dataPath,
-                                instanceIndex,
-                                dimension,
-                                timeIndex
-                        );
-            }
-
-            expectedLength =
-                    validateDimensionLength(
-                            expectedLength,
-                            values.length,
-                            dataPath,
-                            instanceIndex,
-                            dimension
-                    );
-
-            data[dimension] =
-                    values;
-        }
-
-        return data;
-    }
-
-    private Double[][] parseBoxedDoubleMatrix(
-            List<String> dimensions,
-            Path dataPath,
-            int instanceIndex
-    ) {
-        Double[][] data =
-                new Double[dimensions.size()][];
-
-        int expectedLength =
-                -1;
-
-        for (int dimension = 0;
-             dimension < dimensions.size();
-             dimension++) {
-
-            String[] tokens =
-                    splitLiteral(
-                            dimensions.get(dimension),
-                            innerSeparator
-                    );
-
-            Double[] values =
-                    new Double[tokens.length];
-
-            for (int timeIndex = 0;
-                 timeIndex < tokens.length;
-                 timeIndex++) {
-
-                values[timeIndex] =
-                        parseNullableDouble(
-                                tokens[timeIndex],
-                                dataPath,
-                                instanceIndex,
-                                dimension,
-                                timeIndex
-                        );
-            }
-
-            expectedLength =
-                    validateDimensionLength(
-                            expectedLength,
-                            values.length,
-                            dataPath,
-                            instanceIndex,
-                            dimension
-                    );
-
-            data[dimension] =
-                    values;
-        }
-
-        return data;
     }
 
     private Object[][] parseObjectMatrix(
@@ -765,168 +639,6 @@ public class DelimitedFileReader
         );
     }
 
-    private double parseRequiredDouble(
-            String token,
-            Path dataPath,
-            int instanceIndex,
-            int fieldIndex
-    ) {
-        String trimmed =
-                token == null
-                        ? ""
-                        : token.trim();
-
-        if (RowParser.isMissingToken(trimmed)) {
-            throw new IllegalArgumentException(
-                    "Encountered a missing value in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", field "
-                            + fieldIndex
-                            + ", but hasMissingValues is false."
-            );
-        }
-
-        try {
-            //return Double.parseDouble(
-            //        trimmed
-            //);
-            return JavaDoubleParser.parseDouble(trimmed);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Could not parse numeric value '"
-                            + trimmed
-                            + "' in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", field "
-                            + fieldIndex
-                            + ".",
-                    e
-            );
-        }
-    }
-
-    private double parseRequiredDouble(
-            String token,
-            Path dataPath,
-            int instanceIndex,
-            int dimension,
-            int timeIndex
-    ) {
-        String trimmed =
-                token == null
-                        ? ""
-                        : token.trim();
-
-        if (RowParser.isMissingToken(trimmed)) {
-            throw new IllegalArgumentException(
-                    "Encountered a missing value in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", dimension "
-                            + dimension
-                            + ", time index "
-                            + timeIndex
-                            + ", but hasMissingValues is false."
-            );
-        }
-
-        try {
-            //return Double.parseDouble(trimmed);
-            return JavaDoubleParser.parseDouble(trimmed);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Could not parse numeric value '"
-                            + trimmed
-                            + "' in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", dimension "
-                            + dimension
-                            + ", time index "
-                            + timeIndex
-                            + ".",
-                    e
-            );
-        }
-    }
-
-    private Double parseNullableDouble(
-            String token,
-            Path dataPath,
-            int instanceIndex,
-            int fieldIndex
-    ) {
-        String trimmed =
-                token == null
-                        ? ""
-                        : token.trim();
-
-        if (RowParser.isMissingToken(trimmed)) {
-            return null;
-        }
-
-        try {
-            //return Double.valueOf(trimmed);
-            return JavaDoubleParser.parseDouble(trimmed);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Could not parse numeric value '"
-                            + trimmed
-                            + "' in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", field "
-                            + fieldIndex
-                            + ".",
-                    e
-            );
-        }
-    }
-
-    private Double parseNullableDouble(
-            String token,
-            Path dataPath,
-            int instanceIndex,
-            int dimension,
-            int timeIndex
-    ) {
-        String trimmed =
-                token == null
-                        ? ""
-                        : token.trim();
-
-        if (RowParser.isMissingToken(trimmed)) {
-            return null;
-        }
-
-        try {
-            //return Double.valueOf(trimmed);
-            return JavaDoubleParser.parseDouble(trimmed);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Could not parse numeric value '"
-                            + trimmed
-                            + "' in file "
-                            + dataPath
-                            + " at instance "
-                            + instanceIndex
-                            + ", dimension "
-                            + dimension
-                            + ", time index "
-                            + timeIndex
-                            + ".",
-                    e
-            );
-        }
-    }
-
     private int validateDimensionLength(
             int expectedLength,
             int actualLength,
@@ -956,59 +668,6 @@ public class DelimitedFileReader
         }
 
         return expectedLength;
-    }
-
-    private int requireMatrixLength(
-            Object[] matrix,
-            Path dataPath,
-            int instanceIndex
-    ) {
-        if (matrix.length == 0) {
-            throw new IllegalArgumentException(
-                    "Row-encoded 2D instance "
-                            + instanceIndex
-                            + " in file "
-                            + dataPath
-                            + " contains no dimensions."
-            );
-        }
-
-        Object firstDimension =
-                matrix[0];
-
-        if (firstDimension == null
-                || !firstDimension.getClass().isArray()) {
-
-            throw new IllegalArgumentException(
-                    "Row-encoded 2D instance "
-                            + instanceIndex
-                            + " in file "
-                            + dataPath
-                            + " has an invalid first dimension."
-            );
-        }
-
-        return java.lang.reflect.Array.getLength(
-                firstDimension
-        );
-    }
-
-    private int requireMatrixLength(
-            double[][] matrix,
-            Path dataPath,
-            int instanceIndex
-    ) {
-        if (matrix.length == 0) {
-            throw new IllegalArgumentException(
-                    "Row-encoded 2D instance "
-                            + instanceIndex
-                            + " in file "
-                            + dataPath
-                            + " contains no dimensions."
-            );
-        }
-
-        return matrix[0].length;
     }
 
     private Object getSeparateLabel(
@@ -1051,6 +710,18 @@ public class DelimitedFileReader
                             + "."
             );
         }
+    }
+
+    private static NumericStorageType resolveStorageType(
+            NumericStorageType requested
+    ) {
+        NumericStorageType value = Objects.requireNonNull(
+                requested,
+                "NumericStorageType cannot be null."
+        );
+        return value == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64
+                : value;
     }
 
     private void validateDataFile(
@@ -1347,23 +1018,6 @@ public class DelimitedFileReader
         }
     }
 
-    public static class ParsedBoxedDoubleRow {
-
-        public final Object label;
-        public final Double[] features;
-
-        public ParsedBoxedDoubleRow(
-                Object label,
-                Double[] features
-        ) {
-            this.label =
-                    label;
-
-            this.features =
-                    features;
-        }
-    }
-
     private static final class ParsedInstance {
 
         private final Object label;
@@ -1599,65 +1253,6 @@ public class DelimitedFileReader
             );
         }
 
-        public static ParsedBoxedDoubleRow parseBoxedDoubleRow(
-                String[] lineArray,
-                boolean targetColumnIsFirst,
-                boolean isRegression
-        ) {
-            int dataLength =
-                    lineArray.length - 1;
-
-            Double[] features =
-                    new Double[dataLength];
-
-            int labelIndex =
-                    targetColumnIsFirst
-                            ? 0
-                            : dataLength;
-
-            Object label =
-                    isRegression
-                            ? Double.parseDouble(
-                            lineArray[labelIndex].trim()
-                    )
-                            : tryParseLabel(
-                            lineArray[labelIndex]
-                    );
-
-            int outputIndex =
-                    0;
-
-            for (int index = 0;
-                 index < lineArray.length;
-                 index++) {
-
-                if (index == labelIndex) {
-                    continue;
-                }
-
-                features[outputIndex++] =
-                        parseBoxedDoubleToken(
-                                lineArray[index]
-                        );
-            }
-
-            return new ParsedBoxedDoubleRow(
-                    label,
-                    features
-            );
-        }
-
-        private static Double parseBoxedDoubleToken(
-                String token
-        ) {
-            if (isMissingToken(token)) {
-                return null;
-            }
-
-            //return Double.valueOf(token.trim());
-            return JavaDoubleParser.parseDouble(token.trim());
-        }
-
         public static Object tryParseLabel(
                 String token
         ) {
@@ -1745,72 +1340,6 @@ public class DelimitedFileReader
 
                 matrix[index] =
                         parseDoubleArray(
-                                rowStrings[index],
-                                entrySeparator
-                        );
-            }
-
-            return matrix;
-        }
-
-        public static Double[] parseBoxedDoubleArray(
-                String row,
-                String separator
-        ) {
-            char delimiter =
-                    requireSingleCharacterSeparator(
-                            normalizeSeparator(separator),
-                            "separator"
-                    );
-
-            String[] tokens =
-                    splitLiteral(
-                            row,
-                            delimiter
-                    );
-
-            Double[] parsed =
-                    new Double[tokens.length];
-
-            for (int index = 0;
-                 index < tokens.length;
-                 index++) {
-
-                parsed[index] =
-                        parseBoxedDoubleToken(
-                                tokens[index]
-                        );
-            }
-
-            return parsed;
-        }
-
-        public static Double[][] parseBoxedDoubleMatrix(
-                String row,
-                String arraySeparator,
-                String entrySeparator
-        ) {
-            char outer =
-                    requireSingleCharacterSeparator(
-                            normalizeSeparator(arraySeparator),
-                            "arraySeparator"
-                    );
-
-            String[] rowStrings =
-                    splitLiteral(
-                            row,
-                            outer
-                    );
-
-            Double[][] matrix =
-                    new Double[rowStrings.length][];
-
-            for (int index = 0;
-                 index < rowStrings.length;
-                 index++) {
-
-                matrix[index] =
-                        parseBoxedDoubleArray(
                                 rowStrings[index],
                                 entrySeparator
                         );

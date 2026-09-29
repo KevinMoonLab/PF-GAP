@@ -171,6 +171,11 @@ public class AppContext {
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;
+	// Sparse output containing only originally missing cells after imputation.
+	public static boolean output_train_imputed_csr = false;
+	public static boolean output_test_imputed_csr = false;
+	public static String train_imputed_csr_file = "training_imputed_values.mtx";
+	public static String test_imputed_csr_file = "testing_imputed_values.mtx";
 	public static boolean DTWImpute = false;
 	public static HashSet<String> MissingStrings;
 	public static Map<Integer, Object> meta_predictions;

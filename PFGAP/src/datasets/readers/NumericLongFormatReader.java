@@ -3,6 +3,7 @@ package datasets.readers;
 import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import de.siegmar.fastcsv.reader.AbstractBaseCsvCallbackHandler;
 import de.siegmar.fastcsv.reader.CsvReader;
 import preprocessing.standardization.StandardizationStats;
@@ -43,17 +44,15 @@ import java.util.Set;
  * {@code timeColumn} when one is configured. Otherwise, input order is
  * retained.</p>
  *
- * <p>Output representations:</p>
+ * <p>Output is primitive-only:</p>
  *
  * <pre>
- * One feature:
- *     no missing values:       double[time]
- *     missing values:          Double[time]
- *
- * Multiple features:
- *     no missing values:       double[feature][time]
- *     missing values:          Double[feature][time]
+ * FLOAT64: double[time] or double[feature][time]
+ * FLOAT32: float[time] or float[feature][time]
  * </pre>
+ *
+ * <p>Missing values are primitive NaN. Boxed numeric arrays are not used.
+ * {@link NumericStorageType#AUTO} resolves to FLOAT64 for delimited text.</p>
  *
  * <p>This implementation uses FastCSV's custom callback API. Selected
  * numerical fields are parsed directly from FastCSV's character buffer using
@@ -61,10 +60,9 @@ import java.util.Set;
  * field lists, feature strings, LongRow objects, and boxed feature values
  * during parsing.</p>
  *
- * <p>Missing numeric values are supported. During parsing, numerical values
- * remain in primitive buffers and missing positions are stored separately.
- * Boxing occurs only when the final output representation must be
- * {@code Double[]} or {@code Double[][]}.</p>
+ * <p>During parsing, numerical values remain in primitive double buffers and
+ * missing positions are tracked separately. Final materialization writes NaN
+ * into primitive float or double arrays.</p>
  *
  * <p>This reader currently requires:</p>
  *
@@ -90,6 +88,7 @@ public class NumericLongFormatReader
     private final boolean hasHeader;
     private final boolean hasMissingValues;
     private final boolean isRegression;
+    private final NumericStorageType numericStorageType;
 
     private final String idColumn;
     private final String timeColumn;
@@ -114,7 +113,8 @@ public class NumericLongFormatReader
                 options.getFeatureColumns(),
                 options.getLabelColumns(),
                 options.getStandardizationStats(),
-                DEFAULT_INITIAL_GROUP_CAPACITY
+                DEFAULT_INITIAL_GROUP_CAPACITY,
+                options.getNumericStorageType()
         );
 
         if (!options.isNumeric()) {
@@ -148,7 +148,8 @@ public class NumericLongFormatReader
                 featureColumns,
                 labelColumns,
                 standardizationStats,
-                DEFAULT_INITIAL_GROUP_CAPACITY
+                DEFAULT_INITIAL_GROUP_CAPACITY,
+                NumericStorageType.AUTO
         );
     }
 
@@ -164,6 +165,28 @@ public class NumericLongFormatReader
             List<String> labelColumns,
             StandardizationStats standardizationStats,
             int initialGroupCapacity
+    ) {
+        this(
+                dataFileName, entrySeparator, hasHeader, hasMissingValues,
+                isRegression, idColumn, timeColumn, featureColumns,
+                labelColumns, standardizationStats, initialGroupCapacity,
+                NumericStorageType.AUTO
+        );
+    }
+
+    public NumericLongFormatReader(
+            String dataFileName,
+            String entrySeparator,
+            boolean hasHeader,
+            boolean hasMissingValues,
+            boolean isRegression,
+            String idColumn,
+            String timeColumn,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            StandardizationStats standardizationStats,
+            int initialGroupCapacity,
+            NumericStorageType numericStorageType
     ) {
         this.dataFileName =
                 requireNonblank(
@@ -187,6 +210,8 @@ public class NumericLongFormatReader
 
         this.isRegression =
                 isRegression;
+
+        this.numericStorageType = resolveStorageType(numericStorageType);
 
         this.idColumn =
                 requireNonblank(
@@ -262,7 +287,8 @@ public class NumericLongFormatReader
                         hasMissingValues,
                         isRegression,
                         missingIndicators,
-                        initialGroupCapacity
+                        initialGroupCapacity,
+                        numericStorageType
                 );
 
         try (CsvReader<Boolean> csvReader =
@@ -317,6 +343,15 @@ public class NumericLongFormatReader
         );
 
         return dataset;
+    }
+
+    private static NumericStorageType resolveStorageType(
+            NumericStorageType requested
+    ) {
+        NumericStorageType value = Objects.requireNonNull(
+                requested, "NumericStorageType cannot be null.");
+        return value == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64 : value;
     }
 
     private void validateOptions() {
@@ -593,6 +628,7 @@ public class NumericLongFormatReader
         private final boolean isRegression;
         private final Set<String> missingIndicators;
         private final int initialGroupCapacity;
+        private final NumericStorageType numericStorageType;
 
         private final Map<Object, GroupAccumulator> groups =
                 new LinkedHashMap<>();
@@ -630,7 +666,8 @@ public class NumericLongFormatReader
                 boolean hasMissingValues,
                 boolean isRegression,
                 Set<String> missingIndicators,
-                int initialGroupCapacity
+                int initialGroupCapacity,
+                NumericStorageType numericStorageType
         ) {
             this.file =
                     file;
@@ -658,6 +695,11 @@ public class NumericLongFormatReader
 
             this.initialGroupCapacity =
                     initialGroupCapacity;
+
+            this.numericStorageType = Objects.requireNonNull(
+                    numericStorageType,
+                    "NumericStorageType cannot be null."
+            );
         }
 
         @Override
@@ -1385,7 +1427,7 @@ public class NumericLongFormatReader
                 );
 
                 Object data =
-                        group.toSeries();
+                        group.toSeries(numericStorageType);
 
                 Object label =
                         group.getLabel();
@@ -1659,46 +1701,27 @@ public class NumericLongFormatReader
             );
         }
 
-        private Object toSeries() {
+        private Object toSeries(NumericStorageType storageType) {
             if (featureValues.length == 1) {
-                if (!nullableOutput) {
-                    return featureValues[0].toArray();
-                }
-
-                return featureValues[0].toNullableBoxedArray(
-                        missingPositions[0]
-                );
+                return storageType == NumericStorageType.FLOAT32
+                        ? featureValues[0].toFloatArray(
+                        nullableOutput ? missingPositions[0] : null)
+                        : featureValues[0].toDoubleArray(
+                        nullableOutput ? missingPositions[0] : null);
             }
-
-            if (!nullableOutput) {
-                double[][] result =
-                        new double[featureValues.length][];
-
-                for (int featureIndex = 0;
-                     featureIndex < featureValues.length;
-                     featureIndex++) {
-
-                    result[featureIndex] =
-                            featureValues[featureIndex].toArray();
+            if (storageType == NumericStorageType.FLOAT32) {
+                float[][] result = new float[featureValues.length][];
+                for (int f = 0; f < featureValues.length; f++) {
+                    result[f] = featureValues[f].toFloatArray(
+                            nullableOutput ? missingPositions[f] : null);
                 }
-
                 return result;
             }
-
-            Double[][] result =
-                    new Double[featureValues.length][];
-
-            for (int featureIndex = 0;
-                 featureIndex < featureValues.length;
-                 featureIndex++) {
-
-                result[featureIndex] =
-                        featureValues[featureIndex]
-                                .toNullableBoxedArray(
-                                        missingPositions[featureIndex]
-                                );
+            double[][] result = new double[featureValues.length][];
+            for (int f = 0; f < featureValues.length; f++) {
+                result[f] = featureValues[f].toDoubleArray(
+                        nullableOutput ? missingPositions[f] : null);
             }
-
             return result;
         }
 
@@ -1777,41 +1800,32 @@ public class NumericLongFormatReader
             return size;
         }
 
-        private double[] toArray() {
-            if (size == values.length) {
-                return values;
+        private double[] toDoubleArray(MissingBuffer missing) {
+            validateMissingLength(missing);
+            double[] result = Arrays.copyOf(values, size);
+            if (missing != null) {
+                for (int i = 0; i < size; i++) {
+                    if (missing.get(i)) result[i] = Double.NaN;
+                }
             }
-
-            return Arrays.copyOf(
-                    values,
-                    size
-            );
+            return result;
         }
 
-        private Double[] toNullableBoxedArray(
-                MissingBuffer missing
-        ) {
-            if (missing.size() != size) {
-                throw new IllegalStateException(
-                        "Numeric and missing-position buffers have "
-                                + "different lengths."
-                );
+        private float[] toFloatArray(MissingBuffer missing) {
+            validateMissingLength(missing);
+            float[] result = new float[size];
+            for (int i = 0; i < size; i++) {
+                result[i] = missing != null && missing.get(i)
+                        ? Float.NaN : (float) values[i];
             }
-
-            Double[] result =
-                    new Double[size];
-
-            for (int index = 0;
-                 index < size;
-                 index++) {
-
-                result[index] =
-                        missing.get(index)
-                                ? null
-                                : values[index];
-            }
-
             return result;
+        }
+
+        private void validateMissingLength(MissingBuffer missing) {
+            if (missing != null && missing.size() != size) {
+                throw new IllegalStateException(
+                        "Numeric and missing-position buffers have different lengths.");
+            }
         }
 
         private void reorder(

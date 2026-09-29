@@ -5,93 +5,35 @@ import java.io.Serializable;
 import java.util.Objects;
 
 /**
- * Immutable configuration describing how standardization should be fitted
- * or applied.
+ * Immutable policy describing how numeric data should be standardized.
  *
- * This class contains standardization policy, not fitted numeric statistics.
- * Fitted centers and scales are stored separately in
- * {@link StandardizationStats}.
- *
- * Phase 1 supports:
- *
- *     method:
- *         NONE
- *         Z_SCORE
- *
- *     scope:
- *         GLOBAL
- *         PER_DIMENSION
- *
- *     variance convention:
- *         POPULATION
- *         SAMPLE
- *
- * Future phases may additionally support:
- *
- *     MIN_MAX
- *     ROBUST
- *     PER_SERIES
- *     PER_SERIES_PER_DIMENSION
- *     JSON statistics loading and writing
- *     streaming fitting for lazy datasets
- *
- * Configuration examples:
- *
- *     StandardizationConfig.disabled()
- *
- *     StandardizationConfig.zScorePerDimension()
- *
- *     StandardizationConfig.builder()
- *         .setMethod(StandardizationMethod.Z_SCORE)
- *         .setScope(StandardizationScope.GLOBAL)
- *         .setVarianceConvention(VarianceConvention.SAMPLE)
- *         .build()
+ * <p>GLOBAL and PER_DIMENSION use reusable {@link StandardizationStats}
+ * fitted from training data or loaded from JSON. PER_SERIES and
+ * PER_SERIES_PER_DIMENSION calculate local parameters from each realized
+ * series during transformation and may retain
+ * {@link PerSeriesStandardizationState} for later inverse transformation.</p>
  */
-public final class StandardizationConfig
-        implements Serializable {
+public final class StandardizationConfig implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
-    /**
-     * Standardization method to apply.
-     */
+    /** Mathematical transformation applied to accepted numeric values. */
     private final StandardizationMethod method;
 
-    /**
-     * Scope over which statistics are fitted.
-     */
+    /** Grouping policy used to fit or calculate transformation parameters. */
     private final StandardizationScope scope;
 
-    /**
-     * Variance denominator convention used for z-score fitting.
-     */
+    /** Variance denominator convention used by z-score fitting. */
     private final VarianceConvention varianceConvention;
 
-    /**
-     * Optional path to externally supplied standardization statistics.
-     *
-     * This field is retained in the configuration now so the public API does
-     * not need to change when JSON support is added in Phase 2.
-     *
-     * A null value means that no external statistics file was supplied.
-     */
+    /** Optional JSON path containing reusable training statistics. */
     private final String statisticsPath;
 
-    /**
-     * Whether fitted statistics should later be written to a file.
-     *
-     * Phase 1 stores fitted statistics in memory only. Phase 2 can use this
-     * flag together with statisticsOutputPath.
-     */
+    /** Whether newly fitted reusable statistics should be written to JSON. */
     private final boolean saveFittedStatistics;
 
-    /**
-     * Optional output path for fitted statistics.
-     *
-     * A null value allows the application layer to choose a default output
-     * location when saveFittedStatistics is true.
-     */
+    /** Optional output path for newly fitted reusable statistics. */
     private final String statisticsOutputPath;
 
     private StandardizationConfig(
@@ -102,45 +44,26 @@ public final class StandardizationConfig
             boolean saveFittedStatistics,
             String statisticsOutputPath
     ) {
-        this.method =
-                Objects.requireNonNull(
-                        method,
-                        "StandardizationMethod cannot be null."
-                );
-
-        this.scope =
-                Objects.requireNonNull(
-                        scope,
-                        "StandardizationScope cannot be null."
-                );
-
-        this.varianceConvention =
-                Objects.requireNonNull(
-                        varianceConvention,
-                        "VarianceConvention cannot be null."
-                );
-
-        this.statisticsPath =
-                normalizeNullablePath(
-                        statisticsPath
-                );
-
-        this.saveFittedStatistics =
-                saveFittedStatistics;
-
+        this.method = Objects.requireNonNull(
+                method,
+                "StandardizationMethod cannot be null."
+        );
+        this.scope = Objects.requireNonNull(
+                scope,
+                "StandardizationScope cannot be null."
+        );
+        this.varianceConvention = Objects.requireNonNull(
+                varianceConvention,
+                "VarianceConvention cannot be null."
+        );
+        this.statisticsPath = normalizeNullablePath(statisticsPath);
+        this.saveFittedStatistics = saveFittedStatistics;
         this.statisticsOutputPath =
-                normalizeNullablePath(
-                        statisticsOutputPath
-                );
-
+                normalizeNullablePath(statisticsOutputPath);
         validate();
     }
 
-    /**
-     * Returns a configuration that disables standardization.
-     *
-     * @return disabled standardization configuration
-     */
+    /** Returns a configuration that disables standardization. */
     public static StandardizationConfig disabled() {
         return new StandardizationConfig(
                 StandardizationMethod.NONE,
@@ -152,15 +75,7 @@ public final class StandardizationConfig
         );
     }
 
-    /**
-     * Returns the recommended initial z-score configuration:
-     *
-     *     method              = Z_SCORE
-     *     scope               = PER_DIMENSION
-     *     variance convention = POPULATION
-     *
-     * @return per-dimension population z-score configuration
-     */
+    /** Returns reusable population z-score standardization per feature or dimension. */
     public static StandardizationConfig zScorePerDimension() {
         return new StandardizationConfig(
                 StandardizationMethod.Z_SCORE,
@@ -172,11 +87,7 @@ public final class StandardizationConfig
         );
     }
 
-    /**
-     * Returns a global population z-score configuration.
-     *
-     * @return global population z-score configuration
-     */
+    /** Returns reusable global population z-score standardization. */
     public static StandardizationConfig zScoreGlobal() {
         return new StandardizationConfig(
                 StandardizationMethod.Z_SCORE,
@@ -189,20 +100,38 @@ public final class StandardizationConfig
     }
 
     /**
-     * Returns a new configuration builder.
-     *
-     * @return standardization configuration builder
+     * Returns the usual univariate time-series z-normalization policy.
      */
+    public static StandardizationConfig zScorePerSeries() {
+        return new StandardizationConfig(
+                StandardizationMethod.Z_SCORE,
+                StandardizationScope.PER_SERIES,
+                VarianceConvention.POPULATION,
+                null,
+                false,
+                null
+        );
+    }
+
+    /**
+     * Returns the usual per-instance, per-channel multivariate policy.
+     */
+    public static StandardizationConfig zScorePerSeriesPerDimension() {
+        return new StandardizationConfig(
+                StandardizationMethod.Z_SCORE,
+                StandardizationScope.PER_SERIES_PER_DIMENSION,
+                VarianceConvention.POPULATION,
+                null,
+                false,
+                null
+        );
+    }
+
+    /** Returns a new configuration builder with disabled defaults. */
     public static Builder builder() {
         return new Builder();
     }
 
-    /**
-     * Returns a builder initialized from an existing configuration.
-     *
-     * @param config source configuration
-     * @return initialized builder
-     */
     public static Builder builder(
             StandardizationConfig config
     ) {
@@ -210,16 +139,11 @@ public final class StandardizationConfig
                 config,
                 "StandardizationConfig cannot be null."
         );
-
         return new Builder()
                 .setMethod(config.getMethod())
                 .setScope(config.getScope())
-                .setVarianceConvention(
-                        config.getVarianceConvention()
-                )
-                .setStatisticsPath(
-                        config.getStatisticsPath()
-                )
+                .setVarianceConvention(config.getVarianceConvention())
+                .setStatisticsPath(config.getStatisticsPath())
                 .setSaveFittedStatistics(
                         config.shouldSaveFittedStatistics()
                 )
@@ -228,150 +152,86 @@ public final class StandardizationConfig
                 );
     }
 
-    /**
-     * Returns the configured standardization method.
-     *
-     * @return standardization method
-     */
+    /** @return configured mathematical method */
     public StandardizationMethod getMethod() {
         return method;
     }
 
-    /**
-     * Returns the configured standardization scope.
-     *
-     * @return standardization scope
-     */
+    /** @return configured fitting or local-calculation scope */
     public StandardizationScope getScope() {
         return scope;
     }
 
-    /**
-     * Returns the configured variance convention.
-     *
-     * @return variance convention
-     */
+    /** @return configured variance convention */
     public VarianceConvention getVarianceConvention() {
         return varianceConvention;
     }
 
-    /**
-     * Returns the path to externally supplied statistics, or null when no
-     * statistics file was supplied.
-     *
-     * @return external statistics path or null
-     */
     public String getStatisticsPath() {
         return statisticsPath;
     }
 
-    /**
-     * Returns whether an external statistics path was supplied.
-     *
-     * @return true when statistics should be loaded externally
-     */
     public boolean hasStatisticsPath() {
         return statisticsPath != null;
     }
 
-    /**
-     * Returns whether fitted statistics should be written for later reuse.
-     *
-     * @return true when fitted statistics should be saved
-     */
     public boolean shouldSaveFittedStatistics() {
         return saveFittedStatistics;
     }
 
-    /**
-     * Returns the requested statistics output path, or null when the
-     * application should choose a default path.
-     *
-     * @return statistics output path or null
-     */
     public String getStatisticsOutputPath() {
         return statisticsOutputPath;
     }
 
-    /**
-     * Returns whether standardization is enabled.
-     *
-     * @return true unless method is NONE
-     */
     public boolean isEnabled() {
         return method != StandardizationMethod.NONE;
     }
 
-    /**
-     * Returns whether standardization is disabled.
-     *
-     * @return true when method is NONE
-     */
     public boolean isDisabled() {
         return !isEnabled();
     }
 
     /**
-     * Returns whether fitted statistics should be loaded from an external
-     * source rather than calculated from training data.
-     *
-     * @return true when an external statistics path is configured
+     * Returns whether reusable statistics should be loaded before readers are
+     * constructed. Per-series scopes cannot load dataset-level statistics.
      */
     public boolean shouldLoadStatistics() {
         return isEnabled()
+                && scope.usesTrainingStatistics()
                 && hasStatisticsPath();
     }
 
     /**
-     * Returns whether statistics must be fitted from training data.
-     *
-     * Per-series scopes calculate statistics at transformation time rather
-     * than fitting reusable training statistics. Those scopes are reserved
-     * for a later implementation phase.
-     *
-     * @return true when reusable statistics must be fitted
+     * Returns whether reusable statistics must be fitted from eager training
+     * data.
      */
     public boolean shouldFitStatistics() {
         return isEnabled()
-                && !hasStatisticsPath()
                 && scope.usesTrainingStatistics()
+                && !hasStatisticsPath()
                 && method.requiresFittedStatistics();
     }
 
-    /**
-     * Returns whether statistics are calculated separately for each series
-     * during transformation.
-     *
-     * @return true for a per-series scope
-     */
-    public boolean usesPerSeriesStatistics() {
-        return isEnabled()
-                && scope.usesPerSeriesStatistics();
+    /** @return true when training-set statistics are fitted or loaded and reused */
+    public boolean usesReusableTrainingStatistics() {
+        return isEnabled() && scope.usesTrainingStatistics();
     }
 
-    /**
-     * Validates that this configuration is supported by the current
-     * implementation phase.
-     *
-     * This method may be called by PFApplication or ExperimentRunner before
-     * reading or transforming data.
-     *
-     * JSON statistics paths are recognized by the configuration model but
-     * are not implemented until Phase 2.
-     */
+    /** @return true when parameters are calculated independently per realized series */
+    public boolean usesPerSeriesStatistics() {
+        return isEnabled() && scope.usesPerSeriesStatistics();
+    }
+
     public void requireImplemented() {
         if (isDisabled()) {
             return;
         }
-
         method.requireImplemented();
         scope.requireImplemented();
     }
 
     /**
-     * Validates that fitted statistics match this configuration.
-     *
-     * @param stats fitted or externally loaded statistics
+     * Validates reusable fitted or externally loaded statistics.
      */
     public void validateStatistics(
             StandardizationStats stats
@@ -380,14 +240,20 @@ public final class StandardizationConfig
                 stats,
                 "StandardizationStats cannot be null."
         );
-
         if (isDisabled()) {
             throw new IllegalStateException(
-                    "Cannot validate fitted statistics against a disabled "
-                            + "standardization configuration."
+                    "Cannot validate statistics against disabled "
+                            + "standardization."
             );
         }
-
+        if (!usesReusableTrainingStatistics()) {
+            throw new IllegalStateException(
+                    "Scope "
+                            + scope
+                            + " calculates local per-series parameters and "
+                            + "does not use StandardizationStats."
+            );
+        }
         if (stats.getMethod() != method) {
             throw new IllegalArgumentException(
                     "Standardization method mismatch. Configuration uses "
@@ -397,7 +263,6 @@ public final class StandardizationConfig
                             + "."
             );
         }
-
         if (stats.getScope() != scope) {
             throw new IllegalArgumentException(
                     "Standardization scope mismatch. Configuration uses "
@@ -407,11 +272,8 @@ public final class StandardizationConfig
                             + "."
             );
         }
-
-        if (method == StandardizationMethod.Z_SCORE
-                && stats.getVarianceConvention()
-                != varianceConvention) {
-
+        if (method.usesVarianceConvention()
+                && stats.getVarianceConvention() != varianceConvention) {
             throw new IllegalArgumentException(
                     "Variance convention mismatch. Configuration uses "
                             + varianceConvention
@@ -424,52 +286,55 @@ public final class StandardizationConfig
 
     private void validate() {
         if (method == StandardizationMethod.NONE) {
-            if (statisticsPath != null) {
-                throw new IllegalArgumentException(
-                        "A statistics path cannot be supplied when "
-                                + "standardization method is NONE."
-                );
-            }
-
-            if (saveFittedStatistics) {
-                throw new IllegalArgumentException(
-                        "Fitted statistics cannot be saved when "
-                                + "standardization method is NONE."
-                );
-            }
-
-            if (statisticsOutputPath != null) {
-                throw new IllegalArgumentException(
-                        "A statistics output path cannot be supplied when "
-                                + "standardization method is NONE."
-                );
-            }
-
+            requireNoPersistenceOptions(
+                    "standardization method is NONE"
+            );
             return;
         }
 
-        /*
-         * Recognized future methods and scopes are allowed in the immutable
-         * configuration object. requireImplemented() is responsible for
-         * rejecting them before execution.
-         */
+        if (scope.usesPerSeriesStatistics()) {
+            requireNoPersistenceOptions(
+                    "scope " + scope + " uses local per-series parameters"
+            );
+            return;
+        }
 
-        if (!saveFittedStatistics
-                && statisticsOutputPath != null) {
-
+        if (!saveFittedStatistics && statisticsOutputPath != null) {
             throw new IllegalArgumentException(
                     "statisticsOutputPath was supplied, but "
                             + "saveFittedStatistics is false."
             );
         }
-
-        if (statisticsPath != null
-                && saveFittedStatistics) {
-
+        if (statisticsPath != null && saveFittedStatistics) {
             throw new IllegalArgumentException(
-                    "A standardization configuration cannot both load "
-                            + "precomputed statistics and save newly fitted "
-                            + "statistics in the same operation."
+                    "A configuration cannot both load precomputed "
+                            + "statistics and save newly fitted statistics."
+            );
+        }
+    }
+
+    private void requireNoPersistenceOptions(
+            String reason
+    ) {
+        if (statisticsPath != null) {
+            throw new IllegalArgumentException(
+                    "A reusable statistics path cannot be supplied because "
+                            + reason
+                            + "."
+            );
+        }
+        if (saveFittedStatistics) {
+            throw new IllegalArgumentException(
+                    "Reusable fitted statistics cannot be saved because "
+                            + reason
+                            + "."
+            );
+        }
+        if (statisticsOutputPath != null) {
+            throw new IllegalArgumentException(
+                    "A statistics output path cannot be supplied because "
+                            + reason
+                            + "."
             );
         }
     }
@@ -480,16 +345,10 @@ public final class StandardizationConfig
         if (path == null) {
             return null;
         }
-
-        String trimmed =
-                path.trim();
-
-        if (trimmed.isEmpty()
-                || trimmed.equalsIgnoreCase("None")) {
-
+        String trimmed = path.trim();
+        if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")) {
             return null;
         }
-
         return trimmed;
     }
 
@@ -500,24 +359,18 @@ public final class StandardizationConfig
         if (this == other) {
             return true;
         }
-
         if (!(other instanceof StandardizationConfig that)) {
             return false;
         }
-
-        return saveFittedStatistics
-                == that.saveFittedStatistics
+        return saveFittedStatistics == that.saveFittedStatistics
                 && method == that.method
                 && scope == that.scope
                 && varianceConvention == that.varianceConvention
+                && Objects.equals(statisticsPath, that.statisticsPath)
                 && Objects.equals(
-                statisticsPath,
-                that.statisticsPath
-        )
-                && Objects.equals(
-                statisticsOutputPath,
-                that.statisticsOutputPath
-        );
+                        statisticsOutputPath,
+                        that.statisticsOutputPath
+                );
     }
 
     @Override
@@ -546,188 +399,91 @@ public final class StandardizationConfig
                 + '}';
     }
 
-    /**
-     * Builder for immutable StandardizationConfig instances.
-     */
+    /** Builder for immutable standardization configurations. */
     public static final class Builder {
-
-        private StandardizationMethod method =
-                StandardizationMethod.NONE;
-
+        private StandardizationMethod method = StandardizationMethod.NONE;
         private StandardizationScope scope =
                 StandardizationScope.PER_DIMENSION;
-
         private VarianceConvention varianceConvention =
                 VarianceConvention.POPULATION;
-
-        private String statisticsPath =
-                null;
-
-        private boolean saveFittedStatistics =
-                false;
-
-        private String statisticsOutputPath =
-                null;
+        private String statisticsPath;
+        private boolean saveFittedStatistics;
+        private String statisticsOutputPath;
 
         private Builder() {
         }
 
-        /**
-         * Sets the standardization method.
-         *
-         * @param method standardization method
-         * @return this builder
-         */
         public Builder setMethod(
                 StandardizationMethod method
         ) {
-            this.method =
-                    Objects.requireNonNull(
-                            method,
-                            "StandardizationMethod cannot be null."
-                    );
-
+            this.method = Objects.requireNonNull(
+                    method,
+                    "StandardizationMethod cannot be null."
+            );
             return this;
         }
 
-        /**
-         * Parses and sets the standardization method.
-         *
-         * @param method user-facing method name
-         * @return this builder
-         */
         public Builder setMethod(
                 String method
         ) {
-            return setMethod(
-                    StandardizationMethod.fromString(
-                            method
-                    )
-            );
+            return setMethod(StandardizationMethod.fromString(method));
         }
 
-        /**
-         * Sets the fitting scope.
-         *
-         * @param scope standardization scope
-         * @return this builder
-         */
         public Builder setScope(
                 StandardizationScope scope
         ) {
-            this.scope =
-                    Objects.requireNonNull(
-                            scope,
-                            "StandardizationScope cannot be null."
-                    );
-
+            this.scope = Objects.requireNonNull(
+                    scope,
+                    "StandardizationScope cannot be null."
+            );
             return this;
         }
 
-        /**
-         * Parses and sets the fitting scope.
-         *
-         * @param scope user-facing scope name
-         * @return this builder
-         */
         public Builder setScope(
                 String scope
         ) {
-            return setScope(
-                    StandardizationScope.fromString(
-                            scope
-                    )
-            );
+            return setScope(StandardizationScope.fromString(scope));
         }
 
-        /**
-         * Sets the variance convention.
-         *
-         * @param varianceConvention population or sample convention
-         * @return this builder
-         */
         public Builder setVarianceConvention(
                 VarianceConvention varianceConvention
         ) {
-            this.varianceConvention =
-                    Objects.requireNonNull(
-                            varianceConvention,
-                            "VarianceConvention cannot be null."
-                    );
-
+            this.varianceConvention = Objects.requireNonNull(
+                    varianceConvention,
+                    "VarianceConvention cannot be null."
+            );
             return this;
         }
 
-        /**
-         * Parses and sets the variance convention.
-         *
-         * @param varianceConvention user-facing convention name
-         * @return this builder
-         */
         public Builder setVarianceConvention(
                 String varianceConvention
         ) {
             return setVarianceConvention(
-                    VarianceConvention.fromString(
-                            varianceConvention
-                    )
+                    VarianceConvention.fromString(varianceConvention)
             );
         }
 
-        /**
-         * Sets an optional externally supplied statistics path.
-         *
-         * @param statisticsPath statistics path or null
-         * @return this builder
-         */
         public Builder setStatisticsPath(
                 String statisticsPath
         ) {
-            this.statisticsPath =
-                    statisticsPath;
-
+            this.statisticsPath = statisticsPath;
             return this;
         }
 
-        /**
-         * Sets whether newly fitted statistics should later be saved.
-         *
-         * @param saveFittedStatistics whether to save fitted statistics
-         * @return this builder
-         */
         public Builder setSaveFittedStatistics(
                 boolean saveFittedStatistics
         ) {
-            this.saveFittedStatistics =
-                    saveFittedStatistics;
-
+            this.saveFittedStatistics = saveFittedStatistics;
             return this;
         }
 
-        /**
-         * Sets an optional output path for fitted statistics.
-         *
-         * @param statisticsOutputPath output path or null
-         * @return this builder
-         */
         public Builder setStatisticsOutputPath(
                 String statisticsOutputPath
         ) {
-            this.statisticsOutputPath =
-                    statisticsOutputPath;
-
+            this.statisticsOutputPath = statisticsOutputPath;
             return this;
         }
 
-        /**
-         * Builds and validates an immutable configuration.
-         *
-         * This performs structural validation but does not require every
-         * recognized method, scope, or JSON operation to be implemented.
-         * Call requireImplemented() before execution.
-         *
-         * @return immutable standardization configuration
-         */
         public StandardizationConfig build() {
             return new StandardizationConfig(
                     method,

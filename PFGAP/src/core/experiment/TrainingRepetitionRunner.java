@@ -8,12 +8,15 @@ import core.ProximityForestResult;
 import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import imputation.ProximityImputation;
+import imputation.util.MissingIndices;
 import output.ExperimentResultRecord;
 import output.ExperimentResultWriter;
+import preprocessing.standardization.PerSeriesStandardizationState;
 import trees.ProximityForest;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -29,6 +32,10 @@ import java.util.Objects;
  * exactly one repetition's parallel runtime and accumulated artifact metadata.
  * Proximity and scoring coordinators are created inside {@link #run} so their
  * runtime and mutable matrix state cannot leak across repetitions.</p>
+ *
+ * <p>Dataset-aligned per-series standardization states are forwarded only to
+ * user-facing full-dataset and imputed-only sparse output. Forest training and
+ * prediction continue to consume the standardized in-memory datasets.</p>
  */
 public final class TrainingRepetitionRunner {
 
@@ -137,7 +144,16 @@ public final class TrainingRepetitionRunner {
         );
 
         outputCoordinator.writeTrainingDataWhenRequested(
-                trainingData
+                trainingData,
+                datasets.trainingStandardizationStates()
+        );
+
+        writeImputedOnlyMatrixMarketWhenRequested(
+                trainingData,
+                datasets.trainingStandardizationStates(),
+                true,
+                repetition,
+                context
         );
 
         ProximityForestResult result = testingData == null
@@ -149,7 +165,8 @@ public final class TrainingRepetitionRunner {
                         effectiveDatasetName,
                         context,
                         scoringCoordinator,
-                        proximityCoordinator
+                        proximityCoordinator,
+                        datasets.testingStandardizationStates()
                 );
 
         handleTrainingScores(
@@ -214,7 +231,8 @@ public final class TrainingRepetitionRunner {
             String datasetName,
             ExperimentRepetitionContext context,
             ExperimentScoringCoordinator scoringCoordinator,
-            ExperimentProximityCoordinator proximityCoordinator
+            ExperimentProximityCoordinator proximityCoordinator,
+            List<PerSeriesStandardizationState> testingStandardizationStates
     ) throws Exception {
         performTestingImputationWhenRequested(
                 testingData,
@@ -231,6 +249,19 @@ public final class TrainingRepetitionRunner {
         proximityCoordinator.clearTestTrainResults();
 
         int repetition = context.getRepetition();
+
+        outputCoordinator.writeTestingDataWhenRequested(
+                testingData,
+                testingStandardizationStates
+        );
+
+        writeImputedOnlyMatrixMarketWhenRequested(
+                testingData,
+                testingStandardizationStates,
+                false,
+                repetition,
+                context
+        );
 
         if (AppContext.isIsolationMode()) {
             ExperimentScoringCoordinator.ScoreArtifact scoreArtifact =
@@ -251,10 +282,6 @@ public final class TrainingRepetitionRunner {
 
             return forest.getResultSet();
         }
-
-        outputCoordinator.writeTestingDataWhenRequested(
-                testingData
-        );
 
         boolean enhancedPredictions =
                 AppContext.shouldReturnEnhancedOutputs();
@@ -381,6 +408,63 @@ public final class TrainingRepetitionRunner {
                         ? "trainingIsolationScoringMilliseconds"
                         : "trainingProximityOutlierScoringMilliseconds",
                 context
+        );
+    }
+
+    /**
+     * Writes the sparse originally-missing-value artifact after imputation.
+     *
+     * <p>The two AppContext fields referenced here are introduced with the CLI
+     * wiring: {@code output_train_imputed_csr}/{@code
+     * output_test_imputed_csr} and {@code train_imputed_csr_file}/{@code
+     * test_imputed_csr_file}. The artifact is repetition-aware and contains
+     * values in original coordinates.</p>
+     */
+    private void writeImputedOnlyMatrixMarketWhenRequested(
+            ListObjectDataset dataset,
+            List<PerSeriesStandardizationState> standardizationStates,
+            boolean training,
+            int repetition,
+            ExperimentRepetitionContext context
+    ) throws IOException {
+        boolean requested = training
+                ? AppContext.output_train_imputed_csr
+                : AppContext.output_test_imputed_csr;
+        if (!requested) {
+            return;
+        }
+
+        MissingIndices missing = Objects.requireNonNull(
+                dataset.getMissingIndices(),
+                (training ? "Training" : "Testing")
+                        + " MissingIndices cannot be null when imputed-only "
+                        + "CSR output is requested."
+        );
+        String configuredName = training
+                ? AppContext.train_imputed_csr_file
+                : AppContext.test_imputed_csr_file;
+        String defaultName = training
+                ? "training_imputed_values.mtx"
+                : "testing_imputed_values.mtx";
+        String fileName = configuredName == null || configuredName.isBlank()
+                ? defaultName
+                : configuredName.trim();
+        Path path = artifactPaths.resolveRepeated(fileName, repetition);
+
+        Path written = outputCoordinator.writeImputedValuesMatrixMarket(
+                dataset,
+                missing,
+                standardizationStates,
+                path,
+                training
+                        ? "PFGAP originally missing training values"
+                        : "PFGAP originally missing testing values"
+        );
+        context.addArtifact(
+                training
+                        ? "trainingImputedValues"
+                        : "testingImputedValues",
+                artifactPaths.relativeArtifactPath(written)
         );
     }
 

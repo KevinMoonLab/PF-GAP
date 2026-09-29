@@ -9,34 +9,32 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Fits reusable standardization statistics from an eager numeric dataset.
+ * Fits reusable affine standardization statistics from an eager numeric
+ * training dataset.
  *
- * <p>The fitter performs one value traversal. It trusts the configured
- * numeric and missing-value contracts and retains only cheap structural
- * checks. Primitive double and float NaN values are skipped.
- * {@link OnlineMoments} owns finite-value and accumulator-overflow checks.</p>
+ * <p>This fitter is used only by scopes that reuse training-set statistics:
+ * {@link StandardizationScope#GLOBAL} and
+ * {@link StandardizationScope#PER_DIMENSION}. Per-series scopes calculate
+ * local parameters during transformation and are represented by
+ * {@link PerSeriesStandardizationState}.</p>
  *
- * <p>Supported instance representations are {@code double[]},
- * {@code float[]}, {@code double[][]}, and {@code float[][]}.
- * Multivariate arrays are dimension-major.</p>
+ * <p>The fitter performs one traversal of accepted numeric values and supports
+ * {@code double[]}, {@code float[]}, {@code double[][]}, and
+ * {@code float[][]}. Multivariate arrays are dimension-major. Primitive NaN
+ * values are treated as missing and skipped. Infinite values are rejected so
+ * they cannot corrupt fitted parameters.</p>
  *
- * <p>When {@link StandardizationScope#PER_DIMENSION} is selected for
- * {@code double[]} or {@code float[]} instances, each array position is
- * interpreted as one tabular feature and is fitted across dataset instances.
- * All rows must consequently contain the same number of features.</p>
- *
- * <p>For {@link StandardizationScope#GLOBAL}, {@code double[]} and
- * {@code float[]} retain their univariate-series interpretation, and all
- * values from every instance contribute to one reusable statistic group.</p>
- *
- * <p>For {@code double[][]} and {@code float[][]}, the outer array remains
- * the dimension-major axis. GLOBAL combines values from all dimensions into
- * one group, while PER_DIMENSION fits one group per outer-array dimension.</p>
+ * <p>Z-score and mean-centering use {@link OnlineMoments}; min-max scaling uses
+ * {@link OnlineRange}. Statistics are accumulated in double precision even
+ * when the source representation is float.</p>
  */
 public final class StandardizationFitter {
 
-    public static final double CONSTANT_SCALE =
-            1.0;
+    /**
+     * Scale stored for constant groups and for groups whose requested sample
+     * variance cannot be calculated from the available observation count.
+     */
+    public static final double CONSTANT_SCALE = 1.0;
 
     private StandardizationFitter() {
         // Utility class.
@@ -97,14 +95,14 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Fits reusable statistics in one pass over accepted numeric values.
+     * Fits reusable statistics in one traversal of accepted numeric values.
      *
      * @param dataset eager numeric training dataset
-     * @param method standardization method
+     * @param method affine standardization method
      * @param scope reusable-statistics scope
-     * @param varianceConvention variance denominator convention
+     * @param varianceConvention variance convention used by z-score fitting
      * @param featureNames optional ordered realized-dimension names
-     * @return fitted standardization statistics
+     * @return immutable fitted statistics
      */
     public static StandardizationStats fit(
             ListObjectDataset dataset,
@@ -113,68 +111,38 @@ public final class StandardizationFitter {
             VarianceConvention varianceConvention,
             List<String> featureNames
     ) {
-        Objects.requireNonNull(
-                dataset,
-                "Dataset cannot be null."
-        );
-
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
         Objects.requireNonNull(
                 method,
                 "StandardizationMethod cannot be null."
         );
-
         Objects.requireNonNull(
                 scope,
                 "StandardizationScope cannot be null."
         );
-
         Objects.requireNonNull(
                 varianceConvention,
                 "VarianceConvention cannot be null."
         );
 
-        if (method != StandardizationMethod.Z_SCORE) {
-            throw new UnsupportedOperationException(
-                    "Standardization method "
-                            + method
-                            + " is not implemented."
-            );
-        }
+        method.requireImplemented();
+        scope.requireImplemented();
+        requireReusableMethod(method);
+        requireReusableScope(scope);
 
-        if (scope != StandardizationScope.GLOBAL
-                && scope != StandardizationScope.PER_DIMENSION) {
-
-            throw new UnsupportedOperationException(
-                    "Standardization scope "
-                            + scope
-                            + " is not implemented."
-            );
-        }
-
-        List<Object> data =
-                Objects.requireNonNull(
-                        dataset.getData(),
-                        "Dataset data cannot be null."
-                );
-
+        List<Object> data = Objects.requireNonNull(
+                dataset.getData(),
+                "Dataset data cannot be null."
+        );
         if (data.isEmpty()) {
             throw new IllegalArgumentException(
-                    "Cannot fit standardization statistics "
-                            + "from an empty dataset."
+                    "Cannot fit standardization statistics from an empty "
+                            + "dataset."
             );
         }
 
-        Object firstInstance =
-                firstRealizedInstance(
-                        data
-                );
-
-        int dimensionCount =
-                dimensionCountOf(
-                        firstInstance,
-                        scope
-                );
-
+        Object firstInstance = firstRealizedInstance(data);
+        int dimensionCount = dimensionCountOf(firstInstance, scope);
         List<String> normalizedFeatureNames =
                 validateAndCopyFeatureNames(
                         featureNames,
@@ -182,502 +150,79 @@ public final class StandardizationFitter {
                         scope
                 );
 
-        OnlineMoments[] moments =
-                createAccumulators(
-                        scope,
-                        dimensionCount
-                );
+        int groupCount = scope.statisticGroupCount(dimensionCount);
+        return switch (method) {
+            case Z_SCORE, MEAN_CENTER ->
+                    fitMomentStatistics(
+                            data,
+                            method,
+                            scope,
+                            varianceConvention,
+                            normalizedFeatureNames,
+                            dimensionCount,
+                            groupCount
+                    );
+            case MIN_MAX ->
+                    fitRangeStatistics(
+                            data,
+                            method,
+                            scope,
+                            varianceConvention,
+                            normalizedFeatureNames,
+                            dimensionCount,
+                            groupCount
+                    );
+            case NONE, ROBUST ->
+                    throw new UnsupportedOperationException(
+                            "Standardization method "
+                                    + method
+                                    + " cannot fit reusable statistics."
+                    );
+        };
+    }
+
+    private static StandardizationStats fitMomentStatistics(
+            List<Object> data,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention,
+            List<String> featureNames,
+            int dimensionCount,
+            int groupCount
+    ) {
+        OnlineMoments[] moments = createMomentAccumulators(groupCount);
+        MomentSink sink = new MomentSink(moments);
 
         for (Object instance : data) {
             accumulateInstance(
                     instance,
                     dimensionCount,
                     scope,
-                    moments
+                    sink
             );
         }
 
-        return buildStatistics(
-                method,
-                scope,
-                varianceConvention,
-                normalizedFeatureNames,
-                moments
-        );
-    }
+        long[] counts = new long[groupCount];
+        double[] centers = new double[groupCount];
+        double[] scales = new double[groupCount];
 
-    /**
-     * Returns the first eager realized instance in the supplied data.
-     */
-    private static Object firstRealizedInstance(
-            List<Object> data
-    ) {
-        for (Object instance : data) {
-            if (instance == null) {
-                continue;
-            }
-
-            if (instance instanceof LazySeriesRef) {
-                throw new UnsupportedOperationException(
-                        "Standardization fitting requires eager realized data."
+        for (int group = 0; group < groupCount; group++) {
+            OnlineMoments accumulator = moments[group];
+            requireObservations(accumulator.hasObservations(), group, method);
+            counts[group] = accumulator.getCount();
+            centers[group] = accumulator.getMean();
+            scales[group] = switch (method) {
+                case Z_SCORE -> fittedStandardDeviation(
+                        accumulator,
+                        varianceConvention,
+                        group
                 );
-            }
-
-            return instance;
-        }
-
-        throw new IllegalArgumentException(
-                "Training dataset contains no realized instances."
-        );
-    }
-
-    /**
-     * Returns the number of realized dimensions represented by one instance
-     * under the requested reusable-statistics scope.
-     *
-     * <p>For PER_DIMENSION, a one-dimensional numeric array is interpreted as
-     * one tabular row, and each array position is a realized feature.</p>
-     *
-     * <p>For GLOBAL, a one-dimensional numeric array remains one univariate
-     * representation because all values contribute to the same statistic
-     * group.</p>
-     */
-    private static int dimensionCountOf(
-            Object instance,
-            StandardizationScope scope
-    ) {
-        if (instance instanceof double[] values) {
-            if (scope == StandardizationScope.PER_DIMENSION) {
-                requirePositiveDimensionCount(
-                        values.length
-                );
-
-                return values.length;
-            }
-
-            return 1;
-        }
-
-        if (instance instanceof float[] values) {
-            if (scope == StandardizationScope.PER_DIMENSION) {
-                requirePositiveDimensionCount(
-                        values.length
-                );
-
-                return values.length;
-            }
-
-            return 1;
-        }
-
-        if (instance instanceof double[][] matrix) {
-            requirePositiveDimensionCount(
-                    matrix.length
-            );
-
-            return matrix.length;
-        }
-
-        if (instance instanceof float[][] matrix) {
-            requirePositiveDimensionCount(
-                    matrix.length
-            );
-
-            return matrix.length;
-        }
-
-        throw unsupportedSeriesType(
-                instance
-        );
-    }
-
-    /**
-     * Creates one accumulator for GLOBAL standardization or one accumulator
-     * per realized dimension for PER_DIMENSION standardization.
-     */
-    private static OnlineMoments[] createAccumulators(
-            StandardizationScope scope,
-            int dimensionCount
-    ) {
-        int groupCount =
-                scope == StandardizationScope.GLOBAL
-                        ? 1
-                        : dimensionCount;
-
-        OnlineMoments[] moments =
-                new OnlineMoments[groupCount];
-
-        for (int group = 0;
-             group < groupCount;
-             group++) {
-
-            moments[group] =
-                    new OnlineMoments();
-        }
-
-        return moments;
-    }
-
-    /**
-     * Accumulates one supported eager instance.
-     */
-    private static void accumulateInstance(
-            Object instance,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        Objects.requireNonNull(
-                instance,
-                "Training instance cannot be null."
-        );
-
-        if (instance instanceof LazySeriesRef) {
-            throw new UnsupportedOperationException(
-                    "Standardization fitting requires eager realized data."
-            );
-        }
-
-        if (instance instanceof double[] values) {
-            accumulatePrimitiveOneDimensionalInstance(
-                    values,
-                    expectedDimensionCount,
-                    scope,
-                    moments
-            );
-
-            return;
-        }
-
-        if (instance instanceof float[] values) {
-            accumulateFloatOneDimensionalInstance(
-                    values,
-                    expectedDimensionCount,
-                    scope,
-                    moments
-            );
-
-            return;
-        }
-
-        if (instance instanceof double[][] matrix) {
-            accumulatePrimitiveMultivariateInstance(
-                    matrix,
-                    expectedDimensionCount,
-                    scope,
-                    moments
-            );
-
-            return;
-        }
-
-        if (instance instanceof float[][] matrix) {
-            accumulateFloatMultivariateInstance(
-                    matrix,
-                    expectedDimensionCount,
-                    scope,
-                    moments
-            );
-
-            return;
-        }
-
-        throw unsupportedSeriesType(
-                instance
-        );
-    }
-
-    /**
-     * Accumulates one primitive one-dimensional instance.
-     *
-     * <p>PER_DIMENSION interprets the instance as a tabular row.
-     * GLOBAL interprets it as a univariate series contributing to one
-     * statistic group.</p>
-     */
-    private static void accumulatePrimitiveOneDimensionalInstance(
-            double[] values,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        if (scope == StandardizationScope.PER_DIMENSION) {
-            requireExpectedDimensionCount(
-                    values.length,
-                    expectedDimensionCount
-            );
-
-            accumulatePrimitiveTabularRow(
-                    values,
-                    moments
-            );
-
-            return;
-        }
-
-        requireUnivariateCompatibility(
-                expectedDimensionCount
-        );
-
-        accumulatePrimitiveDimension(
-                values,
-                moments[0]
-        );
-    }
-
-    /**
-     * Accumulates one float one-dimensional instance.
-     *
-     * <p>PER_DIMENSION interprets the instance as a tabular row.
-     * GLOBAL interprets it as a univariate series contributing to one
-     * statistic group.</p>
-     */
-    private static void accumulateFloatOneDimensionalInstance(
-            float[] values,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        if (scope == StandardizationScope.PER_DIMENSION) {
-            requireExpectedDimensionCount(
-                    values.length,
-                    expectedDimensionCount
-            );
-
-            accumulateFloatTabularRow(
-                    values,
-                    moments
-            );
-
-            return;
-        }
-
-        requireUnivariateCompatibility(
-                expectedDimensionCount
-        );
-
-        accumulateFloatDimension(
-                values,
-                moments[0]
-        );
-    }
-
-    /**
-     * Accumulates one primitive dimension-major multivariate instance.
-     */
-    private static void accumulatePrimitiveMultivariateInstance(
-            double[][] matrix,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        requireExpectedDimensionCount(
-                matrix.length,
-                expectedDimensionCount
-        );
-
-        for (int dimension = 0;
-             dimension < matrix.length;
-             dimension++) {
-
-            double[] values =
-                    Objects.requireNonNull(
-                            matrix[dimension],
-                            "Training series contains a null dimension."
-                    );
-
-            accumulatePrimitiveDimension(
-                    values,
-                    accumulator(
-                            scope,
-                            moments,
-                            dimension
-                    )
-            );
-        }
-    }
-
-    /**
-     * Accumulates one float dimension-major multivariate instance.
-     */
-    private static void accumulateFloatMultivariateInstance(
-            float[][] matrix,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        requireExpectedDimensionCount(
-                matrix.length,
-                expectedDimensionCount
-        );
-
-        for (int dimension = 0;
-             dimension < matrix.length;
-             dimension++) {
-
-            float[] values =
-                    Objects.requireNonNull(
-                            matrix[dimension],
-                            "Training series contains a null dimension."
-                    );
-
-            accumulateFloatDimension(
-                    values,
-                    accumulator(
-                            scope,
-                            moments,
-                            dimension
-                    )
-            );
-        }
-    }
-
-    /**
-     * Returns the reusable accumulator for one multivariate dimension.
-     */
-    private static OnlineMoments accumulator(
-            StandardizationScope scope,
-            OnlineMoments[] moments,
-            int dimension
-    ) {
-        return scope == StandardizationScope.GLOBAL
-                ? moments[0]
-                : moments[dimension];
-    }
-
-    /**
-     * Accumulates one primitive tabular row into one statistic group per
-     * feature position.
-     */
-    private static void accumulatePrimitiveTabularRow(
-            double[] values,
-            OnlineMoments[] moments
-    ) {
-        for (int feature = 0;
-             feature < values.length;
-             feature++) {
-
-            double value =
-                    values[feature];
-
-            if (!Double.isNaN(
-                    value
-            )) {
-                moments[feature].add(
-                        value
-                );
-            }
-        }
-    }
-
-    /**
-     * Accumulates one float tabular row into one statistic group per feature
-     * position.
-     */
-    private static void accumulateFloatTabularRow(
-            float[] values,
-            OnlineMoments[] moments
-    ) {
-        for (int feature = 0;
-             feature < values.length;
-             feature++) {
-
-            float value =
-                    values[feature];
-
-            if (!Float.isNaN(
-                    value
-            )) {
-                moments[feature].add(
-                        value
-                );
-            }
-        }
-    }
-
-    /**
-     * Accumulates every accepted value from one primitive series dimension
-     * into one statistic group.
-     */
-    private static void accumulatePrimitiveDimension(
-            double[] values,
-            OnlineMoments moments
-    ) {
-        for (double value : values) {
-            if (!Double.isNaN(
-                    value
-            )) {
-                moments.add(
-                        value
-                );
-            }
-        }
-    }
-
-    /**
-     * Accumulates every accepted value from one float series dimension into
-     * one statistic group.
-     */
-    private static void accumulateFloatDimension(
-            float[] values,
-            OnlineMoments moments
-    ) {
-        for (float value : values) {
-            if (!Float.isNaN(
-                    value
-            )) {
-                moments.add(
-                        value
-                );
-            }
-        }
-    }
-
-    /**
-     * Converts completed online accumulators into immutable reusable
-     * statistics.
-     */
-    private static StandardizationStats buildStatistics(
-            StandardizationMethod method,
-            StandardizationScope scope,
-            VarianceConvention varianceConvention,
-            List<String> featureNames,
-            OnlineMoments[] moments
-    ) {
-        long[] counts =
-                new long[moments.length];
-
-        double[] centers =
-                new double[moments.length];
-
-        double[] scales =
-                new double[moments.length];
-
-        for (int group = 0;
-             group < moments.length;
-             group++) {
-
-            OnlineMoments accumulator =
-                    moments[group];
-
-            if (!accumulator.hasObservations()) {
-                throw new IllegalArgumentException(
-                        "Standardization statistic group "
-                                + group
-                                + " contains no observations."
-                );
-            }
-
-            counts[group] =
-                    accumulator.getCount();
-
-            centers[group] =
-                    accumulator.getMean();
-
-            scales[group] =
-                    fittedScale(
-                            accumulator,
-                            varianceConvention
-                    );
+                case MEAN_CENTER -> CONSTANT_SCALE;
+                case NONE, MIN_MAX, ROBUST ->
+                        throw new IllegalStateException(
+                                "Unexpected moment-based method: " + method
+                        );
+            };
         }
 
         return new StandardizationStats(
@@ -691,48 +236,391 @@ public final class StandardizationFitter {
         );
     }
 
-    /**
-     * Returns the fitted standard deviation or the configured constant-group
-     * scale when variance cannot be calculated or is zero.
-     */
-    private static double fittedScale(
-            OnlineMoments moments,
-            VarianceConvention varianceConvention
+    private static StandardizationStats fitRangeStatistics(
+            List<Object> data,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention,
+            List<String> featureNames,
+            int dimensionCount,
+            int groupCount
     ) {
-        if (!moments.canCalculateVariance(
-                varianceConvention
-        )) {
+        OnlineRange[] ranges = createRangeAccumulators(groupCount);
+        RangeSink sink = new RangeSink(ranges);
+
+        for (Object instance : data) {
+            accumulateInstance(
+                    instance,
+                    dimensionCount,
+                    scope,
+                    sink
+            );
+        }
+
+        long[] counts = new long[groupCount];
+        double[] centers = new double[groupCount];
+        double[] scales = new double[groupCount];
+
+        for (int group = 0; group < groupCount; group++) {
+            OnlineRange accumulator = ranges[group];
+            requireObservations(accumulator.hasObservations(), group, method);
+            counts[group] = accumulator.getCount();
+            centers[group] = accumulator.getMinimum();
+            scales[group] = fittedRange(accumulator, group);
+        }
+
+        return new StandardizationStats(
+                method,
+                scope,
+                varianceConvention,
+                featureNames,
+                counts,
+                centers,
+                scales
+        );
+    }
+
+    private static OnlineMoments[] createMomentAccumulators(
+            int groupCount
+    ) {
+        OnlineMoments[] moments = new OnlineMoments[groupCount];
+        for (int group = 0; group < groupCount; group++) {
+            moments[group] = new OnlineMoments();
+        }
+        return moments;
+    }
+
+    private static OnlineRange[] createRangeAccumulators(
+            int groupCount
+    ) {
+        OnlineRange[] ranges = new OnlineRange[groupCount];
+        for (int group = 0; group < groupCount; group++) {
+            ranges[group] = new OnlineRange();
+        }
+        return ranges;
+    }
+
+    /**
+     * Returns the first eager realized instance in the supplied data.
+     */
+    private static Object firstRealizedInstance(
+            List<Object> data
+    ) {
+        for (Object instance : data) {
+            if (instance == null) {
+                continue;
+            }
+            if (instance instanceof LazySeriesRef) {
+                throw lazyFittingUnsupported();
+            }
+            return instance;
+        }
+        throw new IllegalArgumentException(
+                "Training dataset contains no realized instances."
+        );
+    }
+
+    /**
+     * Determines the realized dimension count used for compatibility checks
+     * and feature-name validation.
+     *
+     * <p>For PER_DIMENSION, one-dimensional input is interpreted as a tabular
+     * row whose positions are features. For GLOBAL, one-dimensional input is
+     * one univariate representation. The outer length of two-dimensional input
+     * is always the realized channel count.</p>
+     */
+    private static int dimensionCountOf(
+            Object instance,
+            StandardizationScope scope
+    ) {
+        if (instance instanceof double[] values) {
+            if (scope == StandardizationScope.PER_DIMENSION) {
+                requirePositiveDimensionCount(values.length);
+                return values.length;
+            }
+            return 1;
+        }
+        if (instance instanceof float[] values) {
+            if (scope == StandardizationScope.PER_DIMENSION) {
+                requirePositiveDimensionCount(values.length);
+                return values.length;
+            }
+            return 1;
+        }
+        if (instance instanceof double[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
+        if (instance instanceof float[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
+        throw unsupportedSeriesType(instance);
+    }
+
+    private static void accumulateInstance(
+            Object instance,
+            int expectedDimensionCount,
+            StandardizationScope scope,
+            ValueSink sink
+    ) {
+        Objects.requireNonNull(
+                instance,
+                "Training instance cannot be null."
+        );
+        if (instance instanceof LazySeriesRef) {
+            throw lazyFittingUnsupported();
+        }
+        if (instance instanceof double[] values) {
+            accumulateDoubleOneDimensional(
+                    values,
+                    expectedDimensionCount,
+                    scope,
+                    sink
+            );
+            return;
+        }
+        if (instance instanceof float[] values) {
+            accumulateFloatOneDimensional(
+                    values,
+                    expectedDimensionCount,
+                    scope,
+                    sink
+            );
+            return;
+        }
+        if (instance instanceof double[][] matrix) {
+            accumulateDoubleMultivariate(
+                    matrix,
+                    expectedDimensionCount,
+                    scope,
+                    sink
+            );
+            return;
+        }
+        if (instance instanceof float[][] matrix) {
+            accumulateFloatMultivariate(
+                    matrix,
+                    expectedDimensionCount,
+                    scope,
+                    sink
+            );
+            return;
+        }
+        throw unsupportedSeriesType(instance);
+    }
+
+    private static void accumulateDoubleOneDimensional(
+            double[] values,
+            int expectedDimensionCount,
+            StandardizationScope scope,
+            ValueSink sink
+    ) {
+        if (scope == StandardizationScope.PER_DIMENSION) {
+            requireExpectedDimensionCount(
+                    values.length,
+                    expectedDimensionCount
+            );
+            for (int feature = 0; feature < values.length; feature++) {
+                addAccepted(values[feature], feature, sink);
+            }
+            return;
+        }
+
+        requireUnivariateCompatibility(expectedDimensionCount);
+        accumulateDoubleDimension(values, 0, sink);
+    }
+
+    private static void accumulateFloatOneDimensional(
+            float[] values,
+            int expectedDimensionCount,
+            StandardizationScope scope,
+            ValueSink sink
+    ) {
+        if (scope == StandardizationScope.PER_DIMENSION) {
+            requireExpectedDimensionCount(
+                    values.length,
+                    expectedDimensionCount
+            );
+            for (int feature = 0; feature < values.length; feature++) {
+                addAccepted(values[feature], feature, sink);
+            }
+            return;
+        }
+
+        requireUnivariateCompatibility(expectedDimensionCount);
+        accumulateFloatDimension(values, 0, sink);
+    }
+
+    private static void accumulateDoubleMultivariate(
+            double[][] matrix,
+            int expectedDimensionCount,
+            StandardizationScope scope,
+            ValueSink sink
+    ) {
+        requireExpectedDimensionCount(
+                matrix.length,
+                expectedDimensionCount
+        );
+        for (int dimension = 0; dimension < matrix.length; dimension++) {
+            double[] values = Objects.requireNonNull(
+                    matrix[dimension],
+                    "Training series contains a null dimension at index "
+                            + dimension
+                            + "."
+            );
+            int group = groupForDimension(scope, dimension);
+            accumulateDoubleDimension(values, group, sink);
+        }
+    }
+
+    private static void accumulateFloatMultivariate(
+            float[][] matrix,
+            int expectedDimensionCount,
+            StandardizationScope scope,
+            ValueSink sink
+    ) {
+        requireExpectedDimensionCount(
+                matrix.length,
+                expectedDimensionCount
+        );
+        for (int dimension = 0; dimension < matrix.length; dimension++) {
+            float[] values = Objects.requireNonNull(
+                    matrix[dimension],
+                    "Training series contains a null dimension at index "
+                            + dimension
+                            + "."
+            );
+            int group = groupForDimension(scope, dimension);
+            accumulateFloatDimension(values, group, sink);
+        }
+    }
+
+    private static void accumulateDoubleDimension(
+            double[] values,
+            int group,
+            ValueSink sink
+    ) {
+        for (double value : values) {
+            addAccepted(value, group, sink);
+        }
+    }
+
+    private static void accumulateFloatDimension(
+            float[] values,
+            int group,
+            ValueSink sink
+    ) {
+        for (float value : values) {
+            addAccepted(value, group, sink);
+        }
+    }
+
+    /**
+     * Skips the numeric missing sentinel and rejects infinities before invoking
+     * the trusted accumulator hot path.
+     */
+    private static void addAccepted(
+            double value,
+            int group,
+            ValueSink sink
+    ) {
+        if (Double.isNaN(value)) {
+            return;
+        }
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(
+                    "Standardization fitting encountered a nonfinite value "
+                            + "in statistic group "
+                            + group
+                            + ": "
+                            + value
+                            + ". NaN is the supported numeric missing "
+                            + "sentinel; infinities are not supported."
+            );
+        }
+        sink.add(group, value);
+    }
+
+    private static int groupForDimension(
+            StandardizationScope scope,
+            int dimension
+    ) {
+        return scope == StandardizationScope.GLOBAL
+                ? 0
+                : dimension;
+    }
+
+    private static double fittedStandardDeviation(
+            OnlineMoments moments,
+            VarianceConvention varianceConvention,
+            int group
+    ) {
+        if (!moments.canCalculateVariance(varianceConvention)) {
             return CONSTANT_SCALE;
         }
 
         double standardDeviation =
-                moments.getStandardDeviation(
-                        varianceConvention
-                );
-
+                moments.getStandardDeviation(varianceConvention);
+        if (!Double.isFinite(standardDeviation)) {
+            throw new ArithmeticException(
+                    "Z-score fitting produced a nonfinite standard "
+                            + "deviation for statistic group "
+                            + group
+                            + "."
+            );
+        }
         return standardDeviation == 0.0
                 ? CONSTANT_SCALE
                 : standardDeviation;
     }
 
-    /**
-     * Validates and defensively copies ordered feature names.
-     *
-     * <p>For PER_DIMENSION tabular data, the expected count is the length of
-     * each double[] or float[] row. For dimension-major multivariate data,
-     * it is the number of outer-array dimensions.</p>
-     */
+    private static double fittedRange(
+            OnlineRange range,
+            int group
+    ) {
+        if (range.isConstant()) {
+            return CONSTANT_SCALE;
+        }
+
+        double fittedRange = range.getRange();
+        if (!Double.isFinite(fittedRange) || fittedRange <= 0.0) {
+            throw new ArithmeticException(
+                    "Min-max fitting produced an invalid range for "
+                            + "statistic group "
+                            + group
+                            + ": "
+                            + fittedRange
+                            + "."
+            );
+        }
+        return fittedRange;
+    }
+
+    private static void requireObservations(
+            boolean hasObservations,
+            int group,
+            StandardizationMethod method
+    ) {
+        if (!hasObservations) {
+            throw new IllegalArgumentException(
+                    "Standardization statistic group "
+                            + group
+                            + " contains no observed values for method "
+                            + method
+                            + "."
+            );
+        }
+    }
+
     private static List<String> validateAndCopyFeatureNames(
             List<String> featureNames,
             int dimensionCount,
             StandardizationScope scope
     ) {
-        if (featureNames == null
-                || featureNames.isEmpty()) {
-
+        if (featureNames == null || featureNames.isEmpty()) {
             return Collections.emptyList();
         }
-
         if (featureNames.size() != dimensionCount) {
             throw new IllegalArgumentException(
                     "Training data contains "
@@ -745,29 +633,49 @@ public final class StandardizationFitter {
             );
         }
 
-        List<String> copy =
-                new ArrayList<>(
-                        featureNames.size()
-                );
-
+        List<String> copy = new ArrayList<>(featureNames.size());
         for (String featureName : featureNames) {
-            if (featureName == null
-                    || featureName.isBlank()) {
-
+            if (featureName == null || featureName.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Standardization feature names cannot be "
-                                + "null or blank."
+                        "Standardization feature names cannot be null or "
+                                + "blank."
                 );
             }
+            copy.add(featureName.trim());
+        }
+        return Collections.unmodifiableList(copy);
+    }
 
-            copy.add(
-                    featureName.trim()
+    private static void requireReusableMethod(
+            StandardizationMethod method
+    ) {
+        if (method == StandardizationMethod.NONE) {
+            throw new IllegalArgumentException(
+                    "StandardizationFitter should not be invoked for "
+                            + "StandardizationMethod.NONE."
             );
         }
+        if (method == StandardizationMethod.ROBUST) {
+            throw new UnsupportedOperationException(
+                    "ROBUST standardization is recognized but its quantile "
+                            + "convention and fitting strategy are not yet "
+                            + "implemented."
+            );
+        }
+    }
 
-        return Collections.unmodifiableList(
-                copy
-        );
+    private static void requireReusableScope(
+            StandardizationScope scope
+    ) {
+        if (!scope.usesTrainingStatistics()) {
+            throw new IllegalArgumentException(
+                    "StandardizationFitter fits reusable training statistics "
+                            + "only for GLOBAL and PER_DIMENSION. Scope "
+                            + scope
+                            + " calculates local parameters during each "
+                            + "series transformation."
+            );
+        }
     }
 
     private static void requirePositiveDimensionCount(
@@ -775,8 +683,8 @@ public final class StandardizationFitter {
     ) {
         if (dimensionCount < 1) {
             throw new IllegalArgumentException(
-                    "Numeric data must contain at least one "
-                            + "realized dimension."
+                    "Numeric data must contain at least one realized "
+                            + "dimension."
             );
         }
     }
@@ -784,19 +692,9 @@ public final class StandardizationFitter {
     private static void requireUnivariateCompatibility(
             int expectedDimensionCount
     ) {
-        requireExpectedDimensionCount(
-                1,
-                expectedDimensionCount
-        );
+        requireExpectedDimensionCount(1, expectedDimensionCount);
     }
 
-    /**
-     * Validates the realized dimension count.
-     *
-     * <p>For PER_DIMENSION one-dimensional data, this compares the current
-     * tabular row length with the feature count established from the first
-     * realized row.</p>
-     */
     private static void requireExpectedDimensionCount(
             int actual,
             int expected
@@ -807,10 +705,19 @@ public final class StandardizationFitter {
                             + actual
                             + " realized dimensions or features; expected "
                             + expected
-                            + ". PER_DIMENSION tabular rows must have "
-                            + "consistent lengths."
+                            + ". PER_DIMENSION tabular rows and multivariate "
+                            + "series must have consistent realized "
+                            + "dimension counts."
             );
         }
+    }
+
+    private static UnsupportedOperationException lazyFittingUnsupported() {
+        return new UnsupportedOperationException(
+                "StandardizationFitter requires eager realized data. Lazy "
+                        + "training standardization currently requires "
+                        + "externally supplied reusable statistics."
+        );
     }
 
     private static IllegalArgumentException unsupportedSeriesType(
@@ -819,8 +726,52 @@ public final class StandardizationFitter {
         return new IllegalArgumentException(
                 "Unsupported standardization training type: "
                         + instance.getClass().getTypeName()
-                        + ". Expected double[], float[], double[][], "
-                        + "or float[][]."
+                        + ". Expected double[], float[], double[][], or "
+                        + "float[][]."
         );
+    }
+
+    /**
+     * Small internal abstraction that shares representation traversal without
+     * boxing values or branching on the fitting method in the innermost loop.
+     */
+    private interface ValueSink {
+        void add(int group, double value);
+    }
+
+    private static final class MomentSink implements ValueSink {
+        private final OnlineMoments[] moments;
+
+        private MomentSink(
+                OnlineMoments[] moments
+        ) {
+            this.moments = moments;
+        }
+
+        @Override
+        public void add(
+                int group,
+                double value
+        ) {
+            moments[group].add(value);
+        }
+    }
+
+    private static final class RangeSink implements ValueSink {
+        private final OnlineRange[] ranges;
+
+        private RangeSink(
+                OnlineRange[] ranges
+        ) {
+            this.ranges = ranges;
+        }
+
+        @Override
+        public void add(
+                int group,
+                double value
+        ) {
+            ranges[group].add(value);
+        }
     }
 }

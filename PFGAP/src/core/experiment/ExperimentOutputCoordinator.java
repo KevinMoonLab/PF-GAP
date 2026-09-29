@@ -4,9 +4,16 @@ import core.AppContext;
 import core.ForestPredictionResult;
 import core.ProximityForestResult;
 import datasets.ListObjectDataset;
+import datasets.readers.ReaderType;
+import datasets.writers.DatasetWriteOptions;
+import datasets.writers.DatasetWriter;
+import datasets.writers.DatasetWriterFactory;
+import imputation.results.ImputedValuesCSR;
+import imputation.results.ImputedValuesCSRBuilder;
+import imputation.util.MissingIndices;
 import output.ExperimentResultWriter;
 import output.PredictionWriter;
-import util.GeneralUtilities;
+import preprocessing.standardization.PerSeriesStandardizationState;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -164,36 +171,131 @@ public final class ExperimentOutputCoordinator {
         );
     }
 
-    /** Writes prepared training data when imputed output was requested. */
+    /** Writes the complete imputed training dataset in its mirror format. */
     public void writeTrainingDataWhenRequested(
-            ListObjectDataset trainingData
+            ListObjectDataset data,
+            List<PerSeriesStandardizationState> states
     ) throws IOException {
-        Objects.requireNonNull(trainingData, "Training data cannot be null.");
-        if (!AppContext.impute_train) {
-            return;
-        }
-        GeneralUtilities.writeDelimitedData(
-                trainingData.getData(),
-                AppContext.output_dir + AppContext.training_file,
-                AppContext.array_separator,
-                AppContext.entry_separator
-        );
+        writeDataset(data, states, AppContext.getTrainingReaderType(),
+                Path.of(AppContext.output_dir + AppContext.training_file),
+                AppContext.impute_train, "training");
     }
 
-    /** Writes prepared testing data when imputed output was requested. */
+    public void writeTrainingDataWhenRequested(ListObjectDataset data)
+            throws IOException {
+        writeTrainingDataWhenRequested(data, List.of());
+    }
+
+    /** Writes the complete imputed testing dataset in its mirror format. */
     public void writeTestingDataWhenRequested(
-            ListObjectDataset testingData
+            ListObjectDataset data,
+            List<PerSeriesStandardizationState> states
     ) throws IOException {
-        Objects.requireNonNull(testingData, "Testing data cannot be null.");
-        if (!AppContext.impute_test) {
-            return;
+        writeDataset(data, states, AppContext.getTestingReaderType(),
+                Path.of(AppContext.output_dir + AppContext.testing_file),
+                AppContext.impute_test, "testing");
+    }
+
+    public void writeTestingDataWhenRequested(ListObjectDataset data)
+            throws IOException {
+        writeTestingDataWhenRequested(data, List.of());
+    }
+
+    /** Builds a reader-independent CSR containing originally missing cells. */
+    public ImputedValuesCSR buildImputedValuesCsr(
+            ListObjectDataset data,
+            MissingIndices missing,
+            List<PerSeriesStandardizationState> states
+    ) {
+        Objects.requireNonNull(data, "Imputed dataset cannot be null.");
+        Objects.requireNonNull(missing, "MissingIndices cannot be null.");
+        validateStates(data, states, "imputed-output");
+        return ImputedValuesCSRBuilder.build(
+                data, missing,
+                states.isEmpty() ? AppContext.standardizationStats : null,
+                states);
+    }
+
+    /** Builds and writes the imputed-only CSR as Matrix Market coordinate data. */
+    public Path writeImputedValuesMatrixMarket(
+            ListObjectDataset data,
+            MissingIndices missing,
+            List<PerSeriesStandardizationState> states,
+            Path path,
+            String description
+    ) throws IOException {
+        Objects.requireNonNull(path, "Matrix Market path cannot be null.");
+        return buildImputedValuesCsr(data, missing, states)
+                .writeMatrixMarket(path, description);
+    }
+
+    private void writeDataset(
+            ListObjectDataset data,
+            List<PerSeriesStandardizationState> states,
+            ReaderType readerType,
+            Path path,
+            boolean requested,
+            String role
+    ) throws IOException {
+        Objects.requireNonNull(data, role + " data cannot be null.");
+        validateStates(data, states, role);
+        if (!requested) return;
+        DatasetWriteOptions options = options(data, states, readerType, path);
+        DatasetWriter writer = DatasetWriterFactory.createFor(
+                readerType, data, options);
+        writer.write(data, options);
+    }
+
+    private static DatasetWriteOptions options(
+            ListObjectDataset data,
+            List<PerSeriesStandardizationState> states,
+            ReaderType readerType,
+            Path path
+    ) {
+        String name = readerType.name().toUpperCase();
+        boolean longForm = name.contains("LONG");
+        boolean matrix = isMatrix(data);
+        DatasetWriteOptions.DataLayout layout = longForm
+                ? DatasetWriteOptions.DataLayout.LONG_FORM
+                : matrix
+                ? DatasetWriteOptions.DataLayout.MULTIVARIATE_SERIES
+                : DatasetWriteOptions.DataLayout.AUTO;
+        List<String> features = AppContext.feature_columns == null
+                ? List.of() : List.copyOf(AppContext.feature_columns);
+        DatasetWriteOptions.Builder builder = DatasetWriteOptions.builder(path)
+                .setDataLayout(layout)
+                .setEntrySeparator(AppContext.entry_separator)
+                .setArraySeparator(AppContext.array_separator)
+                .setIncludeHeader(!longForm && AppContext.csv_has_header
+                        && !features.isEmpty())
+                .setFeatureNames(features);
+        if (states.isEmpty()) {
+            builder.setReusableStatistics(AppContext.standardizationStats);
+        } else {
+            builder.setPerSeriesStates(states);
         }
-        GeneralUtilities.writeDelimitedData(
-                testingData.getData(),
-                AppContext.output_dir + AppContext.testing_file,
-                AppContext.array_separator,
-                AppContext.entry_separator
-        );
+        return builder.build();
+    }
+
+    private static boolean isMatrix(ListObjectDataset data) {
+        if (data.getData() == null || data.getData().isEmpty()) return false;
+        Object first = data.getData().get(0);
+        return first instanceof double[][] || first instanceof float[][]
+                || first instanceof Object[][];
+    }
+
+    private static void validateStates(
+            ListObjectDataset data,
+            List<PerSeriesStandardizationState> states,
+            String role
+    ) {
+        Objects.requireNonNull(states, "Standardization states cannot be null.");
+        if (!states.isEmpty() && states.size() != data.size()) {
+            throw new IllegalArgumentException(
+                    role + " data contain " + data.size()
+                            + " instances, but " + states.size()
+                            + " per-series states were supplied.");
+        }
     }
 
     /** Writes all accumulated experiment records when export is enabled. */

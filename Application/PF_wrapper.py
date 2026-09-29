@@ -282,6 +282,10 @@ def train(
     impute_iterations=5,
     return_imputed_training=False,
     return_imputed_testing=False,
+    return_imputed_training_csr=False,
+    return_imputed_testing_csr=False,
+    training_imputed_csr_file=None,
+    testing_imputed_csr_file=None,
     initial_imputer="mean",
     knn_distances=None,
     DTWImpute=False,
@@ -329,6 +333,8 @@ def train(
         ("return_enhanced_outputs", return_enhanced_outputs),
         ("return_ood_scores", return_ood_scores),
         ("collect_split_distance_summaries", collect_split_distance_summaries),
+        ("return_imputed_training_csr", return_imputed_training_csr),
+        ("return_imputed_testing_csr", return_imputed_testing_csr),
     ):
         if not isinstance(value, (bool, np.bool_)):
             raise TypeError(f"{name} must be a boolean.")
@@ -366,6 +372,8 @@ def train(
         has_missing_values = (
             impute_training_data
             or impute_testing_data
+            or return_imputed_training_csr
+            or return_imputed_testing_csr
             or imputation_initialization == "proximity_first"
             or missing_proximity_distances is not None
         )
@@ -382,14 +390,22 @@ def train(
 
     if return_imputed_testing and not impute_testing_data:
         impute_testing_data = True
+    if return_imputed_training_csr and not impute_training_data:
+        impute_training_data = True
+    if return_imputed_testing_csr and not impute_testing_data:
+        impute_testing_data = True
         
     _validate_lazy_reader_options(
         reader_type=reader_type,
         file_pattern=file_pattern,
         impute_training_data=impute_training_data,
         impute_testing_data=impute_testing_data,
-        return_imputed_training=return_imputed_training,
-        return_imputed_testing=return_imputed_testing,
+        return_imputed_training=(
+            return_imputed_training or return_imputed_training_csr
+        ),
+        return_imputed_testing=(
+            return_imputed_testing or return_imputed_testing_csr
+        ),
     )
     
     normalized_dimension_selection_strategy = (
@@ -457,6 +473,8 @@ def train(
         "-numImputes=" + str(impute_iterations),
         "-impute_train=" + _bool(return_imputed_training),
         "-impute_test=" + _bool(return_imputed_testing),
+        "-output_train_imputed_csr=" + _bool(return_imputed_training_csr),
+        "-output_test_imputed_csr=" + _bool(return_imputed_testing_csr),
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),
@@ -514,6 +532,8 @@ def train(
     
     _append_if_not_none(msgList, "standardization_stats", standardization_stats)
     _append_if_not_none(msgList, "standardization_stats_output", standardization_stats_output)
+    _append_if_not_none(msgList, "train_imputed_csr_file", training_imputed_csr_file)
+    _append_if_not_none(msgList, "test_imputed_csr_file", testing_imputed_csr_file)
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
@@ -579,6 +599,8 @@ def predict(
     impute_testing_data=False,
     impute_iterations=5,
     return_imputed_testing=False,
+    return_imputed_testing_csr=False,
+    testing_imputed_csr_file=None,
     initial_imputer="mean",
     DTWImpute=False,
     gap_update=None,
@@ -594,6 +616,7 @@ def predict(
         ("return_predictions", return_predictions),
         ("return_enhanced_outputs", return_enhanced_outputs),
         ("return_ood_scores", return_ood_scores),
+        ("return_imputed_testing_csr", return_imputed_testing_csr),
     ):
         if not isinstance(value, (bool, np.bool_)):
             raise TypeError(f"{name} must be a boolean.")
@@ -607,6 +630,7 @@ def predict(
     if has_missing_values is None:
         has_missing_values = (
             impute_testing_data
+            or return_imputed_testing_csr
             or imputation_initialization == "proximity_first"
             or missing_proximity_distances is not None
         )
@@ -614,12 +638,16 @@ def predict(
     # you must impute the data if you want imputed data returned.
     if return_imputed_testing and not impute_testing_data:
         impute_testing_data = True
+    if return_imputed_testing_csr and not impute_testing_data:
+        impute_testing_data = True
         
     _validate_lazy_reader_options(
         reader_type=reader_type,
         file_pattern=file_pattern,
         impute_testing_data=impute_testing_data,
-        return_imputed_testing=return_imputed_testing,
+        return_imputed_testing=(
+            return_imputed_testing or return_imputed_testing_csr
+        ),
     )
 
     if gap_update is None:
@@ -671,6 +699,7 @@ def predict(
         "-perform_test_imputation=" + _bool(impute_testing_data),
         "-numImputes=" + str(impute_iterations),
         "-impute_test=" + _bool(return_imputed_testing),
+        "-output_test_imputed_csr=" + _bool(return_imputed_testing_csr),
 
         "-DTWImpute=" + _bool(DTWImpute),
         "-imputation_initialization=" + imputation_initialization,
@@ -704,6 +733,9 @@ def predict(
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
 
+    _append_if_not_none(
+        msgList, "test_imputed_csr_file", testing_imputed_csr_file
+    )
     return subprocess.call(msgList)
 
 

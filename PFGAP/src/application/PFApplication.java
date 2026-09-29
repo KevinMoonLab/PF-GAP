@@ -616,6 +616,22 @@ public class PFApplication {
 					case "-impute_test": // should we *return* imputed test set?
 						AppContext.impute_test = Boolean.parseBoolean(options[1]);
 						break;
+					case "-output_train_imputed_csr":
+						AppContext.output_train_imputed_csr =
+								Boolean.parseBoolean(options[1]);
+						break;
+					case "-output_test_imputed_csr":
+						AppContext.output_test_imputed_csr =
+								Boolean.parseBoolean(options[1]);
+						break;
+					case "-train_imputed_csr_file":
+						AppContext.train_imputed_csr_file =
+								parseNullableString(options[1]);
+						break;
+					case "-test_imputed_csr_file":
+						AppContext.test_imputed_csr_file =
+								parseNullableString(options[1]);
+						break;
 					case "-perform_train_imputation": // should we impute train data?
 						AppContext.perform_train_imputation =
 								Boolean.parseBoolean(options[1]);
@@ -998,6 +1014,14 @@ public class PFApplication {
 				}
 			}
 
+			if (AppContext.output_train_imputed_csr) {
+				AppContext.perform_train_imputation = true;
+				AppContext.hasMissingValues = true;
+			}
+			if (AppContext.output_test_imputed_csr) {
+				AppContext.perform_test_imputation = true;
+				AppContext.hasMissingValues = true;
+			}
 			validateDimensionSelectionConfiguration();
 			AppContext.validateEvaluationOutputConfiguration();
 
