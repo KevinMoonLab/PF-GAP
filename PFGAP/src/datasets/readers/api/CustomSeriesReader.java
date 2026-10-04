@@ -5,100 +5,115 @@ import datasets.readers.lazy.LazySeriesRef;
 import java.io.IOException;
 
 /**
- * Public plugin interface for user-defined instance readers.
+ * Public plugin contract for materializing one dataset observation.
  *
- * <p>A CustomSeriesReader materializes exactly one dataset instance from a
- * {@link LazySeriesRef}. The same implementation can be used by both eager
- * and lazy per-file dataset readers:</p>
+ * <p>The same plugin can be used by eager and lazy custom dataset readers.
+ * Eager readers invoke {@link #read(LazySeriesRef, CustomReaderContext)} while
+ * constructing the dataset. Lazy readers invoke it only when an observation
+ * is requested.</p>
  *
- * <ul>
- *     <li>
- *         An eager custom per-file reader invokes this method while building
- *         the dataset.
- *     </li>
- *     <li>
- *         A lazy custom per-file reader invokes this method only when a
- *         distance calculation requests the referenced instance.
- *     </li>
- * </ul>
+ * <h2>Source location</h2>
  *
- * <p>The initial supported use case is one file per instance, including
- * proprietary binary formats. In that case, the implementation normally
- * reads:</p>
+ * <p>The complete {@link LazySeriesRef} is supplied rather than only a file
+ * path. Current per-file plugins normally read {@code reference.getFile()}.
+ * Plugins should also use {@code reference.getIndex()} when the observation
+ * index is meaningful. Supplying the complete reference keeps this contract
+ * compatible with future non-file locators, byte ranges, record identifiers,
+ * and shared-container readers.</p>
  *
- * <pre>
- * reference.getFile()
- * </pre>
+ * <h2>Configuration</h2>
  *
- * <p>The complete reference is supplied instead of only a Path so this API
- * remains compatible with future additions to LazySeriesRef, such as
- * instance metadata, byte offsets, record identifiers, or other
- * serializable locator information.</p>
+ * <p>Reader-specific configuration is supplied through the immutable
+ * {@link CustomReaderContext}. Implementations should not read mutable global
+ * PFGAP configuration when the required setting can be obtained from the
+ * context.</p>
  *
- * <p>Reader-specific configuration is supplied through
- * {@link CustomReaderContext}. Implementations should not access mutable
- * PFGAP global configuration when the required information can be supplied
- * through the context.</p>
+ * <h2>Returned representation</h2>
  *
- * <p>The returned object must contain raw instance values. Implementations
- * should not apply PFGAP standardization themselves. When standardization is
- * enabled and the custom reader is configured as numeric, PFGAP applies the
- * prepared training statistics after this method returns. This rule is the
- * same for eager and lazy custom readers and prevents transformation from
- * being applied twice.</p>
+ * <p>The returned object must be non-null and contain raw observation values.
+ * A custom reader must not apply PFGAP standardization itself. When built-in
+ * standardization is configured, PFGAP applies the prepared training
+ * statistics after this method returns.</p>
  *
- * <p>Built-in standardization currently requires one of these realized
- * numeric representations:</p>
+ * <p>Standard numeric PFGAP representations are:</p>
  *
  * <pre>
- * double[]
- * Double[]
- * double[][]
- * Double[][]
+ * float[time]
+ * double[time]
+ * float[dimension][time]
+ * double[dimension][time]
  * </pre>
+ *
+ * <p>Built-in standardization supports these primitive one-dimensional and
+ * two-dimensional numeric representations. Numeric missing values should be
+ * represented by primitive {@code NaN}. Boxed numeric arrays are not part of
+ * the standard numeric contract.</p>
+ *
+ * <p>Standard generic PFGAP representations are:</p>
+ *
+ * <pre>
+ * Object[time]
+ * Object[dimension][time]
+ * </pre>
+ *
+ * <p>Generic missing values should be represented by {@code null}.</p>
+ *
+ * <h3>Per-file custom readers</h3>
+ *
+ * <p>When this plugin is used through {@code CustomPerFileReader} or
+ * {@code LazyCustomPerFileReader}, the per-file time-series contract is more
+ * specific: the plugin must preserve the dimension axis and return a
+ * two-dimensional representation:</p>
+ *
+ * <pre>
+ * float[dimension][time]
+ * double[dimension][time]
+ * Object[dimension][time]
+ * </pre>
+ *
+ * <p>A univariate per-file series therefore remains {@code [1][time]}. The
+ * per-file coordinators are responsible for enforcing this narrower contract.</p>
  *
  * <p>A proprietary representation remains valid when built-in
- * standardization is disabled and the configured distance functions
- * understand that representation.</p>
+ * standardization is disabled and every configured consumer, including
+ * distance functions, explicitly supports that representation.</p>
  *
- * <p>The returned object may otherwise use any representation understood by
- * the configured distance functions. Common PFGAP representations include:</p>
+ * <h2>Serialization and lifecycle</h2>
  *
- * <pre>
- * double[]
- * Double[]
- * Object[]
- * double[][]
- * Double[][]
- * Object[][]
- * </pre>
- *
- * <p>The interface does not require Serializable. Runtime reader instances,
- * class loaders, open files, memory mappings, and caches are not serialized.
- * Saved lazy models instead retain the plugin descriptor and reader
- * parameters, then reconstruct the plugin in a new JVM.</p>
+ * <p>The plugin implementation does not need to implement
+ * {@link java.io.Serializable}. Runtime instances, class loaders, open files,
+ * memory mappings, and caches are not serialized. Saved lazy models retain
+ * the plugin descriptor and serializable reader configuration, then recreate
+ * the plugin in a new JVM.</p>
  *
  * <p>Implementations must provide an accessible no-argument constructor so
- * the Java plugin loader can instantiate them reflectively.</p>
+ * the plugin loader can instantiate them reflectively. Resources owned by the
+ * runtime adapter are released when the registered reader is replaced or the
+ * lazy-reader registry is cleared.</p>
  *
  * <h2>Thread safety</h2>
  *
- * <p>PFGAP may eventually invoke this method concurrently for distinct
- * references when parallel execution is enabled. Implementations should keep
- * per-read mutable state inside this method. Shared immutable lookup tables
- * are safe. A later adapter option will allow non-thread-safe plugins to be
- * synchronized without changing this interface.</p>
+ * <p>PFGAP may invoke one plugin instance concurrently for different
+ * references. Thread-safe implementations should keep mutable per-read state
+ * local to this method and use immutable or safely concurrent shared caches.
+ * Plugins declared non-thread-safe are synchronized by the runtime adapter;
+ * implementations must not add unnecessary global synchronization.</p>
+ *
+ * <p>Implementations should preserve interruption status when wrapping an
+ * interruption-related failure and should include useful source information
+ * in thrown exceptions. The runtime adapter adds reader-key and reference
+ * context when propagating plugin failures.</p>
  */
+@FunctionalInterface
 public interface CustomSeriesReader {
 
     /**
-     * Materializes one dataset instance.
+     * Materializes one raw dataset observation.
      *
-     * @param reference reference identifying the instance to read
-     * @param context immutable configuration for this reader
-     * @return non-null raw instance representation; PFGAP applies any
-     *         configured built-in standardization after return
-     * @throws IOException if the underlying data cannot be read
+     * @param reference non-null reference identifying the observation
+     * @param context non-null immutable plugin configuration
+     * @return non-null raw observation representation
+     * @throws IOException if the source cannot be read or decoded
      */
     Object read(
             LazySeriesRef reference,

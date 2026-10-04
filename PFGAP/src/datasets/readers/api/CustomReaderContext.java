@@ -1,5 +1,7 @@
 package datasets.readers.api;
 
+import datasets.NumericStorageType;
+
 import java.io.Serial;
 import java.io.Serializable;
 import java.nio.file.Path;
@@ -11,7 +13,8 @@ import java.util.*;
  * <p>This context intentionally exposes only stable reader-facing
  * information rather than the complete internal ReaderOptions object.
  * Custom readers are therefore insulated from changes to PFGAP's internal
- * reader configuration.</p>
+ * reader configuration. Numeric plugins can also inspect the requested
+ * primitive storage type without consulting global state.</p>
  *
  * <p>Format-specific settings are supplied through a string parameter map.
  * Typical parameters for a proprietary binary reader might include:</p>
@@ -41,6 +44,7 @@ public final class CustomReaderContext
     private final boolean regression;
     private final boolean numeric;
     private final boolean hasMissingValues;
+    private final NumericStorageType numericStorageType;
     private final Map<String, String> parameters;
     private final List<String> featureColumns;
 
@@ -71,6 +75,29 @@ public final class CustomReaderContext
             List<String> featureColumns,
             Map<String, String> parameters
     ) {
+        this(
+                dataPath, test, regression, numeric, hasMissingValues,
+                featureColumns, parameters, NumericStorageType.AUTO
+        );
+    }
+
+    /**
+     * Creates a complete immutable custom-reader context.
+     *
+     * @param numericStorageType requested primitive numeric representation;
+     *                           AUTO preserves the source reader's natural
+     *                           float32 or float64 precision
+     */
+    public CustomReaderContext(
+            Path dataPath,
+            boolean test,
+            boolean regression,
+            boolean numeric,
+            boolean hasMissingValues,
+            List<String> featureColumns,
+            Map<String, String> parameters,
+            NumericStorageType numericStorageType
+    ) {
         this.dataPath =
                 dataPath;
 
@@ -85,6 +112,11 @@ public final class CustomReaderContext
 
         this.hasMissingValues =
                 hasMissingValues;
+
+        this.numericStorageType =
+                numericStorageType == null
+                        ? NumericStorageType.AUTO
+                        : numericStorageType;
 
         this.featureColumns =
                 copyFeatureColumns(
@@ -184,6 +216,18 @@ public final class CustomReaderContext
 
     public boolean hasMissingValues() {
         return hasMissingValues;
+    }
+
+    /**
+     * Returns the requested primitive numeric representation.
+     *
+     * <p>Contexts serialized before this field was introduced receive null
+     * and therefore resolve to AUTO.</p>
+     */
+    public NumericStorageType getNumericStorageType() {
+        return numericStorageType == null
+                ? NumericStorageType.AUTO
+                : numericStorageType;
     }
 
     public List<String> getFeatureColumns() {
@@ -502,27 +546,24 @@ public final class CustomReaderContext
             return List.of();
         }
 
-        List<String> copy =
-                new ArrayList<>(
-                        featureColumns.size()
-                );
-
+        List<String> copy = new ArrayList<>(featureColumns.size());
+        Set<String> used = new HashSet<>();
         for (String featureColumn : featureColumns) {
             if (featureColumn == null || featureColumn.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Custom-reader feature columns cannot contain "
-                                + "null or blank names."
+                        "Custom-reader feature columns cannot be null or blank."
                 );
             }
-
-            copy.add(
-                    featureColumn.trim()
-            );
+            String normalized = featureColumn.trim();
+            if (!used.add(normalized)) {
+                throw new IllegalArgumentException(
+                        "Custom-reader feature column was selected more than "
+                                + "once: " + normalized
+                );
+            }
+            copy.add(normalized);
         }
-
-        return Collections.unmodifiableList(
-                copy
-        );
+        return Collections.unmodifiableList(copy);
     }
 
     private static Map<String, String> normalizeParameters(
@@ -763,6 +804,8 @@ public final class CustomReaderContext
                 + numeric
                 + ", hasMissingValues="
                 + hasMissingValues
+                + ", numericStorageType="
+                + getNumericStorageType()
                 + ", featureColumns="
                 + featureColumns
                 + ", parameterNames="

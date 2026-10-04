@@ -2,7 +2,9 @@ package datasets.readers.lazy;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import datasets.readers.DatasetReader;
+import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
 import preprocessing.standardization.StandardizationStats;
@@ -13,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -39,7 +42,7 @@ import java.util.stream.Stream;
  * <p>Materialized representation:</p>
  *
  * <pre>
- * double[dimension][time]
+ * float[dimension][time] or double[dimension][time]
  * </pre>
  *
  * <p>This reader is deliberately specialized for numeric files without
@@ -111,6 +114,7 @@ public class LazyPerFileNumericDelimitedReader
     private final String readerKey;
     private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
+    private final NumericStorageType numericStorageType;
 
     /**
      * Constructs the reader from ordinary PFGAP reader options.
@@ -138,7 +142,8 @@ public class LazyPerFileNumericDelimitedReader
                         ? "test"
                         : "train",
                 options.getStandardizationStats(),
-                DEFAULT_INITIAL_TIME_CAPACITY
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                options.getNumericStorageType()
         );
 
         if (!options.isNumeric()) {
@@ -180,7 +185,8 @@ public class LazyPerFileNumericDelimitedReader
                 filePattern,
                 readerKey,
                 standardizationStats,
-                DEFAULT_INITIAL_TIME_CAPACITY
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericStorageType.AUTO
         );
     }
 
@@ -202,6 +208,29 @@ public class LazyPerFileNumericDelimitedReader
             String readerKey,
             StandardizationStats standardizationStats,
             int initialTimeCapacity
+    ) {
+        this(
+                dataPath, entrySeparator, hasHeader, timeColumn,
+                featureColumns, filePattern, readerKey,
+                standardizationStats, initialTimeCapacity,
+                NumericStorageType.AUTO
+        );
+    }
+
+    /**
+     * Constructs the reader with explicit capacity and numeric storage type.
+     */
+    public LazyPerFileNumericDelimitedReader(
+            String dataPath,
+            String entrySeparator,
+            boolean hasHeader,
+            String timeColumn,
+            List<String> featureColumns,
+            String filePattern,
+            String readerKey,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            NumericStorageType numericStorageType
     ) {
         this.dataPath =
                 normalizeNullableString(
@@ -259,6 +288,12 @@ public class LazyPerFileNumericDelimitedReader
         this.initialTimeCapacity =
                 initialTimeCapacity;
 
+        this.numericStorageType =
+                Objects.requireNonNull(
+                        numericStorageType,
+                        "numericStorageType cannot be null."
+                );
+
         validateConstructionOptions();
     }
 
@@ -299,7 +334,10 @@ public class LazyPerFileNumericDelimitedReader
                         entrySeparator,
                         hasHeader,
                         standardizationStats,
-                        initialTimeCapacity
+                        initialTimeCapacity,
+                        numericStorageType,
+                        NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                                .FILE_ORDER
                 );
 
         AppContext.registerLazySeriesReader(
@@ -346,6 +384,7 @@ public class LazyPerFileNumericDelimitedReader
         dataset.setLength(
                 0
         );
+        AppContext.length = 0;
 
         return dataset;
     }

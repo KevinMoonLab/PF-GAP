@@ -1,5 +1,7 @@
 package datasets.readers.lazy;
 
+import datasets.NumericStorageType;
+import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderType;
 import preprocessing.standardization.StandardizationStats;
 
@@ -61,6 +63,9 @@ public final class LazySeriesReaderSpec
      * DEFAULT_INITIAL_TIME_CAPACITY.</p>
      */
     private final int initialTimeCapacity;
+    private final NumericStorageType numericStorageType;
+    private final NumericPerFileParquetSeriesReader.TimeOrderPolicy
+            parquetTimeOrderPolicy;
 
     /*
      * Custom-reader reconstruction fields.
@@ -74,6 +79,77 @@ public final class LazySeriesReaderSpec
     private final String customReaderDataPath;
     private final boolean customReaderTest;
     private final boolean customReaderRegression;
+
+    /**
+     * Backward-compatible complete constructor for custom readers.
+     */
+    public LazySeriesReaderSpec(
+            String readerKey, ReaderType readerType, String timeColumn,
+            List<String> featureColumns, boolean numeric,
+            boolean hasMissingValues, String entrySeparator,
+            boolean hasHeader, StandardizationStats standardizationStats,
+            int initialTimeCapacity, String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean customReaderThreadSafe, String customReaderDataPath,
+            boolean customReaderTest, boolean customReaderRegression
+    ) {
+        this(readerKey, readerType, timeColumn, featureColumns, numeric,
+                hasMissingValues, entrySeparator, hasHeader,
+                standardizationStats, initialTimeCapacity,
+                NumericStorageType.AUTO,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
+                customReaderDescriptor, customReaderParameters,
+                customReaderThreadSafe, customReaderDataPath,
+                customReaderTest, customReaderRegression);
+    }
+
+    /**
+     * Complete custom-reader constructor with numeric storage selection.
+     *
+     * <p>Custom readers do not use Parquet row-order policy, so this overload
+     * supplies {@code FILE_ORDER} internally rather than exposing an unrelated
+     * Parquet option at the custom-reader call site.</p>
+     */
+    public LazySeriesReaderSpec(
+            String readerKey,
+            ReaderType readerType,
+            String timeColumn,
+            List<String> featureColumns,
+            boolean numeric,
+            boolean hasMissingValues,
+            String entrySeparator,
+            boolean hasHeader,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            NumericStorageType numericStorageType,
+            String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean customReaderThreadSafe,
+            String customReaderDataPath,
+            boolean customReaderTest,
+            boolean customReaderRegression
+    ) {
+        this(
+                readerKey,
+                readerType,
+                timeColumn,
+                featureColumns,
+                numeric,
+                hasMissingValues,
+                entrySeparator,
+                hasHeader,
+                standardizationStats,
+                initialTimeCapacity,
+                numericStorageType,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
+                customReaderDescriptor,
+                customReaderParameters,
+                customReaderThreadSafe,
+                customReaderDataPath,
+                customReaderTest,
+                customReaderRegression
+        );
+    }
 
     /**
      * Complete constructor, including custom-reader reconstruction
@@ -92,6 +168,9 @@ public final class LazySeriesReaderSpec
             boolean hasHeader,
             StandardizationStats standardizationStats,
             int initialTimeCapacity,
+            NumericStorageType numericStorageType,
+            NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                    parquetTimeOrderPolicy,
             String customReaderDescriptor,
             Map<String, String> customReaderParameters,
             boolean customReaderThreadSafe,
@@ -151,6 +230,16 @@ public final class LazySeriesReaderSpec
         this.initialTimeCapacity =
                 initialTimeCapacity;
 
+        this.numericStorageType =
+                numericStorageType == null
+                        ? NumericStorageType.AUTO
+                        : numericStorageType;
+
+        this.parquetTimeOrderPolicy =
+                parquetTimeOrderPolicy == null
+                        ? NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER
+                        : parquetTimeOrderPolicy;
+
         this.customReaderDescriptor =
                 normalizeNullableString(
                         customReaderDescriptor
@@ -205,6 +294,8 @@ public final class LazySeriesReaderSpec
                 hasHeader,
                 standardizationStats,
                 initialTimeCapacity,
+                NumericStorageType.AUTO,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
                 null,
                 Map.of(),
                 false,
@@ -212,6 +303,25 @@ public final class LazySeriesReaderSpec
                 false,
                 false
         );
+    }
+
+    /**
+     * Complete constructor for built-in lazy per-file readers.
+     */
+    public LazySeriesReaderSpec(
+            String readerKey, ReaderType readerType, String timeColumn,
+            List<String> featureColumns, boolean numeric,
+            boolean hasMissingValues, String entrySeparator,
+            boolean hasHeader, StandardizationStats standardizationStats,
+            int initialTimeCapacity, NumericStorageType numericStorageType,
+            NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                    parquetTimeOrderPolicy
+    ) {
+        this(readerKey, readerType, timeColumn, featureColumns, numeric,
+                hasMissingValues, entrySeparator, hasHeader,
+                standardizationStats, initialTimeCapacity, numericStorageType,
+                parquetTimeOrderPolicy, null, Map.of(), false, null, false,
+                false);
     }
 
     /**
@@ -239,6 +349,8 @@ public final class LazySeriesReaderSpec
                 hasHeader,
                 standardizationStats,
                 DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericStorageType.AUTO,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
                 null,
                 Map.of(),
                 false,
@@ -272,6 +384,8 @@ public final class LazySeriesReaderSpec
                 false,
                 standardizationStats,
                 DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericStorageType.AUTO,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
                 null,
                 Map.of(),
                 false,
@@ -304,6 +418,8 @@ public final class LazySeriesReaderSpec
                 false,
                 null,
                 DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericStorageType.AUTO,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
                 null,
                 Map.of(),
                 false,
@@ -377,6 +493,27 @@ public final class LazySeriesReaderSpec
 
     public boolean hasExplicitInitialTimeCapacity() {
         return initialTimeCapacity > 0;
+    }
+
+    /**
+     * Returns the effective numeric storage type. Older serialized specs
+     * resolve their absent field to AUTO.
+     */
+    public NumericStorageType getNumericStorageType() {
+        return numericStorageType == null
+                ? NumericStorageType.AUTO
+                : numericStorageType;
+    }
+
+    /**
+     * Returns the effective numeric Parquet ordering policy. Older serialized
+     * specs preserve historical FILE_ORDER behavior.
+     */
+    public NumericPerFileParquetSeriesReader.TimeOrderPolicy
+    getParquetTimeOrderPolicy() {
+        return parquetTimeOrderPolicy == null
+                ? NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER
+                : parquetTimeOrderPolicy;
     }
 
     /**
@@ -526,6 +663,10 @@ public final class LazySeriesReaderSpec
                 + hasStandardizationStats()
                 + ", initialTimeCapacity="
                 + getInitialTimeCapacity()
+                + ", numericStorageType="
+                + getNumericStorageType()
+                + ", parquetTimeOrderPolicy="
+                + getParquetTimeOrderPolicy()
                 + ", explicitInitialTimeCapacity="
                 + hasExplicitInitialTimeCapacity()
                 + ", customReader="

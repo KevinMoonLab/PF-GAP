@@ -5,193 +5,183 @@ import preprocessing.standardization.Standardizer;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Decorates a lazy series reader with PFGAP standardization.
  *
- * <p>The delegate is responsible for materializing one raw instance. This
- * decorator applies already prepared training statistics exactly once after
- * materialization and before returning the instance to the caller.</p>
+ * <p>The delegate materializes one raw observation. This decorator applies
+ * prepared training statistics exactly once, in place, before returning that
+ * observation. It does not fit, load, save, or mutate the statistics.</p>
  *
- * <p>This class does not fit, load, save, or mutate the statistics. Those
- * workflow responsibilities belong to the standardization pipeline. The
- * statistics supplied here must therefore already be final and compatible
- * with the materialized numeric representation.</p>
- *
- * <p>Built-in standardization currently supports these realized forms:</p>
+ * <p>Built-in standardization supports the standard primitive numeric
+ * observation representations:</p>
  *
  * <pre>
- * double[]
- * Double[]
- * double[][]
- * Double[][]
+ * float[time]
+ * double[time]
+ * float[dimension][time]
+ * double[dimension][time]
  * </pre>
  *
- * <p>A custom reader may still return a proprietary representation when
- * standardization is disabled. When this decorator is present, an unsupported
- * representation is rejected by {@link Standardizer} rather than guessed at.</p>
+ * <p>Numeric missing values remain primitive NaN and are handled by
+ * {@link Standardizer} according to its configured implementation. Reader
+ * families may impose a narrower representation contract. In particular,
+ * per-file time-series readers preserve the dimension axis and return a
+ * two-dimensional matrix.</p>
  *
- * <h2>Resource ownership</h2>
+ * <h2>Vectorization</h2>
  *
- * <p>This decorator owns its delegate. Closing it closes the delegate when the
- * delegate implements {@link AutoCloseable}. Closure is idempotent.</p>
+ * <p>This class deliberately contains no scalar or Vector API loop. It routes
+ * the realized primitive matrix directly to
+ * {@link Standardizer#transformInstanceInPlace(Object, StandardizationStats)},
+ * which is the single optimization point for scalar, parallel, and Vector API
+ * implementations. The decorator therefore adds no representation conversion
+ * and cannot bypass the optimized standardization path.</p>
  *
- * <h2>Thread safety</h2>
+ * <h2>Resource ownership and concurrency</h2>
  *
- * <p>The decorator adds no synchronization to read operations. Its effective
- * read concurrency is therefore the same as the delegate's. Standardization
- * modifies only the newly materialized instance returned by that invocation;
- * the same instance object must not be shared concurrently by the delegate.</p>
+ * <p>This decorator owns its delegate. A lifecycle read lock protects an
+ * entire materialize-and-standardize operation. Closure takes the write lock,
+ * waits for active reads to finish, and then closes a closeable delegate.
+ * Concurrent reads remain permitted when the delegate permits them.</p>
  */
 public final class StandardizingLazySeriesReader
         implements LazySeriesReader, AutoCloseable {
-
     private final LazySeriesReader delegate;
     private final StandardizationStats standardizationStats;
-    private final AtomicBoolean closed;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final ReentrantReadWriteLock lifecycleLock =
+            new ReentrantReadWriteLock();
 
-    /**
-     * Creates a standardizing decorator and transfers ownership of the
-     * delegate to it.
-     *
-     * @param delegate reader that returns one raw materialized instance
-     * @param standardizationStats prepared training statistics
-     */
     public StandardizingLazySeriesReader(
             LazySeriesReader delegate,
             StandardizationStats standardizationStats
     ) {
-        this.delegate =
-                Objects.requireNonNull(
-                        delegate,
-                        "StandardizingLazySeriesReader requires a delegate."
-                );
-
-        this.standardizationStats =
-                Objects.requireNonNull(
-                        standardizationStats,
-                        "StandardizingLazySeriesReader requires "
-                                + "standardization statistics."
-                );
-
-        this.closed =
-                new AtomicBoolean(false);
+        this.delegate = Objects.requireNonNull(
+                delegate,
+                "StandardizingLazySeriesReader requires a delegate.");
+        this.standardizationStats = Objects.requireNonNull(
+                standardizationStats,
+                "StandardizingLazySeriesReader requires standardization "
+                        + "statistics.");
     }
 
     /**
-     * Materializes one raw instance and standardizes that same object in
-     * place.
-     *
-     * @param reference instance reference
-     * @return the delegate's materialized instance after standardization
+     * Materializes and standardizes one observation while preventing
+     * concurrent delegate closure.
      */
     @Override
-    public Object read(
-            LazySeriesRef reference
-    ) {
-        requireOpen();
-
+    public Object read(LazySeriesRef reference) {
         Objects.requireNonNull(
                 reference,
-                "StandardizingLazySeriesReader cannot read a null reference."
-        );
+                "StandardizingLazySeriesReader cannot read a null reference.");
 
-        Object series =
-                delegate.read(reference);
-
-        if (series == null) {
-            throw new IllegalStateException(
-                    "Lazy-series delegate returned null for instance index "
-                            + reference.getIndex()
-                            + "."
-            );
+        ReentrantReadWriteLock.ReadLock readLock = lifecycleLock.readLock();
+        readLock.lock();
+        try {
+            requireOpen();
+            Object series = delegate.read(reference);
+            if (series == null) {
+                throw new IllegalStateException(
+                        "Lazy-series delegate returned null for reader key '"
+                                + reference.getReaderKey()
+                                + "', instance index "
+                                + reference.getIndex() + ".");
+            }
+            validateRepresentation(series, reference);
+            Standardizer.transformInstanceInPlace(
+                    series, standardizationStats);
+            return series;
+        } finally {
+            readLock.unlock();
         }
-
-        return Standardizer.transformInstanceInPlace(
-                series,
-                standardizationStats
-        );
     }
 
-    /**
-     * Returns the wrapped reader for controlled diagnostics.
-     *
-     * @return non-null delegate
-     * @throws IllegalStateException after this decorator is closed
-     */
+    private static void validateRepresentation(
+            Object series,
+            LazySeriesRef reference
+    ) {
+        if (!(series instanceof float[])
+                && !(series instanceof double[])
+                && !(series instanceof float[][])
+                && !(series instanceof double[][])) {
+            throw new IllegalStateException(
+                    "Built-in lazy standardization requires float[], "
+                            + "double[], float[][], or double[][], but "
+                            + "reader key '"
+                            + reference.getReaderKey()
+                            + "' returned "
+                            + series.getClass().getTypeName()
+                            + " for instance index "
+                            + reference.getIndex() + ".");
+        }
+    }
+
     public LazySeriesReader getDelegate() {
-        requireOpen();
-        return delegate;
+        ReentrantReadWriteLock.ReadLock readLock = lifecycleLock.readLock();
+        readLock.lock();
+        try {
+            requireOpen();
+            return delegate;
+        } finally {
+            readLock.unlock();
+        }
     }
 
-    /**
-     * Returns the prepared statistics used by this decorator.
-     *
-     * @return non-null prepared statistics
-     */
     public StandardizationStats getStandardizationStats() {
         return standardizationStats;
     }
 
-    /**
-     * Returns whether closure has begun.
-     *
-     * @return true after the first close call
-     */
     public boolean isClosed() {
         return closed.get();
     }
 
     /**
-     * Closes the owned delegate when it is closeable.
-     *
-     * @throws Exception if delegate cleanup fails
+     * Waits for active materializations and then closes the owned delegate.
      */
     @Override
     public void close() throws Exception {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
-
-        if (delegate instanceof AutoCloseable closeableDelegate) {
-            closeableDelegate.close();
+        ReentrantReadWriteLock.WriteLock writeLock = lifecycleLock.writeLock();
+        writeLock.lock();
+        try {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            if (delegate instanceof AutoCloseable closeableDelegate) {
+                closeableDelegate.close();
+            }
+        } finally {
+            writeLock.unlock();
         }
     }
 
-    /**
-     * Closes this decorator while converting checked cleanup failures to an
-     * unchecked lifecycle exception.
-     */
     public void closeUnchecked() {
         try {
             close();
-        } catch (Exception e) {
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Exception failure) {
             throw new IllegalStateException(
                     "Failed to close standardizing lazy-series reader.",
-                    e
-            );
+                    failure);
         }
     }
 
     private void requireOpen() {
         if (closed.get()) {
             throw new IllegalStateException(
-                    "StandardizingLazySeriesReader has already been closed."
-            );
+                    "StandardizingLazySeriesReader has already been closed.");
         }
     }
 
     @Override
     public String toString() {
         return "StandardizingLazySeriesReader{"
-                + "delegate="
-                + delegate
-                + ", method="
-                + standardizationStats.getMethod()
-                + ", scope="
-                + standardizationStats.getScope()
-                + ", closed="
-                + closed.get()
+                + "delegate=" + delegate
+                + ", method=" + standardizationStats.getMethod()
+                + ", scope=" + standardizationStats.getScope()
+                + ", closed=" + closed.get()
                 + '}';
     }
 }
