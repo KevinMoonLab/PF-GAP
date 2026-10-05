@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Immutable, serializable statistics used to standardize numeric data.
+ * Immutable, serializable reusable affine standardization statistics.
  *
  * The statistics are expressed generically as centers and scales:
  *
  *     standardizedValue =
  *         (value - center) / scale
  *
- * For z-score standardization:
+ * For z-score, mean-centering, and min-max standardization:
  *
  *     center = mean
  *     scale  = standard deviation
@@ -276,6 +276,15 @@ public final class StandardizationStats implements Serializable {
         return scales.clone();
     }
 
+    /** Returns copied reciprocal scales for hot forward-transform kernels. */
+    public double[] getInverseScales() {
+        double[] inverseScales = new double[scales.length];
+        for (int group = 0; group < scales.length; group++) {
+            inverseScales[group] = 1.0 / scales[group];
+        }
+        return inverseScales;
+    }
+
     /**
      * Returns the number of fitted statistic groups.
      *
@@ -419,6 +428,23 @@ public final class StandardizationStats implements Serializable {
         );
     }
 
+    public double getInverseScale(
+            int groupIndex
+    ) {
+        validateGroupIndex(groupIndex);
+        return 1.0 / scales[groupIndex];
+    }
+
+    public double getInverseScaleForDimension(
+            int dimensionIndex
+    ) {
+        return getInverseScale(
+                getGroupIndexForDimension(
+                        dimensionIndex
+                )
+        );
+    }
+
     /**
      * Returns the observation count applicable to one dimension.
      *
@@ -447,25 +473,21 @@ public final class StandardizationStats implements Serializable {
             double value,
             int groupIndex
     ) {
-        if (!Double.isFinite(value)) {
-            throw new IllegalArgumentException(
-                    "Cannot standardize a non-finite value: "
-                            + value
-            );
-        }
-
+        requireFiniteValue(value, "standardize");
         validateGroupIndex(groupIndex);
+        return (value - centers[groupIndex]) / scales[groupIndex];
+    }
 
-        return switch (method) {
-            case NONE ->
-                    value;
-
-            case Z_SCORE,
-                    MIN_MAX,
-                    ROBUST ->
-                    (value - centers[groupIndex])
-                            / scales[groupIndex];
-        };
+    /**
+     * Restores one finite transformed value to its original coordinate system.
+     */
+    public double inverseTransform(
+            double value,
+            int groupIndex
+    ) {
+        requireFiniteValue(value, "inverse-transform");
+        validateGroupIndex(groupIndex);
+        return value * scales[groupIndex] + centers[groupIndex];
     }
 
     /**
@@ -481,6 +503,18 @@ public final class StandardizationStats implements Serializable {
             int dimensionIndex
     ) {
         return standardize(
+                value,
+                getGroupIndexForDimension(
+                        dimensionIndex
+                )
+        );
+    }
+
+    public double inverseTransformDimensionValue(
+            double value,
+            int dimensionIndex
+    ) {
+        return inverseTransform(
                 value,
                 getGroupIndexForDimension(
                         dimensionIndex
@@ -509,7 +543,8 @@ public final class StandardizationStats implements Serializable {
     public void validateFeatureCompatibility(
             List<String> suppliedFeatureNames
     ) {
-        if (suppliedFeatureNames == null) {
+        if (suppliedFeatureNames == null
+                || suppliedFeatureNames.isEmpty()) {
             if (hasFeatureNames()) {
                 throw new IllegalArgumentException(
                         "Standardization statistics contain feature names, "
@@ -563,6 +598,12 @@ public final class StandardizationStats implements Serializable {
                     "StandardizationStats should not be constructed for "
                             + "StandardizationMethod.NONE because no fitted "
                             + "statistics are required."
+            );
+        }
+        if (!scope.usesTrainingStatistics()) {
+            throw new IllegalArgumentException(
+                    "StandardizationStats requires GLOBAL or PER_DIMENSION "
+                            + "scope, but received " + scope + "."
             );
         }
     }
@@ -690,6 +731,17 @@ public final class StandardizationStats implements Serializable {
                             + " statistic groups, but "
                             + featureNames.size()
                             + " feature names were supplied."
+            );
+        }
+    }
+
+    private static void requireFiniteValue(
+            double value,
+            String operation
+    ) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException(
+                    "Cannot " + operation + " a non-finite value: " + value
             );
         }
     }

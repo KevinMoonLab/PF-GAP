@@ -1,5 +1,6 @@
 package datasets.readers;
 
+import datasets.NumericStorageType;
 import datasets.readers.lazy.LazySeriesReader;
 import datasets.readers.lazy.LazySeriesRef;
 import dev.hardwood.InputFile;
@@ -16,93 +17,34 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
- * High-throughput numeric reader for one time series stored in one
- * Parquet file.
+ * High-throughput numeric reader for one per-file Parquet multivariate series.
  *
- * <p>Expected physical organization:</p>
+ * <p>Each selected Parquet column is one dimension and each record is one time
+ * position. Output is always {@code float[dimension][time]} or
+ * {@code double[dimension][time]}, including the one-dimension case.</p>
  *
- * <pre>
- * one Parquet record = one time point
- * one projected feature column = one time-series dimension
- * one Parquet file = one PFGAP instance
- * </pre>
+ * <p>Physical DOUBLE, FLOAT, INT64, and INT32 feature columns are read through
+ * Hardwood's primitive batch accessors. Nulls become primitive NaN when
+ * enabled. FILE_ORDER does not project the configured time column. The legacy
+ * SORT_DOUBLE_TIME policy name is retained for source compatibility, but its
+ * implementation accepts all four supported fixed-width numeric time types.</p>
  *
- * <p>Example univariate file:</p>
- *
- * <pre>
- * time,value
- * 0.0,1.2
- * 1.0,1.4
- * 2.0,1.1
- * </pre>
- *
- * <p>Example multivariate file:</p>
- *
- * <pre>
- * time,x,y,z
- * 0.0,1.2,3.4,5.6
- * 1.0,1.4,3.1,5.8
- * </pre>
- *
- * <p>Output representation:</p>
- *
- * <pre>
- * one feature, no missing:
- *     double[time]
- *
- * multiple features, no missing:
- *     double[dimension][time]
- *
- * one feature, missing enabled:
- *     Double[time]
- *
- * multiple features, missing enabled:
- *     Double[dimension][time]
- * </pre>
- *
- * <p>This reader uses Hardwood's batch-oriented {@link ColumnReaders} API.
- * Projected numerical columns are decoded into primitive arrays and copied
- * directly into dimension-major primitive buffers. It does not construct one
- * row object or one feature array per time point.</p>
- *
- * <p>The current optimized implementation requires all projected feature
- * columns to have Parquet physical type DOUBLE because it uses
- * {@link ColumnReader#getDoubles()}. When time sorting is enabled, the time
- * column must also have physical type DOUBLE.</p>
- *
- * <p>Use {@link PerFileParquetSeriesReader} for generic, nonnumeric, nested,
- * or otherwise unsupported Parquet schemas.</p>
+ * <p>Reader-time standardization remains available for lazy materialization.
+ * Eager coordinators should pass null statistics and let the eager pipeline
+ * transform the completed dataset.</p>
  */
-public class NumericPerFileParquetSeriesReader
+public final class NumericPerFileParquetSeriesReader
         implements LazySeriesReader {
+    private static final int DEFAULT_INITIAL_TIME_CAPACITY = 256;
 
-    private static final int DEFAULT_INITIAL_TIME_CAPACITY =
-            1024;
-
-    /**
-     * Controls how records are ordered in the returned time series.
-     */
     public enum TimeOrderPolicy {
-
-        /**
-         * Preserve the physical Parquet record order.
-         *
-         * <p>The configured time column is not projected or decoded. This is
-         * the fastest mode and should be preferred when files are already
-         * ordered correctly.</p>
-         */
         FILE_ORDER,
-
-        /**
-         * Project a DOUBLE time column, sort records by that value, and use
-         * physical input order as a deterministic tie-breaker.
-         */
         SORT_DOUBLE_TIME
     }
 
@@ -112,28 +54,18 @@ public class NumericPerFileParquetSeriesReader
     private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
     private final TimeOrderPolicy timeOrderPolicy;
-    private final ColumnProjection columnProjection;
+    private final NumericStorageType requestedStorageType;
+    private final ColumnProjection projection;
 
-    /**
-     * Constructs the reader using physical file order.
-     *
-     * <p>The time column is retained as configuration but is not projected
-     * when {@link TimeOrderPolicy#FILE_ORDER} is used.</p>
-     */
     public NumericPerFileParquetSeriesReader(
             String timeColumn,
             List<String> featureColumns,
             boolean hasMissingValues,
             StandardizationStats standardizationStats
     ) {
-        this(
-                timeColumn,
-                featureColumns,
-                hasMissingValues,
-                standardizationStats,
-                DEFAULT_INITIAL_TIME_CAPACITY,
-                TimeOrderPolicy.FILE_ORDER
-        );
+        this(timeColumn, featureColumns, hasMissingValues,
+                standardizationStats, DEFAULT_INITIAL_TIME_CAPACITY,
+                TimeOrderPolicy.FILE_ORDER, NumericStorageType.AUTO);
     }
 
     public NumericPerFileParquetSeriesReader(
@@ -141,26 +73,11 @@ public class NumericPerFileParquetSeriesReader
             List<String> featureColumns,
             boolean hasMissingValues
     ) {
-        this(
-                timeColumn,
-                featureColumns,
-                hasMissingValues,
-                null,
-                DEFAULT_INITIAL_TIME_CAPACITY,
-                TimeOrderPolicy.FILE_ORDER
-        );
+        this(timeColumn, featureColumns, hasMissingValues, null,
+                DEFAULT_INITIAL_TIME_CAPACITY, TimeOrderPolicy.FILE_ORDER,
+                NumericStorageType.AUTO);
     }
 
-    /**
-     * Full constructor.
-     *
-     * @param timeColumn          optional time column
-     * @param featureColumns      projected DOUBLE feature columns
-     * @param hasMissingValues    whether null feature values are permitted
-     * @param standardizationStats optional standardization statistics
-     * @param initialTimeCapacity initial allocation hint per dimension
-     * @param timeOrderPolicy     physical-order or DOUBLE-time sorting policy
-     */
     public NumericPerFileParquetSeriesReader(
             String timeColumn,
             List<String> featureColumns,
@@ -169,1129 +86,512 @@ public class NumericPerFileParquetSeriesReader
             int initialTimeCapacity,
             TimeOrderPolicy timeOrderPolicy
     ) {
-        this.timeColumn =
-                normalizeNullableString(
-                        timeColumn
-                );
+        this(timeColumn, featureColumns, hasMissingValues,
+                standardizationStats, initialTimeCapacity, timeOrderPolicy,
+                NumericStorageType.AUTO);
+    }
 
-        this.featureColumns =
-                copyAndValidateFeatureColumns(
-                        featureColumns
-                );
-
-        this.hasMissingValues =
-                hasMissingValues;
-
-        this.standardizationStats =
-                standardizationStats;
-
+    public NumericPerFileParquetSeriesReader(
+            String timeColumn,
+            List<String> featureColumns,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            TimeOrderPolicy timeOrderPolicy,
+            NumericStorageType numericStorageType
+    ) {
+        this.timeColumn = normalizeNullableString(timeColumn);
+        this.featureColumns = copyFeatures(featureColumns);
+        this.hasMissingValues = hasMissingValues;
+        this.standardizationStats = standardizationStats;
         if (initialTimeCapacity < 1) {
             throw new IllegalArgumentException(
-                    "NumericPerFileParquetSeriesReader "
-                            + "initialTimeCapacity must be at least 1. "
-                            + "Received: "
-                            + initialTimeCapacity
-                            + "."
-            );
+                    "initialTimeCapacity must be at least 1.");
         }
-
-        this.initialTimeCapacity =
-                initialTimeCapacity;
-
-        this.timeOrderPolicy =
-                timeOrderPolicy == null
-                        ? TimeOrderPolicy.FILE_ORDER
-                        : timeOrderPolicy;
-
-        if (this.timeOrderPolicy
-                == TimeOrderPolicy.SORT_DOUBLE_TIME
+        this.initialTimeCapacity = initialTimeCapacity;
+        this.timeOrderPolicy = timeOrderPolicy == null
+                ? TimeOrderPolicy.FILE_ORDER : timeOrderPolicy;
+        this.requestedStorageType = Objects.requireNonNull(
+                numericStorageType, "numericStorageType cannot be null.");
+        if (this.timeOrderPolicy == TimeOrderPolicy.SORT_DOUBLE_TIME
                 && this.timeColumn == null) {
-
             throw new IllegalArgumentException(
-                    "SORT_DOUBLE_TIME requires a nonempty timeColumn."
-            );
+                    "SORT_DOUBLE_TIME requires a time column.");
         }
-
-        validateStandardizationConfiguration();
-
-        this.columnProjection =
-                buildColumnProjection();
+        if (standardizationStats != null) {
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns);
+        }
+        this.projection = buildProjection();
     }
 
     @Override
-    public Object read(
-            LazySeriesRef reference
-    ) {
+    public Object read(LazySeriesRef reference) {
         if (reference == null) {
-            throw new IllegalArgumentException(
-                    "Cannot read a null LazySeriesRef."
-            );
+            throw new IllegalArgumentException("Cannot read null LazySeriesRef.");
         }
-
-        Path file =
-                reference.getFile();
-
         try {
-            return readFileInternal(
-                    file,
-                    false
-            );
+            return readFileInternal(reference.getFile(), false);
         } catch (IOException e) {
             throw new IllegalStateException(
-                    "Failed to lazily read numeric Parquet time series "
-                            + "from: "
-                            + file,
-                    e
-            );
+                    "Failed to read numeric Parquet series: "
+                            + reference.getFile(), e);
         }
     }
 
-    /**
-     * Reads one numeric per-file Parquet time series directly.
-     *
-     * @param file Parquet file
-     * @return materialized time series
-     * @throws IOException if the file cannot be read
-     */
-    public Object readFile(
-            Path file
-    ) throws IOException {
-        return readFileInternal(
-                file,
-                true
-        );
+    public Object readFile(Path file) throws IOException {
+        return readFileInternal(file, true);
     }
 
-    private Object readFileInternal(
-            Path file,
-            boolean validateFileMetadata
-    ) throws IOException {
+    public float[][] readFloatFile(Path file) throws IOException {
+        if (requestedStorageType != NumericStorageType.FLOAT32) {
+            throw new IllegalStateException(
+                    "readFloatFile requires FLOAT32 configuration.");
+        }
+        return (float[][]) readFileInternal(file, true);
+    }
 
+    public double[][] readDoubleFile(Path file) throws IOException {
+        if (requestedStorageType == NumericStorageType.FLOAT32) {
+            throw new IllegalStateException(
+                    "readDoubleFile requires FLOAT64 or AUTO configuration.");
+        }
+        return (double[][]) readFileInternal(file, true);
+    }
+
+    private Object readFileInternal(Path file, boolean validateMetadata)
+            throws IOException {
         if (file == null) {
-            throw new IllegalArgumentException(
-                    "NumericPerFileParquetSeriesReader requires "
-                            + "a non-null file."
-            );
+            throw new IllegalArgumentException("A non-null file is required.");
+        }
+        if (validateMetadata) {
+            validateFile(file);
         }
 
-        if (validateFileMetadata) {
-            validateFile(
-                    file
-            );
-        }
+        ValueKind[] featureKinds = null;
+        ValueKind timeKind = null;
+        NumericStorageType outputType = null;
+        NumericBuffer[] features = null;
+        DoubleBuffer times = timeOrderPolicy == TimeOrderPolicy.SORT_DOUBLE_TIME
+                ? new DoubleBuffer(initialTimeCapacity) : null;
+        MissingBuffer timeMissing = times == null
+                ? null : new MissingBuffer(initialTimeCapacity);
+        int recordCount = 0;
 
-        int dimensionCount =
-                featureColumns.size();
-
-        PrimitiveDoubleBuffer[] featureBuffers =
-                new PrimitiveDoubleBuffer[dimensionCount];
-
-        MissingBuffer[] missingBuffers =
-                hasMissingValues
-                        ? new MissingBuffer[dimensionCount]
-                        : null;
-
-        for (int dimension = 0;
-             dimension < dimensionCount;
-             dimension++) {
-
-            featureBuffers[dimension] =
-                    new PrimitiveDoubleBuffer(
-                            initialTimeCapacity
-                    );
-
-            if (hasMissingValues) {
-                missingBuffers[dimension] =
-                        new MissingBuffer(
-                                initialTimeCapacity
-                        );
-            }
-        }
-
-        PrimitiveDoubleBuffer timeValues =
-                timeOrderPolicy
-                        == TimeOrderPolicy.SORT_DOUBLE_TIME
-                        ? new PrimitiveDoubleBuffer(
-                        initialTimeCapacity
-                )
-                        : null;
-
-        MissingBuffer timeMissing =
-                timeOrderPolicy
-                        == TimeOrderPolicy.SORT_DOUBLE_TIME
-                        ? new MissingBuffer(
-                        initialTimeCapacity
-                )
-                        : null;
-
-        IntBuffer inputOrders =
-                timeOrderPolicy
-                        == TimeOrderPolicy.SORT_DOUBLE_TIME
-                        ? new IntBuffer(
-                        initialTimeCapacity
-                )
-                        : null;
-
-        int totalRecordCount =
-                0;
-
-        try (ParquetFileReader fileReader =
-                     ParquetFileReader.open(
-                             InputFile.of(
-                                     file
-                             )
-                     );
-
-             ColumnReaders columns =
-                     fileReader.buildColumnReaders(
-                                     columnProjection
-                             )
-                             .build()) {
-
-            int timeColumnOffset =
-                    timeOrderPolicy
-                            == TimeOrderPolicy.SORT_DOUBLE_TIME
-                            ? 1
-                            : 0;
-
+        try (ParquetFileReader parquet =
+                     ParquetFileReader.open(InputFile.of(file));
+             ColumnReaders columns = parquet.buildColumnReaders(projection)
+                     .build()) {
             while (columns.nextBatch()) {
-                int batchRecordCount =
-                        columns.getRecordCount();
-
-                if (batchRecordCount == 0) {
+                int batchCount = columns.getRecordCount();
+                if (batchCount == 0) {
                     continue;
                 }
-
-                if (timeOrderPolicy
-                        == TimeOrderPolicy.SORT_DOUBLE_TIME) {
-
-                    ColumnReader timeReader =
-                            columns.getColumnReader(
-                                    0
-                            );
-
-                    appendTimeBatch(
-                            timeReader,
-                            batchRecordCount,
-                            timeValues,
-                            timeMissing,
-                            inputOrders,
-                            totalRecordCount,
-                            file
-                    );
+                if (featureKinds == null) {
+                    featureKinds = detectFeatureKinds(columns, file);
+                    outputType = resolveOutputType(featureKinds);
+                    features = createFeatureBuffers(outputType);
+                    if (times != null) {
+                        timeKind = detectKind(
+                                columns.getColumnReader(timeColumn),
+                                timeColumn, file);
+                    }
                 }
 
-                for (int dimension = 0;
-                     dimension < dimensionCount;
-                     dimension++) {
-
-                    ColumnReader featureReader =
-                            columns.getColumnReader(
-                                    timeColumnOffset + dimension
-                            );
-
-                    appendFeatureBatch(
-                            featureReader,
-                            batchRecordCount,
-                            featureBuffers[dimension],
-                            hasMissingValues
-                                    ? missingBuffers[dimension]
-                                    : null,
-                            featureColumns.get(dimension),
-                            totalRecordCount,
-                            file
-                    );
+                for (int d = 0; d < featureColumns.size(); d++) {
+                    String name = featureColumns.get(d);
+                    ColumnReader reader = columns.getColumnReader(name);
+                    Object source = readValues(reader, featureKinds[d],
+                            name, file);
+                    appendFeatureBatch(source, featureKinds[d],
+                            reader.getLeafValidity(), batchCount, features[d],
+                            name, recordCount, file);
                 }
-
-                totalRecordCount +=
-                        batchRecordCount;
+                if (times != null) {
+                    ColumnReader reader = columns.getColumnReader(timeColumn);
+                    Object source = readValues(reader, timeKind,
+                            timeColumn, file);
+                    appendTimeBatch(source, timeKind,
+                            reader.getLeafValidity(), batchCount, times,
+                            timeMissing);
+                }
+                recordCount += batchCount;
             }
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new IOException(
-                    "Failed while decoding numeric Parquet columns from: "
-                            + file,
-                    e
-            );
+                    "Failed while reading numeric Parquet series: " + file, e);
         }
 
-        if (totalRecordCount == 0) {
-            throw new IOException(
-                    "Numeric Parquet time-series file contains no records: "
-                            + file
-            );
+        if (recordCount == 0 || features == null) {
+            throw new IOException("Parquet series contains no records: " + file);
+        }
+        for (NumericBuffer feature : features) {
+            if (feature.size() != recordCount) {
+                throw new IllegalStateException(
+                        "Feature buffer length differs from record count in "
+                                + file + ".");
+            }
         }
 
-        validateBufferLengths(
-                featureBuffers,
-                missingBuffers,
-                totalRecordCount,
-                file
-        );
-
-        if (timeOrderPolicy
-                == TimeOrderPolicy.SORT_DOUBLE_TIME) {
-
-            sortByTime(
-                    featureBuffers,
-                    missingBuffers,
-                    timeValues,
-                    timeMissing,
-                    inputOrders,
-                    file
-            );
-        }
-
-        Object series =
-                materializeSeries(
-                        featureBuffers,
-                        missingBuffers
-                );
-
+        int[] order = times == null ? null
+                : buildStableTimeOrder(times.toArray(), timeMissing.toArray());
+        Object series = materialize(features, outputType, order);
         if (standardizationStats != null) {
             Standardizer.transformInstanceInPlace(
-                    series,
-                    standardizationStats
-            );
+                    series, standardizationStats);
         }
-
         return series;
     }
 
-    /**
-     * Appends one batch from a projected DOUBLE feature column.
-     *
-     * <p>Hardwood exposes flat column batches as primitive arrays plus a
-     * validity bitmap. Hoisting {@code hasNulls()} outside the inner loop
-     * preserves the no-null fast path.</p>
-     */
-    private void appendFeatureBatch(
-            ColumnReader columnReader,
-            int batchRecordCount,
-            PrimitiveDoubleBuffer valuesBuffer,
-            MissingBuffer missingBuffer,
-            String columnName,
-            int recordOffset,
-            Path file
+    private ValueKind[] detectFeatureKinds(
+            ColumnReaders columns, Path file
     ) {
-        double[] values;
-
-        try {
-            values =
-                    columnReader.getDoubles();
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException(
-                    "NumericPerFileParquetSeriesReader currently requires "
-                            + "feature column '"
-                            + columnName
-                            + "' to have Parquet physical type DOUBLE in file "
-                            + file
-                            + ".",
-                    e
-            );
+        ValueKind[] kinds = new ValueKind[featureColumns.size()];
+        for (int i = 0; i < kinds.length; i++) {
+            String name = featureColumns.get(i);
+            kinds[i] = detectKind(
+                    columns.getColumnReader(name), name, file);
         }
-
-        if (values.length < batchRecordCount) {
-            throw new IllegalStateException(
-                    "Hardwood returned fewer primitive values than records "
-                            + "for feature column '"
-                            + columnName
-                            + "' in file "
-                            + file
-                            + ". Records="
-                            + batchRecordCount
-                            + ", values="
-                            + values.length
-                            + "."
-            );
-        }
-
-        Validity validity =
-                columnReader.getLeafValidity();
-
-        boolean batchHasNulls =
-                validity.hasNulls();
-
-        if (!batchHasNulls) {
-            valuesBuffer.addAll(
-                    values,
-                    0,
-                    batchRecordCount
-            );
-
-            if (missingBuffer != null) {
-                missingBuffer.addRepeated(
-                        false,
-                        batchRecordCount
-                );
-            }
-
-            return;
-        }
-
-        if (!hasMissingValues) {
-            for (int index = 0;
-                 index < batchRecordCount;
-                 index++) {
-
-                if (validity.isNull(index)) {
-                    throw new IllegalArgumentException(
-                            "Encountered null in feature column '"
-                                    + columnName
-                                    + "' in file "
-                                    + file
-                                    + " at record "
-                                    + (recordOffset + index)
-                                    + ", but hasMissingValues=false."
-                    );
-                }
-            }
-        }
-
-        for (int index = 0;
-             index < batchRecordCount;
-             index++) {
-
-            boolean missing =
-                    validity.isNull(index);
-
-            valuesBuffer.add(
-                    missing
-                            ? 0.0
-                            : values[index]
-            );
-
-            if (missingBuffer != null) {
-                missingBuffer.add(
-                        missing
-                );
-            }
-        }
+        return kinds;
     }
 
-    private void appendTimeBatch(
-            ColumnReader timeReader,
-            int batchRecordCount,
-            PrimitiveDoubleBuffer timeValues,
-            MissingBuffer timeMissing,
-            IntBuffer inputOrders,
-            int startingRecordIndex,
-            Path file
-    ) {
-        double[] values;
-
-        try {
-            values =
-                    timeReader.getDoubles();
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException(
-                    "SORT_DOUBLE_TIME currently requires time column '"
-                            + timeColumn
-                            + "' to have Parquet physical type DOUBLE in file "
-                            + file
-                            + ".",
-                    e
-            );
+    private NumericStorageType resolveOutputType(ValueKind[] kinds) {
+        if (requestedStorageType != NumericStorageType.AUTO) {
+            return requestedStorageType;
         }
-
-        if (values.length < batchRecordCount) {
-            throw new IllegalStateException(
-                    "Hardwood returned fewer primitive time values than "
-                            + "records for column '"
-                            + timeColumn
-                            + "' in file "
-                            + file
-                            + ". Records="
-                            + batchRecordCount
-                            + ", values="
-                            + values.length
-                            + "."
-            );
+        for (ValueKind kind : kinds) {
+            if (kind != ValueKind.FLOAT) {
+                return NumericStorageType.FLOAT64;
+            }
         }
-
-        Validity validity =
-                timeReader.getLeafValidity();
-
-        boolean batchHasNulls =
-                validity.hasNulls();
-
-        for (int index = 0;
-             index < batchRecordCount;
-             index++) {
-
-            boolean missing =
-                    batchHasNulls
-                            && validity.isNull(index);
-
-            timeValues.add(
-                    missing
-                            ? 0.0
-                            : values[index]
-            );
-
-            timeMissing.add(
-                    missing
-            );
-
-            inputOrders.add(
-                    startingRecordIndex + index
-            );
-        }
+        return NumericStorageType.FLOAT32;
     }
 
-    private void sortByTime(
-            PrimitiveDoubleBuffer[] featureBuffers,
-            MissingBuffer[] missingBuffers,
-            PrimitiveDoubleBuffer timeValues,
-            MissingBuffer timeMissing,
-            IntBuffer inputOrders,
-            Path file
-    ) {
-        int size =
-                timeValues.size();
-
-        if (size < 2) {
-            return;
+    private NumericBuffer[] createFeatureBuffers(NumericStorageType output) {
+        NumericBuffer[] result = new NumericBuffer[featureColumns.size()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = output == NumericStorageType.FLOAT32
+                    ? new FloatBuffer(initialTimeCapacity)
+                    : new DoubleBuffer(initialTimeCapacity);
         }
-
-        if (timeMissing.size() != size
-                || inputOrders.size() != size) {
-
-            throw new IllegalStateException(
-                    "Time-order buffers have inconsistent lengths for file "
-                            + file
-                            + "."
-            );
-        }
-
-        Integer[] order =
-                new Integer[size];
-
-        for (int index = 0;
-             index < size;
-             index++) {
-
-            order[index] =
-                    index;
-        }
-
-        Arrays.sort(
-                order,
-                Comparator
-                        .comparing(
-                                (Integer index) ->
-                                        new TimeSortKey(
-                                                timeMissing.get(index),
-                                                timeValues.get(index)
-                                        )
-                        )
-                        .thenComparingInt(
-                                inputOrders::get
-                        )
-        );
-
-        boolean alreadySorted =
-                true;
-
-        for (int index = 0;
-             index < order.length;
-             index++) {
-
-            if (order[index] != index) {
-                alreadySorted =
-                        false;
-
-                break;
-            }
-        }
-
-        if (alreadySorted) {
-            return;
-        }
-
-        for (PrimitiveDoubleBuffer buffer : featureBuffers) {
-            buffer.reorder(
-                    order
-            );
-        }
-
-        if (missingBuffers != null) {
-            for (MissingBuffer buffer : missingBuffers) {
-                buffer.reorder(
-                        order
-                );
-            }
-        }
-    }
-
-    private void validateBufferLengths(
-            PrimitiveDoubleBuffer[] featureBuffers,
-            MissingBuffer[] missingBuffers,
-            int expectedLength,
-            Path file
-    ) {
-        for (int dimension = 0;
-             dimension < featureBuffers.length;
-             dimension++) {
-
-            int actualLength =
-                    featureBuffers[dimension].size();
-
-            if (actualLength != expectedLength) {
-                throw new IllegalStateException(
-                        "Feature column '"
-                                + featureColumns.get(dimension)
-                                + "' produced "
-                                + actualLength
-                                + " values, but "
-                                + expectedLength
-                                + " records were expected in file "
-                                + file
-                                + "."
-                );
-            }
-
-            if (missingBuffers != null
-                    && missingBuffers[dimension].size()
-                    != expectedLength) {
-
-                throw new IllegalStateException(
-                        "Missing-position buffer for feature column '"
-                                + featureColumns.get(dimension)
-                                + "' has an inconsistent length in file "
-                                + file
-                                + "."
-                );
-            }
-        }
-    }
-
-    private Object materializeSeries(
-            PrimitiveDoubleBuffer[] featureBuffers,
-            MissingBuffer[] missingBuffers
-    ) {
-        if (featureBuffers.length == 1) {
-            if (!hasMissingValues) {
-                return featureBuffers[0].toArray();
-            }
-
-            return featureBuffers[0].toNullableBoxedArray(
-                    missingBuffers[0]
-            );
-        }
-
-        if (!hasMissingValues) {
-            double[][] result =
-                    new double[featureBuffers.length][];
-
-            for (int dimension = 0;
-                 dimension < featureBuffers.length;
-                 dimension++) {
-
-                result[dimension] =
-                        featureBuffers[dimension].toArray();
-            }
-
-            return result;
-        }
-
-        Double[][] result =
-                new Double[featureBuffers.length][];
-
-        for (int dimension = 0;
-             dimension < featureBuffers.length;
-             dimension++) {
-
-            result[dimension] =
-                    featureBuffers[dimension]
-                            .toNullableBoxedArray(
-                                    missingBuffers[dimension]
-                            );
-        }
-
         return result;
     }
 
-    private ColumnProjection buildColumnProjection() {
-        List<String> columns =
-                new ArrayList<>();
-
-        if (timeOrderPolicy
-                == TimeOrderPolicy.SORT_DOUBLE_TIME) {
-
-            columns.add(
-                    timeColumn
-            );
-        }
-
-        columns.addAll(
-                featureColumns
-        );
-
-        return ColumnProjection.columns(
-                columns.toArray(
-                        String[]::new
-                )
-        );
-    }
-
-    private void validateStandardizationConfiguration() {
-        if (standardizationStats == null) {
+    private void appendFeatureBatch(
+            Object source,
+            ValueKind kind,
+            Validity validity,
+            int count,
+            NumericBuffer destination,
+            String column,
+            int recordOffset,
+            Path file
+    ) {
+        if (!validity.hasNulls()) {
+            destination.addAll(source, kind, count);
             return;
         }
-
-        standardizationStats.validateFeatureCompatibility(
-                featureColumns
-        );
-    }
-
-    private void validateFile(
-            Path file
-    ) throws IOException {
-        if (!Files.exists(file)) {
-            throw new IOException(
-                    "Numeric Parquet time-series file does not exist: "
-                            + file
-            );
-        }
-
-        if (!Files.isRegularFile(file)) {
-            throw new IOException(
-                    "Numeric Parquet time-series path is not a regular file: "
-                            + file
-            );
-        }
-
-        if (!Files.isReadable(file)) {
-            throw new IOException(
-                    "Numeric Parquet time-series file is not readable: "
-                            + file
-            );
-        }
-    }
-
-    private static List<String> copyAndValidateFeatureColumns(
-            List<String> featureColumns
-    ) {
-        if (featureColumns == null || featureColumns.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "NumericPerFileParquetSeriesReader requires at least "
-                            + "one feature column."
-            );
-        }
-
-        List<String> copy =
-                new ArrayList<>(
-                        featureColumns.size()
-                );
-
-        Set<String> used =
-                new HashSet<>();
-
-        for (String featureColumn : featureColumns) {
-            if (featureColumn == null
-                    || featureColumn.isBlank()) {
-
+        for (int row = 0; row < count; row++) {
+            boolean missing = validity.isNull(row);
+            if (missing && !hasMissingValues) {
                 throw new IllegalArgumentException(
-                        "Numeric Parquet feature-column names cannot be "
-                                + "null or blank."
-                );
+                        "Null in feature column '" + column + "' at record "
+                                + (recordOffset + row) + " in " + file
+                                + ", but hasMissingValues=false.");
             }
-
-            String normalized =
-                    featureColumn.trim();
-
-            if (!used.add(normalized)) {
-                throw new IllegalArgumentException(
-                        "Numeric Parquet feature column was selected more "
-                                + "than once: "
-                                + normalized
-                );
-            }
-
-            copy.add(
-                    normalized
-            );
+            destination.add(source, kind, row, missing);
         }
-
-        return List.copyOf(
-                copy
-        );
     }
 
-    private static String normalizeNullableString(
-            String value
+    private static void appendTimeBatch(
+            Object source,
+            ValueKind kind,
+            Validity validity,
+            int count,
+            DoubleBuffer times,
+            MissingBuffer missing
     ) {
-        if (value == null) {
-            return null;
+        boolean hasNulls = validity.hasNulls();
+        for (int row = 0; row < count; row++) {
+            boolean isMissing = hasNulls && validity.isNull(row);
+            times.add(isMissing ? 0.0d : doubleAt(source, kind, row));
+            missing.add(isMissing);
         }
-
-        String trimmed =
-                value.trim();
-
-        if (trimmed.isEmpty()
-                || trimmed.equalsIgnoreCase("None")) {
-
-            return null;
-        }
-
-        return trimmed;
     }
 
-    private static int nextCapacity(
-            int currentCapacity,
-            int requiredCapacity
+    private Object materialize(
+            NumericBuffer[] features,
+            NumericStorageType output,
+            int[] order
     ) {
-        int expandedCapacity =
-                currentCapacity <= Integer.MAX_VALUE / 2
-                        ? currentCapacity << 1
-                        : Integer.MAX_VALUE;
-
-        if (expandedCapacity < requiredCapacity) {
-            expandedCapacity =
-                    requiredCapacity;
-        }
-
-        if (expandedCapacity < 0
-                || expandedCapacity < currentCapacity) {
-
-            throw new OutOfMemoryError(
-                    "Required numeric Parquet series buffer is too large."
-            );
-        }
-
-        return expandedCapacity;
-    }
-
-    private static final class PrimitiveDoubleBuffer {
-
-        private double[] values;
-        private int size;
-
-        private PrimitiveDoubleBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new double[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
-        }
-
-        private void add(
-                double value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
-        }
-
-        private void addAll(
-                double[] source,
-                int offset,
-                int length
-        ) {
-            if (length == 0) {
-                return;
+        if (output == NumericStorageType.FLOAT32) {
+            float[][] result = new float[features.length][];
+            for (int d = 0; d < features.length; d++) {
+                float[] values = ((FloatBuffer) features[d]).toArray();
+                result[d] = order == null ? values : reorder(values, order);
             }
-
-            ensureCapacity(
-                    size + length
-            );
-
-            System.arraycopy(
-                    source,
-                    offset,
-                    values,
-                    size,
-                    length
-            );
-
-            size +=
-                    length;
-        }
-
-        private double get(
-                int index
-        ) {
-            return values[index];
-        }
-
-        private int size() {
-            return size;
-        }
-
-        private double[] toArray() {
-            if (size == values.length) {
-                return values;
-            }
-
-            return Arrays.copyOf(
-                    values,
-                    size
-            );
-        }
-
-        private Double[] toNullableBoxedArray(
-                MissingBuffer missingBuffer
-        ) {
-            if (missingBuffer.size() != size) {
-                throw new IllegalStateException(
-                        "Numeric and missing-position buffers have "
-                                + "different lengths."
-                );
-            }
-
-            Double[] result =
-                    new Double[size];
-
-            for (int index = 0;
-                 index < size;
-                 index++) {
-
-                result[index] =
-                        missingBuffer.get(index)
-                                ? null
-                                : values[index];
-            }
-
             return result;
         }
-
-        private void reorder(
-                Integer[] order
-        ) {
-            double[] reordered =
-                    new double[size];
-
-            for (int outputIndex = 0;
-                 outputIndex < order.length;
-                 outputIndex++) {
-
-                reordered[outputIndex] =
-                        values[order[outputIndex]];
-            }
-
-            values =
-                    reordered;
+        double[][] result = new double[features.length][];
+        for (int d = 0; d < features.length; d++) {
+            double[] values = ((DoubleBuffer) features[d]).toArray();
+            result[d] = order == null ? values : reorder(values, order);
         }
+        return result;
+    }
 
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
-                return;
+    private static int[] buildStableTimeOrder(
+            double[] times,
+            boolean[] missing
+    ) {
+        Integer[] boxed = new Integer[times.length];
+        for (int i = 0; i < boxed.length; i++) {
+            boxed[i] = i;
+        }
+        Arrays.sort(boxed, (left, right) -> {
+            if (missing[left] != missing[right]) {
+                return missing[left] ? 1 : -1;
             }
+            if (missing[left]) {
+                return Integer.compare(left, right);
+            }
+            int comparison = Double.compare(times[left], times[right]);
+            return comparison != 0
+                    ? comparison : Integer.compare(left, right);
+        });
+        int[] order = new int[boxed.length];
+        for (int i = 0; i < order.length; i++) {
+            order[i] = boxed[i];
+        }
+        return order;
+    }
 
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
+    private static float[] reorder(float[] source, int[] order) {
+        float[] result = new float[order.length];
+        for (int i = 0; i < order.length; i++) {
+            result[i] = source[order[i]];
+        }
+        return result;
+    }
+
+    private static double[] reorder(double[] source, int[] order) {
+        double[] result = new double[order.length];
+        for (int i = 0; i < order.length; i++) {
+            result[i] = source[order[i]];
+        }
+        return result;
+    }
+
+    private ColumnProjection buildProjection() {
+        List<String> columns = new ArrayList<>();
+        if (timeOrderPolicy == TimeOrderPolicy.SORT_DOUBLE_TIME) {
+            columns.add(timeColumn);
+        }
+        for (String feature : featureColumns) {
+            if (!columns.contains(feature)) {
+                columns.add(feature);
+            }
+        }
+        return ColumnProjection.columns(columns.toArray(String[]::new));
+    }
+
+    private static ValueKind detectKind(
+            ColumnReader reader, String column, Path file
+    ) {
+        RuntimeException last = null;
+        for (ValueKind kind : ValueKind.values()) {
+            try {
+                readValues(reader, kind, column, file);
+                return kind;
+            } catch (RuntimeException e) {
+                last = e;
+            }
+        }
+        throw new IllegalArgumentException(
+                "Column '" + column + "' in " + file
+                        + " is not physical DOUBLE, FLOAT, INT64, or INT32.",
+                last);
+    }
+
+    private static Object readValues(
+            ColumnReader reader, ValueKind kind, String column, Path file
+    ) {
+        try {
+            return switch (kind) {
+                case DOUBLE -> reader.getDoubles();
+                case FLOAT -> reader.getFloats();
+                case LONG -> reader.getLongs();
+                case INT -> reader.getInts();
+            };
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    "Column '" + column + "' in " + file
+                            + " is incompatible with " + kind + ".", e);
+        }
+    }
+
+    private static float floatAt(Object source, ValueKind kind, int index) {
+        return switch (kind) {
+            case DOUBLE -> (float) ((double[]) source)[index];
+            case FLOAT -> ((float[]) source)[index];
+            case LONG -> (float) ((long[]) source)[index];
+            case INT -> ((int[]) source)[index];
+        };
+    }
+
+    private static double doubleAt(Object source, ValueKind kind, int index) {
+        return switch (kind) {
+            case DOUBLE -> ((double[]) source)[index];
+            case FLOAT -> ((float[]) source)[index];
+            case LONG -> ((long[]) source)[index];
+            case INT -> ((int[]) source)[index];
+        };
+    }
+
+    private interface NumericBuffer {
+        int size();
+        void add(Object source, ValueKind kind, int index, boolean missing);
+        void addAll(Object source, ValueKind kind, int count);
+    }
+
+    private static final class FloatBuffer implements NumericBuffer {
+        private float[] values;
+        private int size;
+        private FloatBuffer(int capacity) {
+            values = new float[Math.max(1, capacity)];
+        }
+        private void add(float value) {
+            ensure(size + 1); values[size++] = value;
+        }
+        @Override public int size() { return size; }
+        @Override public void add(Object source, ValueKind kind,
+                                  int index, boolean missing) {
+            add(missing ? Float.NaN : floatAt(source, kind, index));
+        }
+        @Override public void addAll(Object source, ValueKind kind, int count) {
+            ensure(size + count);
+            if (kind == ValueKind.FLOAT) {
+                System.arraycopy(source, 0, values, size, count);
+                size += count;
+            } else {
+                for (int i = 0; i < count; i++) {
+                    values[size++] = floatAt(source, kind, i);
+                }
+            }
+        }
+        private float[] toArray() { return Arrays.copyOf(values, size); }
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
+            }
+        }
+    }
+
+    private static final class DoubleBuffer implements NumericBuffer {
+        private double[] values;
+        private int size;
+        private DoubleBuffer(int capacity) {
+            values = new double[Math.max(1, capacity)];
+        }
+        private void add(double value) {
+            ensure(size + 1); values[size++] = value;
+        }
+        @Override public int size() { return size; }
+        @Override public void add(Object source, ValueKind kind,
+                                  int index, boolean missing) {
+            add(missing ? Double.NaN : doubleAt(source, kind, index));
+        }
+        @Override public void addAll(Object source, ValueKind kind, int count) {
+            ensure(size + count);
+            if (kind == ValueKind.DOUBLE) {
+                System.arraycopy(source, 0, values, size, count);
+                size += count;
+            } else {
+                for (int i = 0; i < count; i++) {
+                    values[size++] = doubleAt(source, kind, i);
+                }
+            }
+        }
+        private double[] toArray() { return Arrays.copyOf(values, size); }
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
+            }
         }
     }
 
     private static final class MissingBuffer {
-
         private boolean[] values;
         private int size;
-
-        private MissingBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new boolean[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
+        private MissingBuffer(int capacity) {
+            values = new boolean[Math.max(1, capacity)];
         }
-
-        private void add(
-                boolean value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
+        private void add(boolean value) {
+            ensure(size + 1); values[size++] = value;
         }
-
-        private void addRepeated(
-                boolean value,
-                int count
-        ) {
-            if (count == 0) {
-                return;
+        private boolean[] toArray() { return Arrays.copyOf(values, size); }
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
             }
-
-            ensureCapacity(
-                    size + count
-            );
-
-            if (value) {
-                Arrays.fill(
-                        values,
-                        size,
-                        size + count,
-                        true
-                );
-            }
-
-            size +=
-                    count;
-        }
-
-        private boolean get(
-                int index
-        ) {
-            return values[index];
-        }
-
-        private int size() {
-            return size;
-        }
-
-        private void reorder(
-                Integer[] order
-        ) {
-            boolean[] reordered =
-                    new boolean[size];
-
-            for (int outputIndex = 0;
-                 outputIndex < order.length;
-                 outputIndex++) {
-
-                reordered[outputIndex] =
-                        values[order[outputIndex]];
-            }
-
-            values =
-                    reordered;
-        }
-
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
-                return;
-            }
-
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
         }
     }
 
-    private static final class IntBuffer {
-
-        private int[] values;
-        private int size;
-
-        private IntBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new int[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
+    private static int nextCapacity(int current, int required) {
+        int expanded = current <= Integer.MAX_VALUE / 2
+                ? current << 1 : Integer.MAX_VALUE;
+        if (expanded < required) {
+            expanded = required;
         }
-
-        private void add(
-                int value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
+        if (expanded < current) {
+            throw new OutOfMemoryError("Parquet series buffer is too large.");
         }
+        return expanded;
+    }
 
-        private int get(
-                int index
-        ) {
-            return values[index];
+    private static List<String> copyFeatures(List<String> columns) {
+        if (columns == null || columns.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "At least one feature column is required.");
         }
-
-        private int size() {
-            return size;
-        }
-
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
-                return;
+        List<String> result = new ArrayList<>(columns.size());
+        Set<String> seen = new HashSet<>();
+        for (String column : columns) {
+            if (column == null || column.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Feature columns cannot be blank.");
             }
+            String normalized = column.trim();
+            if (!seen.add(normalized)) {
+                throw new IllegalArgumentException(
+                        "Duplicate feature column: " + normalized);
+            }
+            result.add(normalized);
+        }
+        return List.copyOf(result);
+    }
 
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
+    private static String normalizeNullableString(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")
+                ? null : trimmed;
+    }
+
+    private static void validateFile(Path file) throws IOException {
+        if (!Files.isRegularFile(file) || !Files.isReadable(file)) {
+            throw new IOException(
+                    "Parquet series file is not a readable regular file: "
+                            + file);
         }
     }
 
-    private static final class TimeSortKey
-            implements Comparable<TimeSortKey> {
-
-        private final boolean missing;
-        private final double value;
-
-        private TimeSortKey(
-                boolean missing,
-                double value
-        ) {
-            this.missing =
-                    missing;
-
-            this.value =
-                    value;
-        }
-
-        @Override
-        public int compareTo(
-                TimeSortKey other
-        ) {
-            if (missing && other.missing) {
-                return 0;
-            }
-
-            if (missing) {
-                return -1;
-            }
-
-            if (other.missing) {
-                return 1;
-            }
-
-            return Double.compare(
-                    value,
-                    other.value
-            );
-        }
-    }
+    private enum ValueKind { DOUBLE, FLOAT, LONG, INT }
 }

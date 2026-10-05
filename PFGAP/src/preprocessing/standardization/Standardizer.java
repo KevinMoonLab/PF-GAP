@@ -1,36 +1,33 @@
 package preprocessing.standardization;
 
+import core.AppContext;
 import datasets.ListObjectDataset;
 import datasets.readers.lazy.LazySeriesRef;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Applies prepared standardization statistics to realized numeric data.
+ * Applies affine forward and inverse standardization to realized primitive
+ * numeric data.
  *
  * <p>Supported representations are {@code double[]}, {@code float[]},
- * {@code double[][]}, and {@code float[][]}. Multivariate arrays use
- * dimension-major orientation: {@code data[dimension][time]}.</p>
+ * {@code double[][]}, and {@code float[][]}. Multivariate arrays are
+ * dimension-major. Transformations are performed in place, preserve primitive
+ * NaN missing values, and preserve float-backed storage.</p>
  *
- * <p>For {@link StandardizationScope#PER_DIMENSION}, one-dimensional
- * {@code double[]} and {@code float[]} instances are interpreted as tabular
- * rows. Each array position is standardized with the corresponding fitted
- * feature statistics.</p>
+ * <p>Reusable {@link StandardizationStats} support GLOBAL and PER_DIMENSION.
+ * PER_SERIES and PER_SERIES_PER_DIMENSION calculate local parameters from each
+ * realized series and return {@link PerSeriesStandardizationState} so the
+ * transformation can later be inverted.</p>
  *
- * <p>For {@link StandardizationScope#GLOBAL}, every accepted value uses the
- * single global center and scale.</p>
- *
- * <p>Transformation is performed in place and in one pass over the values.
- * This class intentionally does not perform a preliminary full-dataset
- * validation pass. Reader configuration and the configured numeric and
- * missing-value modes are treated as trusted input contracts. Cheap
- * structural checks are retained so configuration errors fail near their
- * source.</p>
- *
- * <p>Primitive NaN values are preserved. Float-backed observations retain float
- * storage: each standardized double result is narrowed once when written back
- * to the source float array. No standardized copy is created.</p>
+ * <p>Contiguous homogeneous-parameter arrays use Java Vector API kernels when
+ * {@link AppContext#useVectorApi} is enabled and the array is large enough.
+ * Scalar kernels remain available for disabled vectorization, short arrays,
+ * and scalar tails. One-dimensional PER_DIMENSION tabular rows also have a
+ * vector path that loads contiguous center and reciprocal-scale arrays.</p>
  */
 public final class Standardizer {
 
@@ -38,246 +35,383 @@ public final class Standardizer {
         // Utility class.
     }
 
-    /**
-     * Standardizes every realized instance in a dataset in place.
-     *
-     * <p>Centers and scales are defensively copied from the immutable
-     * statistics object once for the entire dataset, rather than once for
-     * every instance or dimension.</p>
-     *
-     * @param dataset eager numeric dataset
-     * @param stats prepared standardization statistics
-     * @param featureNames ordered realized-dimension names, or null when
-     *                     unavailable
-     * @return the same dataset instance
-     */
+    /* --------------------------------------------------------------------- */
+    /* Reusable training-statistic forward transformation                    */
+    /* --------------------------------------------------------------------- */
+
     public static ListObjectDataset transformInPlace(
             ListObjectDataset dataset,
             StandardizationStats stats,
             List<String> featureNames
     ) {
-        Objects.requireNonNull(
+        return transformInPlace(
                 dataset,
-                "Dataset cannot be null."
+                stats,
+                featureNames,
+                AppContext.useVectorApi
         );
+    }
 
+    public static ListObjectDataset transformInPlace(
+            ListObjectDataset dataset,
+            StandardizationStats stats,
+            List<String> featureNames,
+            boolean useVectorApi
+    ) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
         Objects.requireNonNull(
                 stats,
                 "StandardizationStats cannot be null."
         );
-
-        List<Object> data =
-                Objects.requireNonNull(
-                        dataset.getData(),
-                        "Dataset data cannot be null."
-                );
-
-        stats.validateFeatureCompatibility(
-                featureNames
+        List<Object> data = Objects.requireNonNull(
+                dataset.getData(),
+                "Dataset data cannot be null."
         );
+        stats.validateFeatureCompatibility(featureNames);
 
-        StandardizationScope scope =
-                stats.getScope();
-
-        double[] centers =
-                stats.getCenters();
-
-        double[] scales =
-                stats.getScales();
-
-        validatePreparedStatistics(
-                scope,
-                centers,
-                scales
-        );
-
+        PreparedParameters parameters = prepare(stats);
         for (Object instance : data) {
-            transformInstanceInPlace(
+            transformReusableInstanceInPlace(
                     instance,
-                    scope,
-                    centers,
-                    scales
+                    parameters,
+                    useVectorApi,
+                    false
             );
         }
-
         return dataset;
     }
 
-    /**
-     * Standardizes every realized instance without named-feature validation.
-     *
-     * @param dataset eager numeric dataset
-     * @param stats prepared standardization statistics
-     * @return the same dataset instance
-     */
     public static ListObjectDataset transformInPlace(
             ListObjectDataset dataset,
             StandardizationStats stats
     ) {
-        Objects.requireNonNull(
-                stats,
-                "StandardizationStats cannot be null."
-        );
-
-        if (stats.hasFeatureNames()) {
-            throw new IllegalArgumentException(
-                    "Standardization statistics contain ordered feature "
-                            + "names. Supply feature names to "
-                            + "transformInPlace(dataset, stats, featureNames)."
-            );
-        }
-
+        requireUnnamedCompatibility(stats);
         return transformInPlace(
                 dataset,
                 stats,
-                null
+                null,
+                AppContext.useVectorApi
         );
     }
 
-    /**
-     * Standardizes one realized numeric instance in place.
-     *
-     * <p>This method is suitable for individually materialized lazy
-     * instances. Centers and scales are copied once for this transformation
-     * call. Eager dataset transformation should use
-     * {@link #transformInPlace(ListObjectDataset, StandardizationStats)} so
-     * the copied arrays are reused across every instance.</p>
-     *
-     * @param series realized numeric instance
-     * @param stats prepared standardization statistics
-     * @return the same instance object
-     */
     public static Object transformInstanceInPlace(
             Object series,
             StandardizationStats stats
     ) {
-        Objects.requireNonNull(
+        return transformInstanceInPlace(
                 series,
-                "Series cannot be null."
+                stats,
+                AppContext.useVectorApi
         );
+    }
 
+    public static Object transformInstanceInPlace(
+            Object series,
+            StandardizationStats stats,
+            boolean useVectorApi
+    ) {
         Objects.requireNonNull(
                 stats,
                 "StandardizationStats cannot be null."
         );
-
-        if (series instanceof LazySeriesRef) {
-            throw new UnsupportedOperationException(
-                    "Cannot standardize a LazySeriesRef directly. "
-                            + "Standardize the realized series after "
-                            + "materialization."
-            );
-        }
-
-        StandardizationScope scope =
-                stats.getScope();
-
-        double[] centers =
-                stats.getCenters();
-
-        double[] scales =
-                stats.getScales();
-
-        validatePreparedStatistics(
-                scope,
-                centers,
-                scales
-        );
-
-        return transformInstanceInPlace(
+        transformReusableInstanceInPlace(
                 series,
-                scope,
-                centers,
-                scales
+                prepare(stats),
+                useVectorApi,
+                false
+        );
+        return series;
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Reusable training-statistic inverse transformation                    */
+    /* --------------------------------------------------------------------- */
+
+    public static ListObjectDataset inverseTransformInPlace(
+            ListObjectDataset dataset,
+            StandardizationStats stats,
+            List<String> featureNames
+    ) {
+        return inverseTransformInPlace(
+                dataset,
+                stats,
+                featureNames,
+                AppContext.useVectorApi
         );
     }
 
-    /**
-     * Dispatches one realized instance to its representation-specific
-     * transformation path.
-     */
-    private static Object transformInstanceInPlace(
+    public static ListObjectDataset inverseTransformInPlace(
+            ListObjectDataset dataset,
+            StandardizationStats stats,
+            List<String> featureNames,
+            boolean useVectorApi
+    ) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        Objects.requireNonNull(
+                stats,
+                "StandardizationStats cannot be null."
+        );
+        List<Object> data = Objects.requireNonNull(
+                dataset.getData(),
+                "Dataset data cannot be null."
+        );
+        stats.validateFeatureCompatibility(featureNames);
+
+        PreparedParameters parameters = prepare(stats);
+        for (Object instance : data) {
+            transformReusableInstanceInPlace(
+                    instance,
+                    parameters,
+                    useVectorApi,
+                    true
+            );
+        }
+        return dataset;
+    }
+
+    public static ListObjectDataset inverseTransformInPlace(
+            ListObjectDataset dataset,
+            StandardizationStats stats
+    ) {
+        requireUnnamedCompatibility(stats);
+        return inverseTransformInPlace(
+                dataset,
+                stats,
+                null,
+                AppContext.useVectorApi
+        );
+    }
+
+    public static Object inverseTransformInstanceInPlace(
             Object series,
-            StandardizationScope scope,
-            double[] centers,
-            double[] scales
+            StandardizationStats stats
+    ) {
+        return inverseTransformInstanceInPlace(
+                series,
+                stats,
+                AppContext.useVectorApi
+        );
+    }
+
+    public static Object inverseTransformInstanceInPlace(
+            Object series,
+            StandardizationStats stats,
+            boolean useVectorApi
     ) {
         Objects.requireNonNull(
-                series,
-                "Series cannot be null."
+                stats,
+                "StandardizationStats cannot be null."
         );
+        transformReusableInstanceInPlace(
+                series,
+                prepare(stats),
+                useVectorApi,
+                true
+        );
+        return series;
+    }
 
-        if (series instanceof LazySeriesRef) {
-            throw new UnsupportedOperationException(
-                    "Cannot standardize a LazySeriesRef directly. "
-                            + "Standardize the realized series after "
-                            + "materialization."
-            );
-        }
+    /* --------------------------------------------------------------------- */
+    /* Per-series fitting and forward transformation                         */
+    /* --------------------------------------------------------------------- */
 
-        if (series instanceof double[] values) {
-            transformPrimitiveOneDimensionalInstance(
-                    values,
-                    scope,
-                    centers,
-                    scales
-            );
-
-            return values;
-        }
-
-        if (series instanceof float[] values) {
-            transformFloatOneDimensionalInstance(
-                    values,
-                    scope,
-                    centers,
-                    scales
-            );
-
-            return values;
-        }
-
-        if (series instanceof double[][] values) {
-            transformPrimitiveMultivariateInstance(
-                    values,
-                    scope,
-                    centers,
-                    scales
-            );
-
-            return values;
-        }
-
-        if (series instanceof float[][] values) {
-            transformFloatMultivariateInstance(
-                    values,
-                    scope,
-                    centers,
-                    scales
-            );
-
-            return values;
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported standardization series type: "
-                        + series.getClass().getTypeName()
-                        + ". Expected double[], float[], double[][], or "
-                        + "float[][]. Boxed numeric arrays are not supported."
+    /**
+     * Calculates and applies local parameters to every eager dataset instance.
+     * The returned immutable list is aligned with dataset order and contains
+     * the state required for inverse transformation.
+     */
+    public static List<PerSeriesStandardizationState>
+    transformPerSeriesInPlace(
+            ListObjectDataset dataset,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention
+    ) {
+        return transformPerSeriesInPlace(
+                dataset,
+                method,
+                scope,
+                varianceConvention,
+                AppContext.useVectorApi
         );
     }
 
-    /**
-     * Transforms one primitive one-dimensional instance.
-     *
-     * <p>PER_DIMENSION interprets the instance as a tabular row.
-     * GLOBAL applies the single prepared statistic group to every value.</p>
-     */
-    private static void transformPrimitiveOneDimensionalInstance(
+    public static List<PerSeriesStandardizationState>
+    transformPerSeriesInPlace(
+            ListObjectDataset dataset,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention,
+            boolean useVectorApi
+    ) {
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        List<Object> data = Objects.requireNonNull(
+                dataset.getData(),
+                "Dataset data cannot be null."
+        );
+        requirePerSeriesConfiguration(method, scope, varianceConvention);
+
+        List<PerSeriesStandardizationState> states =
+                new ArrayList<>(data.size());
+        for (Object instance : data) {
+            states.add(
+                    transformPerSeriesInstanceInPlace(
+                            instance,
+                            method,
+                            scope,
+                            varianceConvention,
+                            useVectorApi
+                    )
+            );
+        }
+        return Collections.unmodifiableList(states);
+    }
+
+    public static PerSeriesStandardizationState
+    transformPerSeriesInstanceInPlace(
+            Object series,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention
+    ) {
+        return transformPerSeriesInstanceInPlace(
+                series,
+                method,
+                scope,
+                varianceConvention,
+                AppContext.useVectorApi
+        );
+    }
+
+    public static PerSeriesStandardizationState
+    transformPerSeriesInstanceInPlace(
+            Object series,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention,
+            boolean useVectorApi
+    ) {
+        requireRealizedSeries(series);
+        requirePerSeriesConfiguration(method, scope, varianceConvention);
+
+        PerSeriesStandardizationState state = fitPerSeriesState(
+                series,
+                method,
+                scope,
+                varianceConvention
+        );
+        transformLocalInstanceInPlace(
+                series,
+                state,
+                useVectorApi,
+                false
+        );
+        return state;
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Per-series inverse transformation                                     */
+    /* --------------------------------------------------------------------- */
+
+    public static Object inverseTransformInstanceInPlace(
+            Object series,
+            PerSeriesStandardizationState state
+    ) {
+        return inverseTransformInstanceInPlace(
+                series,
+                state,
+                AppContext.useVectorApi
+        );
+    }
+
+    public static Object inverseTransformInstanceInPlace(
+            Object series,
+            PerSeriesStandardizationState state,
+            boolean useVectorApi
+    ) {
+        transformLocalInstanceInPlace(
+                series,
+                Objects.requireNonNull(
+                        state,
+                        "Per-series state cannot be null."
+                ),
+                useVectorApi,
+                true
+        );
+        return series;
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Reusable dispatch                                                     */
+    /* --------------------------------------------------------------------- */
+
+    private static void transformReusableInstanceInPlace(
+            Object series,
+            PreparedParameters parameters,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        requireRealizedSeries(series);
+
+        if (series instanceof double[] values) {
+            transformDoubleOneDimensional(
+                    values,
+                    parameters.scope,
+                    parameters.centers,
+                    parameters.scales,
+                    parameters.inverseScales,
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        if (series instanceof float[] values) {
+            transformFloatOneDimensional(
+                    values,
+                    parameters.scope,
+                    parameters.centers,
+                    parameters.scales,
+                    parameters.inverseScales,
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        if (series instanceof double[][] values) {
+            transformDoubleMultivariate(
+                    values,
+                    parameters.scope,
+                    parameters.centers,
+                    parameters.scales,
+                    parameters.inverseScales,
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        if (series instanceof float[][] values) {
+            transformFloatMultivariate(
+                    values,
+                    parameters.scope,
+                    parameters.centers,
+                    parameters.scales,
+                    parameters.inverseScales,
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        throw unsupportedSeriesType(series);
+    }
+
+    private static void transformDoubleOneDimensional(
             double[] values,
             StandardizationScope scope,
             double[] centers,
-            double[] scales
+            double[] scales,
+            double[] inverseScales,
+            boolean useVectorApi,
+            boolean inverse
     ) {
         if (scope == StandardizationScope.PER_DIMENSION) {
             requireDimensionCompatibility(
@@ -285,39 +419,33 @@ public final class Standardizer {
                     centers.length,
                     "Tabular row"
             );
-
-            transformPrimitiveTabularRow(
+            transformDoubleTabular(
                     values,
                     centers,
-                    scales
+                    inverse ? scales : inverseScales,
+                    useVectorApi,
+                    inverse
             );
-
             return;
         }
-
-        requireGlobalStatistics(
-                centers,
-                scales
-        );
-
-        transformPrimitiveDimension(
+        requireGlobalParameters(centers, scales);
+        transformDoubleDimension(
                 values,
                 centers[0],
-                scales[0]
+                inverse ? scales[0] : inverseScales[0],
+                useVectorApi,
+                inverse
         );
     }
 
-    /**
-     * Transforms one float one-dimensional instance.
-     *
-     * <p>PER_DIMENSION interprets the instance as a tabular row.
-     * GLOBAL applies the single prepared statistic group to every value.</p>
-     */
-    private static void transformFloatOneDimensionalInstance(
+    private static void transformFloatOneDimensional(
             float[] values,
             StandardizationScope scope,
             double[] centers,
-            double[] scales
+            double[] scales,
+            double[] inverseScales,
+            boolean useVectorApi,
+            boolean inverse
     ) {
         if (scope == StandardizationScope.PER_DIMENSION) {
             requireDimensionCompatibility(
@@ -325,325 +453,905 @@ public final class Standardizer {
                     centers.length,
                     "Tabular row"
             );
-            transformFloatTabularRow(
+            transformFloatTabular(
                     values,
                     centers,
-                    scales
+                    inverse ? scales : inverseScales,
+                    useVectorApi,
+                    inverse
             );
             return;
         }
-
-        requireGlobalStatistics(
-                centers,
-                scales
-        );
+        requireGlobalParameters(centers, scales);
         transformFloatDimension(
                 values,
                 centers[0],
-                scales[0]
+                inverse ? scales[0] : inverseScales[0],
+                useVectorApi,
+                inverse
         );
     }
 
-    /**
-     * Transforms one primitive dimension-major multivariate instance.
-     */
-    private static void transformPrimitiveMultivariateInstance(
+    private static void transformDoubleMultivariate(
             double[][] values,
             StandardizationScope scope,
             double[] centers,
-            double[] scales
+            double[] scales,
+            double[] inverseScales,
+            boolean useVectorApi,
+            boolean inverse
     ) {
-        requirePositiveDimensionCount(
-                values.length
-        );
-
+        requirePositiveDimensionCount(values.length);
         if (scope == StandardizationScope.PER_DIMENSION) {
             requireDimensionCompatibility(
                     values.length,
                     centers.length,
                     "Multivariate series"
             );
-
-            for (int dimension = 0;
-                 dimension < values.length;
-                 dimension++) {
-
-                double[] dimensionValues =
-                        Objects.requireNonNull(
-                                values[dimension],
-                                "Numeric series contains a null dimension at "
-                                        + dimension
-                                        + "."
-                        );
-
-                transformPrimitiveDimension(
-                        dimensionValues,
-                        centers[dimension],
-                        scales[dimension]
-                );
-            }
-
-            return;
+        } else {
+            requireGlobalParameters(centers, scales);
         }
 
-        requireGlobalStatistics(
-                centers,
-                scales
-        );
-
-        double center =
-                centers[0];
-
-        double scale =
-                scales[0];
-
-        for (int dimension = 0;
-             dimension < values.length;
-             dimension++) {
-
-            double[] dimensionValues =
-                    Objects.requireNonNull(
-                            values[dimension],
-                            "Numeric series contains a null dimension at "
-                                    + dimension
-                                    + "."
-                    );
-
-            transformPrimitiveDimension(
-                    dimensionValues,
-                    center,
-                    scale
+        for (int dimension = 0; dimension < values.length; dimension++) {
+            double[] row = requireDimension(values[dimension], dimension);
+            int group = scope == StandardizationScope.GLOBAL ? 0 : dimension;
+            transformDoubleDimension(
+                    row,
+                    centers[group],
+                    inverse ? scales[group] : inverseScales[group],
+                    useVectorApi,
+                    inverse
             );
         }
     }
 
-    /**
-     * Transforms one float dimension-major multivariate instance.
-     */
-    private static void transformFloatMultivariateInstance(
+    private static void transformFloatMultivariate(
             float[][] values,
             StandardizationScope scope,
             double[] centers,
-            double[] scales
+            double[] scales,
+            double[] inverseScales,
+            boolean useVectorApi,
+            boolean inverse
     ) {
-        requirePositiveDimensionCount(
-                values.length
-        );
+        requirePositiveDimensionCount(values.length);
         if (scope == StandardizationScope.PER_DIMENSION) {
             requireDimensionCompatibility(
                     values.length,
                     centers.length,
                     "Multivariate series"
             );
-            for (int dimension = 0;
-                 dimension < values.length;
-                 dimension++) {
-                float[] dimensionValues =
-                        Objects.requireNonNull(
-                                values[dimension],
-                                "Numeric series contains a null dimension at "
-                                        + dimension
-                                        + "."
+        } else {
+            requireGlobalParameters(centers, scales);
+        }
+
+        for (int dimension = 0; dimension < values.length; dimension++) {
+            float[] row = requireDimension(values[dimension], dimension);
+            int group = scope == StandardizationScope.GLOBAL ? 0 : dimension;
+            transformFloatDimension(
+                    row,
+                    centers[group],
+                    inverse ? scales[group] : inverseScales[group],
+                    useVectorApi,
+                    inverse
+            );
+        }
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Per-series state fitting and dispatch                                 */
+    /* --------------------------------------------------------------------- */
+
+    private static PerSeriesStandardizationState fitPerSeriesState(
+            Object series,
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention
+    ) {
+        int dimensionCount = dimensionCount(series);
+        int groupCount = scope.perSeriesGroupCount(dimensionCount);
+        long[] counts = new long[groupCount];
+        double[] centers = new double[groupCount];
+        double[] scales = new double[groupCount];
+
+        if (method == StandardizationMethod.MIN_MAX) {
+            OnlineRange[] ranges = new OnlineRange[groupCount];
+            for (int group = 0; group < groupCount; group++) {
+                ranges[group] = new OnlineRange();
+            }
+            accumulateLocal(series, scope, (group, value) ->
+                    ranges[group].add(value));
+            for (int group = 0; group < groupCount; group++) {
+                OnlineRange range = ranges[group];
+                requireObservedLocalGroup(range.hasObservations(), group);
+                counts[group] = range.getCount();
+                centers[group] = range.getMinimum();
+                scales[group] = range.isConstant()
+                        ? StandardizationFitter.CONSTANT_SCALE
+                        : requireFinitePositiveRange(range.getRange(), group);
+            }
+        } else {
+            OnlineMoments[] moments = new OnlineMoments[groupCount];
+            for (int group = 0; group < groupCount; group++) {
+                moments[group] = new OnlineMoments();
+            }
+            accumulateLocal(series, scope, (group, value) ->
+                    moments[group].add(value));
+            for (int group = 0; group < groupCount; group++) {
+                OnlineMoments moment = moments[group];
+                requireObservedLocalGroup(moment.hasObservations(), group);
+                counts[group] = moment.getCount();
+                centers[group] = moment.getMean();
+                scales[group] = method == StandardizationMethod.MEAN_CENTER
+                        ? StandardizationFitter.CONSTANT_SCALE
+                        : fittedLocalStandardDeviation(
+                                moment,
+                                varianceConvention,
+                                group
                         );
-                transformFloatDimension(
-                        dimensionValues,
-                        centers[dimension],
-                        scales[dimension]
+            }
+        }
+
+        return new PerSeriesStandardizationState(
+                method,
+                scope,
+                varianceConvention,
+                counts,
+                centers,
+                scales
+        );
+    }
+
+    private static void accumulateLocal(
+            Object series,
+            StandardizationScope scope,
+            LocalValueSink sink
+    ) {
+        if (series instanceof double[] values) {
+            accumulateDoubleLocal(values, 0, sink);
+            return;
+        }
+        if (series instanceof float[] values) {
+            accumulateFloatLocal(values, 0, sink);
+            return;
+        }
+        if (series instanceof double[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                int group = scope == StandardizationScope.PER_SERIES
+                        ? 0 : dimension;
+                accumulateDoubleLocal(
+                        requireDimension(matrix[dimension], dimension),
+                        group,
+                        sink
                 );
             }
             return;
         }
-
-        requireGlobalStatistics(
-                centers,
-                scales
-        );
-        double center = centers[0];
-        double scale = scales[0];
-        for (int dimension = 0;
-             dimension < values.length;
-             dimension++) {
-            float[] dimensionValues =
-                    Objects.requireNonNull(
-                            values[dimension],
-                            "Numeric series contains a null dimension at "
-                                    + dimension
-                                    + "."
-                    );
-            transformFloatDimension(
-                    dimensionValues,
-                    center,
-                    scale
-            );
-        }
-    }
-
-    /**
-     * Applies one center and scale per primitive tabular feature.
-     */
-    private static void transformPrimitiveTabularRow(
-            double[] values,
-            double[] centers,
-            double[] scales
-    ) {
-        for (int feature = 0;
-             feature < values.length;
-             feature++) {
-
-            double value =
-                    values[feature];
-
-            if (!Double.isNaN(
-                    value
-            )) {
-                values[feature] =
-                        (value - centers[feature])
-                                / scales[feature];
-            }
-        }
-    }
-
-    /**
-     * Applies one center and scale per float tabular feature.
-     */
-    private static void transformFloatTabularRow(
-            float[] values,
-            double[] centers,
-            double[] scales
-    ) {
-        for (int feature = 0;
-             feature < values.length;
-             feature++) {
-            float value = values[feature];
-            if (!Float.isNaN(value)) {
-                values[feature] = (float) (
-                        ((double) value - centers[feature])
-                                / scales[feature]
+        if (series instanceof float[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                int group = scope == StandardizationScope.PER_SERIES
+                        ? 0 : dimension;
+                accumulateFloatLocal(
+                        requireDimension(matrix[dimension], dimension),
+                        group,
+                        sink
                 );
             }
+            return;
         }
+        throw unsupportedSeriesType(series);
     }
 
-    /**
-     * Applies one prepared center and scale to every accepted value in one
-     * primitive series dimension.
-     */
-    private static void transformPrimitiveDimension(
+    private static void accumulateDoubleLocal(
             double[] values,
-            double center,
-            double scale
+            int group,
+            LocalValueSink sink
     ) {
-        for (int index = 0;
-             index < values.length;
-             index++) {
-
-            double value =
-                    values[index];
-
-            if (!Double.isNaN(
-                    value
-            )) {
-                values[index] =
-                        (value - center)
-                                / scale;
-            }
+        for (double value : values) {
+            addLocalValue(value, group, sink);
         }
     }
 
-    /**
-     * Applies one prepared center and scale to every accepted value in one
-     * float series dimension.
-     */
-    private static void transformFloatDimension(
+    private static void accumulateFloatLocal(
             float[] values,
-            double center,
-            double scale
+            int group,
+            LocalValueSink sink
     ) {
-        for (int index = 0;
-             index < values.length;
-             index++) {
-            float value = values[index];
-            if (!Float.isNaN(value)) {
-                values[index] = (float) (
-                        ((double) value - center) / scale
-                );
-            }
+        for (float value : values) {
+            addLocalValue(value, group, sink);
         }
     }
 
-    /**
-     * Performs one-time validation of copied prepared-statistics arrays.
-     */
-    private static void validatePreparedStatistics(
-            StandardizationScope scope,
-            double[] centers,
-            double[] scales
+    private static void addLocalValue(
+            double value,
+            int group,
+            LocalValueSink sink
     ) {
-        Objects.requireNonNull(
-                scope,
-                "Standardization scope cannot be null."
-        );
-
-        Objects.requireNonNull(
-                centers,
-                "Standardization centers cannot be null."
-        );
-
-        Objects.requireNonNull(
-                scales,
-                "Standardization scales cannot be null."
-        );
-
-        if (centers.length == 0) {
-            throw new IllegalArgumentException(
-                    "Standardization statistics must contain at least "
-                            + "one statistic group."
-            );
+        if (Double.isNaN(value)) {
+            return;
         }
-
-        if (centers.length != scales.length) {
+        if (!Double.isFinite(value)) {
             throw new IllegalArgumentException(
-                    "Standardization centers and scales must have "
-                            + "identical lengths. Received centers="
-                            + centers.length
-                            + " and scales="
-                            + scales.length
+                    "Per-series standardization encountered a nonfinite "
+                            + "value in parameter group "
+                            + group
+                            + ": "
+                            + value
                             + "."
             );
         }
+        sink.add(group, value);
+    }
 
-        if (scope != StandardizationScope.GLOBAL
-                && scope != StandardizationScope.PER_DIMENSION) {
+    private static void transformLocalInstanceInPlace(
+            Object series,
+            PerSeriesStandardizationState state,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        requireRealizedSeries(series);
+        double[] centers = state.getCenters();
+        double[] scales = state.getScales();
+        double[] factors = inverse
+                ? scales
+                : reciprocalScales(scales);
+        StandardizationScope scope = state.getScope();
 
-            throw new UnsupportedOperationException(
-                    "Prepared reusable statistics do not support scope "
+        if (series instanceof double[] values) {
+            requireSingleLocalGroup(centers);
+            transformDoubleDimension(
+                    values,
+                    centers[0],
+                    factors[0],
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        if (series instanceof float[] values) {
+            requireSingleLocalGroup(centers);
+            transformFloatDimension(
+                    values,
+                    centers[0],
+                    factors[0],
+                    useVectorApi,
+                    inverse
+            );
+            return;
+        }
+        if (series instanceof double[][] matrix) {
+            requireLocalDimensionCompatibility(matrix.length, scope, centers);
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                int group = scope == StandardizationScope.PER_SERIES
+                        ? 0 : dimension;
+                transformDoubleDimension(
+                        requireDimension(matrix[dimension], dimension),
+                        centers[group],
+                        factors[group],
+                        useVectorApi,
+                        inverse
+                );
+            }
+            return;
+        }
+        if (series instanceof float[][] matrix) {
+            requireLocalDimensionCompatibility(matrix.length, scope, centers);
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                int group = scope == StandardizationScope.PER_SERIES
+                        ? 0 : dimension;
+                transformFloatDimension(
+                        requireDimension(matrix[dimension], dimension),
+                        centers[group],
+                        factors[group],
+                        useVectorApi,
+                        inverse
+                );
+            }
+            return;
+        }
+        throw unsupportedSeriesType(series);
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Scalar and Vector API kernels                                         */
+    /* --------------------------------------------------------------------- */
+
+    private static void transformDoubleDimension(
+            double[] values,
+            double center,
+            double factor,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        if (useVectorApi) {
+            VectorBridge.transformDoubleDimension(
+                    values, center, factor, inverse
+            );
+            return;
+        }
+        transformDoubleDimensionScalar(values, center, factor, inverse);
+    }
+
+    private static void transformDoubleDimensionScalar(
+            double[] values,
+            double center,
+            double factor,
+            boolean inverse
+    ) {
+        if (inverse) {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = values[index] * factor + center;
+            }
+        } else {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = (values[index] - center) * factor;
+            }
+        }
+    }
+
+    private static void transformFloatDimension(
+            float[] values,
+            double center,
+            double factor,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        float floatCenter = (float) center;
+        float floatFactor = (float) factor;
+        if (useVectorApi) {
+            VectorBridge.transformFloatDimension(
+                    values, floatCenter, floatFactor, inverse
+            );
+            return;
+        }
+        transformFloatDimensionScalar(
+                values, floatCenter, floatFactor, inverse
+        );
+    }
+
+    private static void transformFloatDimensionScalar(
+            float[] values,
+            float center,
+            float factor,
+            boolean inverse
+    ) {
+        if (inverse) {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = values[index] * factor + center;
+            }
+        } else {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = (values[index] - center) * factor;
+            }
+        }
+    }
+
+    private static void transformDoubleTabular(
+            double[] values,
+            double[] centers,
+            double[] factors,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        if (useVectorApi) {
+            VectorBridge.transformDoubleTabular(
+                    values, centers, factors, inverse
+            );
+            return;
+        }
+        transformDoubleTabularScalar(values, centers, factors, inverse);
+    }
+
+    private static void transformDoubleTabularScalar(
+            double[] values,
+            double[] centers,
+            double[] factors,
+            boolean inverse
+    ) {
+        if (inverse) {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = values[index] * factors[index]
+                        + centers[index];
+            }
+        } else {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = (values[index] - centers[index])
+                        * factors[index];
+            }
+        }
+    }
+
+    private static void transformFloatTabular(
+            float[] values,
+            double[] centers,
+            double[] factors,
+            boolean useVectorApi,
+            boolean inverse
+    ) {
+        if (inverse) {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = (float) (
+                        (double) values[index] * factors[index]
+                                + centers[index]
+                );
+            }
+        } else {
+            for (int index = 0; index < values.length; index++) {
+                values[index] = (float) (
+                        ((double) values[index] - centers[index])
+                                * factors[index]
+                );
+            }
+        }
+    }
+
+    /**
+     * Reflective bridge that prevents scalar-only class loading from resolving
+     * any incubator Vector API type. It initializes only on a vector request.
+     */
+    private static final class VectorBridge {
+        private static final Class<?> KERNELS;
+
+        static {
+            try {
+                KERNELS = Class.forName(
+                        Standardizer.class.getName() + "$VectorKernels"
+                );
+            } catch (ClassNotFoundException | LinkageError exception) {
+                throw unavailable(exception);
+            }
+        }
+
+        private VectorBridge() {
+        }
+
+        private static void transformDoubleDimension(
+                double[] values, double center, double factor, boolean inverse
+        ) {
+            invoke("transformDoubleDimension",
+                    new Class<?>[]{double[].class, double.class,
+                            double.class, boolean.class},
+                    values, center, factor, inverse);
+        }
+
+        private static void transformFloatDimension(
+                float[] values, float center, float factor, boolean inverse
+        ) {
+            invoke("transformFloatDimension",
+                    new Class<?>[]{float[].class, float.class,
+                            float.class, boolean.class},
+                    values, center, factor, inverse);
+        }
+
+        private static void transformDoubleTabular(
+                double[] values, double[] centers, double[] factors,
+                boolean inverse
+        ) {
+            invoke("transformDoubleTabular",
+                    new Class<?>[]{double[].class, double[].class,
+                            double[].class, boolean.class},
+                    values, centers, factors, inverse);
+        }
+
+        private static void invoke(
+                String name, Class<?>[] parameterTypes, Object... arguments
+        ) {
+            try {
+                java.lang.reflect.Method method =
+                        KERNELS.getDeclaredMethod(name, parameterTypes);
+                method.setAccessible(true);
+                method.invoke(null, arguments);
+            } catch (java.lang.reflect.InvocationTargetException exception) {
+                Throwable cause = exception.getCause();
+                if (cause instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (cause instanceof Error error) {
+                    throw error;
+                }
+                throw new IllegalStateException(
+                        "Vector standardization kernel failed.", cause
+                );
+            } catch (ReflectiveOperationException | LinkageError exception) {
+                throw unavailable(exception);
+            }
+        }
+
+        private static IllegalStateException unavailable(Throwable cause) {
+            return new IllegalStateException(
+                    "Vector API standardization was requested, but "
+                            + "jdk.incubator.vector is unavailable. Launch "
+                            + "Java with --add-modules jdk.incubator.vector "
+                            + "or set use_vector_api=false.",
+                    cause
+            );
+        }
+    }
+
+    /** All incubator references are isolated in this lazily loaded class. */
+    private static final class VectorKernels {
+        private static final int VECTOR_LOOP_MULTIPLIER = 2;
+        private static final
+        jdk.incubator.vector.VectorSpecies<Double> DOUBLE_SPECIES =
+                jdk.incubator.vector.DoubleVector.SPECIES_PREFERRED;
+        private static final
+        jdk.incubator.vector.VectorSpecies<Float> FLOAT_SPECIES =
+                jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
+
+        private VectorKernels() {
+        }
+
+        private static void transformDoubleDimension(
+                double[] values, double center, double factor, boolean inverse
+        ) {
+            if (values.length < DOUBLE_SPECIES.length()
+                    * VECTOR_LOOP_MULTIPLIER) {
+                transformDoubleDimensionScalar(
+                        values, center, factor, inverse
+                );
+                return;
+            }
+            int index = 0;
+            int upperBound = DOUBLE_SPECIES.loopBound(values.length);
+            jdk.incubator.vector.DoubleVector centerVector =
+                    jdk.incubator.vector.DoubleVector.broadcast(
+                            DOUBLE_SPECIES, center
+                    );
+            jdk.incubator.vector.DoubleVector factorVector =
+                    jdk.incubator.vector.DoubleVector.broadcast(
+                            DOUBLE_SPECIES, factor
+                    );
+            for (; index < upperBound; index += DOUBLE_SPECIES.length()) {
+                jdk.incubator.vector.DoubleVector vector =
+                        jdk.incubator.vector.DoubleVector.fromArray(
+                                DOUBLE_SPECIES, values, index
+                        );
+                (inverse
+                        ? vector.mul(factorVector).add(centerVector)
+                        : vector.sub(centerVector).mul(factorVector))
+                        .intoArray(values, index);
+            }
+            if (inverse) {
+                for (; index < values.length; index++) {
+                    values[index] = values[index] * factor + center;
+                }
+            } else {
+                for (; index < values.length; index++) {
+                    values[index] = (values[index] - center) * factor;
+                }
+            }
+        }
+
+        private static void transformFloatDimension(
+                float[] values, float center, float factor, boolean inverse
+        ) {
+            if (values.length < FLOAT_SPECIES.length()
+                    * VECTOR_LOOP_MULTIPLIER) {
+                transformFloatDimensionScalar(
+                        values, center, factor, inverse
+                );
+                return;
+            }
+            int index = 0;
+            int upperBound = FLOAT_SPECIES.loopBound(values.length);
+            jdk.incubator.vector.FloatVector centerVector =
+                    jdk.incubator.vector.FloatVector.broadcast(
+                            FLOAT_SPECIES, center
+                    );
+            jdk.incubator.vector.FloatVector factorVector =
+                    jdk.incubator.vector.FloatVector.broadcast(
+                            FLOAT_SPECIES, factor
+                    );
+            for (; index < upperBound; index += FLOAT_SPECIES.length()) {
+                jdk.incubator.vector.FloatVector vector =
+                        jdk.incubator.vector.FloatVector.fromArray(
+                                FLOAT_SPECIES, values, index
+                        );
+                (inverse
+                        ? vector.mul(factorVector).add(centerVector)
+                        : vector.sub(centerVector).mul(factorVector))
+                        .intoArray(values, index);
+            }
+            if (inverse) {
+                for (; index < values.length; index++) {
+                    values[index] = values[index] * factor + center;
+                }
+            } else {
+                for (; index < values.length; index++) {
+                    values[index] = (values[index] - center) * factor;
+                }
+            }
+        }
+
+        private static void transformDoubleTabular(
+                double[] values, double[] centers, double[] factors,
+                boolean inverse
+        ) {
+            if (values.length < DOUBLE_SPECIES.length()
+                    * VECTOR_LOOP_MULTIPLIER) {
+                transformDoubleTabularScalar(
+                        values, centers, factors, inverse
+                );
+                return;
+            }
+            int index = 0;
+            int upperBound = DOUBLE_SPECIES.loopBound(values.length);
+            for (; index < upperBound; index += DOUBLE_SPECIES.length()) {
+                jdk.incubator.vector.DoubleVector valuesVector =
+                        jdk.incubator.vector.DoubleVector.fromArray(
+                                DOUBLE_SPECIES, values, index
+                        );
+                jdk.incubator.vector.DoubleVector centersVector =
+                        jdk.incubator.vector.DoubleVector.fromArray(
+                                DOUBLE_SPECIES, centers, index
+                        );
+                jdk.incubator.vector.DoubleVector factorsVector =
+                        jdk.incubator.vector.DoubleVector.fromArray(
+                                DOUBLE_SPECIES, factors, index
+                        );
+                (inverse
+                        ? valuesVector.mul(factorsVector).add(centersVector)
+                        : valuesVector.sub(centersVector).mul(factorsVector))
+                        .intoArray(values, index);
+            }
+            if (inverse) {
+                for (; index < values.length; index++) {
+                    values[index] = values[index] * factors[index]
+                            + centers[index];
+                }
+            } else {
+                for (; index < values.length; index++) {
+                    values[index] = (values[index] - centers[index])
+                            * factors[index];
+                }
+            }
+        }
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Validation and preparation                                            */
+    /* --------------------------------------------------------------------- */
+
+    private static PreparedParameters prepare(
+            StandardizationStats stats
+    ) {
+        StandardizationScope scope = stats.getScope();
+        if (!scope.usesTrainingStatistics()) {
+            throw new IllegalArgumentException(
+                    "Reusable StandardizationStats cannot use scope "
                             + scope
                             + "."
             );
         }
+        double[] centers = stats.getCenters();
+        double[] scales = stats.getScales();
+        validatePreparedParameters(scope, centers, scales);
+        return new PreparedParameters(
+                scope,
+                centers,
+                scales,
+                reciprocalScales(scales)
+        );
+    }
 
-        if (scope == StandardizationScope.GLOBAL
-                && centers.length != 1) {
+    private static double[] reciprocalScales(
+            double[] scales
+    ) {
+        double[] inverseScales = new double[scales.length];
+        for (int group = 0; group < scales.length; group++) {
+            inverseScales[group] = 1.0 / scales[group];
+        }
+        return inverseScales;
+    }
 
+    private static void validatePreparedParameters(
+            StandardizationScope scope,
+            double[] centers,
+            double[] scales
+    ) {
+        Objects.requireNonNull(scope, "Scope cannot be null.");
+        Objects.requireNonNull(centers, "Centers cannot be null.");
+        Objects.requireNonNull(scales, "Scales cannot be null.");
+        if (centers.length == 0 || centers.length != scales.length) {
             throw new IllegalArgumentException(
-                    "GLOBAL standardization requires exactly one "
-                            + "statistic group, but received "
+                    "Prepared centers and scales must have identical, "
+                            + "nonzero lengths."
+            );
+        }
+        if (scope == StandardizationScope.GLOBAL && centers.length != 1) {
+            throw new IllegalArgumentException(
+                    "GLOBAL standardization requires one parameter group."
+            );
+        }
+    }
+
+    private static void requirePerSeriesConfiguration(
+            StandardizationMethod method,
+            StandardizationScope scope,
+            VarianceConvention varianceConvention
+    ) {
+        Objects.requireNonNull(method, "Method cannot be null.");
+        Objects.requireNonNull(scope, "Scope cannot be null.");
+        Objects.requireNonNull(
+                varianceConvention,
+                "Variance convention cannot be null."
+        );
+        method.requireImplemented();
+        scope.requireImplemented();
+        if (method == StandardizationMethod.NONE) {
+            throw new IllegalArgumentException(
+                    "Per-series transformation state is unnecessary for NONE."
+            );
+        }
+        if (!scope.usesPerSeriesStatistics()) {
+            throw new IllegalArgumentException(
+                    "Per-series transformation requires PER_SERIES or "
+                            + "PER_SERIES_PER_DIMENSION, but received "
+                            + scope
+                            + "."
+            );
+        }
+    }
+
+    private static int dimensionCount(
+            Object series
+    ) {
+        if (series instanceof double[] || series instanceof float[]) {
+            return 1;
+        }
+        if (series instanceof double[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
+        if (series instanceof float[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
+        throw unsupportedSeriesType(series);
+    }
+
+    private static double fittedLocalStandardDeviation(
+            OnlineMoments moments,
+            VarianceConvention convention,
+            int group
+    ) {
+        if (!moments.canCalculateVariance(convention)) {
+            return StandardizationFitter.CONSTANT_SCALE;
+        }
+        double standardDeviation = moments.getStandardDeviation(convention);
+        if (!Double.isFinite(standardDeviation)) {
+            throw new ArithmeticException(
+                    "Per-series z-score fitting produced a nonfinite standard "
+                            + "deviation for group "
+                            + group
+                            + "."
+            );
+        }
+        return standardDeviation == 0.0
+                ? StandardizationFitter.CONSTANT_SCALE
+                : standardDeviation;
+    }
+
+    private static double requireFinitePositiveRange(
+            double range,
+            int group
+    ) {
+        if (!Double.isFinite(range) || range <= 0.0) {
+            throw new ArithmeticException(
+                    "Per-series min-max fitting produced an invalid range "
+                            + "for group "
+                            + group
+                            + ": "
+                            + range
+                            + "."
+            );
+        }
+        return range;
+    }
+
+    private static void requireObservedLocalGroup(
+            boolean observed,
+            int group
+    ) {
+        if (!observed) {
+            throw new IllegalArgumentException(
+                    "Per-series parameter group "
+                            + group
+                            + " contains no observed values."
+            );
+        }
+    }
+
+    private static void requireUnnamedCompatibility(
+            StandardizationStats stats
+    ) {
+        Objects.requireNonNull(
+                stats,
+                "StandardizationStats cannot be null."
+        );
+        if (stats.hasFeatureNames()) {
+            throw new IllegalArgumentException(
+                    "Statistics contain ordered feature names. Supply feature "
+                            + "names to the dataset transformation overload."
+            );
+        }
+    }
+
+    private static void requireRealizedSeries(
+            Object series
+    ) {
+        Objects.requireNonNull(series, "Series cannot be null.");
+        if (series instanceof LazySeriesRef) {
+            throw new UnsupportedOperationException(
+                    "Cannot transform a LazySeriesRef directly. Transform the "
+                            + "realized numeric series during or after "
+                            + "materialization."
+            );
+        }
+    }
+
+    private static void requireGlobalParameters(
+            double[] centers,
+            double[] scales
+    ) {
+        if (centers.length != 1 || scales.length != 1) {
+            throw new IllegalArgumentException(
+                    "GLOBAL standardization requires one center and scale."
+            );
+        }
+    }
+
+    private static void requireSingleLocalGroup(
+            double[] centers
+    ) {
+        if (centers.length != 1) {
+            throw new IllegalArgumentException(
+                    "Univariate per-series transformation requires one local "
+                            + "parameter group, but received "
                             + centers.length
                             + "."
             );
         }
     }
 
-    private static void requireGlobalStatistics(
-            double[] centers,
-            double[] scales
+    private static void requireLocalDimensionCompatibility(
+            int dimensionCount,
+            StandardizationScope scope,
+            double[] centers
     ) {
-        if (centers.length != 1
-                || scales.length != 1) {
-
+        requirePositiveDimensionCount(dimensionCount);
+        int expected = scope == StandardizationScope.PER_SERIES
+                ? 1
+                : dimensionCount;
+        if (centers.length != expected) {
             throw new IllegalArgumentException(
-                    "GLOBAL standardization requires exactly one "
-                            + "center and one scale."
+                    "Per-series state contains "
+                            + centers.length
+                            + " groups; expected "
+                            + expected
+                            + " for "
+                            + scope
+                            + "."
+            );
+        }
+    }
+
+    private static void requireDimensionCompatibility(
+            int actual,
+            int expected,
+            String representation
+    ) {
+        requirePositiveDimensionCount(actual);
+        if (actual != expected) {
+            throw new IllegalArgumentException(
+                    representation
+                            + " contains "
+                            + actual
+                            + " dimensions or features, but statistics contain "
+                            + expected
+                            + " groups."
             );
         }
     }
@@ -653,35 +1361,57 @@ public final class Standardizer {
     ) {
         if (dimensionCount < 1) {
             throw new IllegalArgumentException(
-                    "Numeric data must contain at least one "
-                            + "realized dimension."
+                    "Numeric data must contain at least one realized "
+                            + "dimension."
             );
         }
     }
 
-    /**
-     * Validates either a tabular feature count or a multivariate dimension
-     * count against the prepared PER_DIMENSION statistics.
-     */
-    private static void requireDimensionCompatibility(
-            int actualDimensionCount,
-            int expectedDimensionCount,
-            String representationName
+    private static double[] requireDimension(
+            double[] dimension,
+            int index
     ) {
-        requirePositiveDimensionCount(
-                actualDimensionCount
+        return Objects.requireNonNull(
+                dimension,
+                "Numeric series contains a null dimension at index "
+                        + index
+                        + "."
         );
+    }
 
-        if (actualDimensionCount != expectedDimensionCount) {
-            throw new IllegalArgumentException(
-                    representationName
-                            + " contains "
-                            + actualDimensionCount
-                            + " realized dimensions or features, but "
-                            + "PER_DIMENSION statistics contain "
-                            + expectedDimensionCount
-                            + " groups."
-            );
-        }
+    private static float[] requireDimension(
+            float[] dimension,
+            int index
+    ) {
+        return Objects.requireNonNull(
+                dimension,
+                "Numeric series contains a null dimension at index "
+                        + index
+                        + "."
+        );
+    }
+
+    private static IllegalArgumentException unsupportedSeriesType(
+            Object series
+    ) {
+        return new IllegalArgumentException(
+                "Unsupported standardization series type: "
+                        + series.getClass().getTypeName()
+                        + ". Expected double[], float[], double[][], or "
+                        + "float[][]."
+        );
+    }
+
+    private record PreparedParameters(
+            StandardizationScope scope,
+            double[] centers,
+            double[] scales,
+            double[] inverseScales
+    ) {
+    }
+
+    @FunctionalInterface
+    private interface LocalValueSink {
+        void add(int group, double value);
     }
 }

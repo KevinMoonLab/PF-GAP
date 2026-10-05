@@ -4,11 +4,8 @@ import proximity.CompressedSparseProximityMatrix;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 
 /**
@@ -138,54 +135,35 @@ public final class ProximityWriter {
                 path,
                 "Proximity output path cannot be null."
         );
-
         Objects.requireNonNull(
                 matrix,
                 "Sparse proximity matrix cannot be null."
         );
 
         if (symmetric) {
-            validateSymmetric(
-                    matrix
-            );
+            validateSymmetric(matrix);
         }
 
-        long entryCount =
-                symmetric
-                        ? countUpperTriangleEntries(matrix)
-                        : matrix.nonZeroCountLong();
+        long entryCount = symmetric
+                ? countUpperTriangleEntries(matrix)
+                : matrix.nonZeroCountLong();
+        MatrixMarketWriter.Symmetry storage = symmetric
+                ? MatrixMarketWriter.Symmetry.SYMMETRIC
+                : MatrixMarketWriter.Symmetry.GENERAL;
 
-        Path outputPath =
-                normalizeAndPreparePath(
-                        path
-                );
-
-        try (BufferedWriter writer =
-                     newUtf8Writer(
-                             outputPath
-                     )) {
-
-            writeMatrixMarketCoordinateHeader(
-                    writer,
-                    symmetric,
-                    description
-            );
-
-            writeCoordinateShape(
-                    writer,
-                    matrix.rowCount(),
-                    matrix.columnCount(),
-                    entryCount
-            );
-
-            writeSparseEntries(
-                    writer,
-                    matrix,
-                    symmetric
-            );
-        }
-
-        return outputPath;
+        return MatrixMarketWriter.writeCoordinate(
+                path,
+                matrix.rowCount(),
+                matrix.columnCount(),
+                entryCount,
+                storage,
+                description,
+                sink -> streamSparseEntries(
+                        matrix,
+                        symmetric,
+                        sink
+                )
+        );
     }
 
     /**
@@ -199,67 +177,11 @@ public final class ProximityWriter {
             double[][] matrix,
             String description
     ) throws IOException {
-        DenseShape shape =
-                validateDenseMatrix(
-                        path,
-                        matrix
-                );
-
-        Path outputPath =
-                normalizeAndPreparePath(
-                        path
-                );
-
-        try (BufferedWriter writer =
-                     newUtf8Writer(
-                             outputPath
-                     )) {
-
-            writer.write(
-                    "%%MatrixMarket matrix array real general"
-            );
-            writer.write('\n');
-
-            writeMatrixMarketComment(
-                    writer,
-                    description
-            );
-
-            writer.write(
-                    Integer.toString(
-                            shape.rowCount()
-                    )
-            );
-            writer.write(' ');
-            writer.write(
-                    Integer.toString(
-                            shape.columnCount()
-                    )
-            );
-            writer.write('\n');
-
-            for (int columnIndex = 0;
-                 columnIndex < shape.columnCount();
-                 columnIndex++) {
-
-                for (int rowIndex = 0;
-                     rowIndex < shape.rowCount();
-                     rowIndex++) {
-
-                    double value =
-                            matrix[rowIndex][columnIndex];
-
-                    writer.write(
-                            Double.toString(
-                                    value
-                            )
-                    );
-                    writer.write('\n');
-                }
-            }
-        }
-
-        return outputPath;
+        return MatrixMarketWriter.writeArray(
+                path,
+                matrix,
+                description
+        );
     }
 
     /**
@@ -277,69 +199,37 @@ public final class ProximityWriter {
         );
     }
 
-    private static void writeSparseEntries(
-            Writer writer,
+    private static void streamSparseEntries(
             CompressedSparseProximityMatrix matrix,
-            boolean upperTriangleOnly
+            boolean upperTriangleOnly,
+            MatrixMarketWriter.CoordinateSink sink
     ) throws IOException {
         for (int rowIndex = 0;
              rowIndex < matrix.rowCount();
              rowIndex++) {
-
-            int entryCount =
-                    matrix.rowEntryCount(
-                            rowIndex
-                    );
-
+            int entryCount = matrix.rowEntryCount(rowIndex);
             for (int rowOffset = 0;
                  rowOffset < entryCount;
                  rowOffset++) {
-
-                int columnIndex =
-                        matrix.columnIndexAt(
-                                rowIndex,
-                                rowOffset
-                        );
-
-                if (upperTriangleOnly
-                        && rowIndex > columnIndex) {
+                int columnIndex = matrix.columnIndexAt(
+                        rowIndex,
+                        rowOffset
+                );
+                if (upperTriangleOnly && rowIndex > columnIndex) {
                     continue;
                 }
 
-                double value =
-                        matrix.valueAt(
-                                rowIndex,
-                                rowOffset
-                        );
-
+                double value = matrix.valueAt(rowIndex, rowOffset);
                 if (value == 0.0) {
                     throw new IllegalStateException(
-                            "CSR matrix retains an exact zero at row "
+                            "Proximity CSR retains an exact zero at row "
                                     + rowIndex
                                     + ", column "
                                     + columnIndex
                                     + "."
                     );
                 }
-
-                writer.write(
-                        Integer.toString(
-                                rowIndex + 1
-                        )
-                );
-                writer.write(' ');
-                writer.write(
-                        Integer.toString(
-                                columnIndex + 1
-                        )
-                );
-                writer.write(' ');
-                writer.write(
-                        Double.toString(
-                                value
-                        )
-                );
-                writer.write('\n');
+                sink.write(rowIndex, columnIndex, value);
             }
         }
     }
@@ -456,32 +346,6 @@ public final class ProximityWriter {
         return count;
     }
 
-    private static void writeCoordinateShape(
-            Writer writer,
-            int rowCount,
-            int columnCount,
-            long entryCount
-    ) throws IOException {
-        writer.write(
-                Integer.toString(
-                        rowCount
-                )
-        );
-        writer.write(' ');
-        writer.write(
-                Integer.toString(
-                        columnCount
-                )
-        );
-        writer.write(' ');
-        writer.write(
-                Long.toString(
-                        entryCount
-                )
-        );
-        writer.write('\n');
-    }
-
     private static void writeDenseHeader(
             BufferedWriter writer,
             int columnCount
@@ -538,47 +402,6 @@ public final class ProximityWriter {
         writer.write(
                 CsvUtils.RECORD_SEPARATOR
         );
-    }
-
-    private static void writeMatrixMarketCoordinateHeader(
-            Writer writer,
-            boolean symmetric,
-            String description
-    ) throws IOException {
-        writer.write(
-                symmetric
-                        ? "%%MatrixMarket matrix coordinate real symmetric"
-                        : "%%MatrixMarket matrix coordinate real general"
-        );
-        writer.write('\n');
-
-        writeMatrixMarketComment(
-                writer,
-                description
-        );
-
-        writer.write(
-                "% Internal zero-based indices were converted to one-based."
-        );
-        writer.write('\n');
-    }
-
-    private static void writeMatrixMarketComment(
-            Writer writer,
-            String description
-    ) throws IOException {
-        if (description == null || description.isBlank()) {
-            return;
-        }
-
-        String normalizedDescription =
-                description.trim()
-                        .replace('\r', ' ')
-                        .replace('\n', ' ');
-
-        writer.write("% ");
-        writer.write(normalizedDescription);
-        writer.write('\n');
     }
 
     private static DenseShape validateDenseMatrix(
@@ -651,31 +474,23 @@ public final class ProximityWriter {
         );
     }
 
+    /**
+     * Normalizes the dense-CSV destination and creates its parent directory.
+     * Matrix Market destinations are prepared by MatrixMarketWriter itself.
+     */
     private static Path normalizeAndPreparePath(
             Path path
     ) throws IOException {
-        Path outputPath =
-                path.toAbsolutePath()
-                        .normalize();
+        Path outputPath = Objects.requireNonNull(
+                path,
+                "Proximity output path cannot be null."
+        ).toAbsolutePath().normalize();
 
         Path parent = outputPath.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
-
         return outputPath;
-    }
-
-    private static BufferedWriter newUtf8Writer(
-            Path outputPath
-    ) throws IOException {
-        return Files.newBufferedWriter(
-                outputPath,
-                StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.WRITE,
-                StandardOpenOption.TRUNCATE_EXISTING
-        );
     }
 
     private record DenseShape(

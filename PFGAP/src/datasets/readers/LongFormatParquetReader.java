@@ -1,93 +1,82 @@
 package datasets.readers;
 
+import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
+import ch.randelshofer.fastdoubleparser.JavaFloatParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import dev.hardwood.InputFile;
 import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.reader.RowReader;
-//import dev.hardwood.schema.ColumnSchema;
-//import dev.hardwood.schema.FileSchema;
 import dev.hardwood.schema.ColumnProjection;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * Reader for long-format Parquet time-series data.
+ * General row-oriented reader for Parquet tabular and long-format datasets.
  *
- * Long-format data has one row per time point, not one row per instance.
+ * <p>When {@code idColumn} is absent, each Parquet record becomes one
+ * one-dimensional observation. This supports tabular records and other
+ * row-wise feature vectors. When {@code idColumn} is configured, records are
+ * grouped into observations. Within a group, a configured time column controls
+ * ordering; otherwise physical Parquet record order is retained.</p>
  *
- * Example logical table:
+ * <p>Numeric output is always primitive. FLOAT32 produces {@code float[]} or
+ * {@code float[][]}; FLOAT64 produces {@code double[]} or
+ * {@code double[][]}. Parquet nulls become primitive NaN when missing numeric
+ * values are enabled. Generic output uses {@code Object[]} or
+ * {@code Object[][]}, with null preserved for missing values.</p>
  *
- *      id,time,temp,pressure,label
- *      A,0,10.1,100.0,class1
- *      A,1,10.4,101.2,class1
- *      A,2,10.2,100.8,class1
- *      B,0,5.2,80.1,class2
- *      B,1,5.4,81.0,class2
+ * <p>This general reader intentionally uses Hardwood's projected
+ * {@link RowReader} API because it supports heterogeneous feature, label, ID,
+ * and time types. Numeric workloads that match the optimized schema should use
+ * {@link NumericLongFormatParquetReader}, which consumes Hardwood column
+ * batches and avoids one row object and one feature array per record.</p>
  *
- * Rows are grouped by idColumn. Within each group, rows are sorted by
- * timeColumn if supplied. Otherwise, input row order is preserved.
+ * <p>Multiple label columns are preserved as immutable lists for multi-label
+ * and multi-target workflows. Repeated group labels must remain consistent.</p>
  *
- * Output shape:
- *
- * If featureColumns.size() == 1:
- *
- *      numeric, no missing:       double[]
- *      numeric, with missing:     Double[]
- *      generic:                   Object[]
- *
- * If featureColumns.size() > 1:
- *
- *      numeric, no missing:       double[][]
- *      numeric, with missing:     Double[][]
- *      generic:                   Object[][]
- *
- * For multivariate output, matrix orientation is:
- *
- *      feature x time
- *
- * Labels:
- *
- *      - If labelColumns is empty, label is null.
- *      - If labelColumns has one column, label is a scalar Object.
- *      - If labelColumns has multiple columns, label is List<Object>.
- *
- * Uses Hardwood for Parquet reading. Hardwood is a lightweight Java
- * implementation of the Parquet format that does not require Hadoop.
+ * <p>A configured time column currently requires nonmissing values. Hybrid
+ * ordering for partially missing time coordinates is tracked as pre-v1 task
+ * LONG-TIME-01.</p>
  */
 public class LongFormatParquetReader implements DatasetReader {
-
     private final String dataFileName;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
     private final boolean isRegression;
-
+    private final NumericStorageType numericStorageType;
     private final String idColumn;
     private final String timeColumn;
     private final List<String> featureColumns;
     private final List<String> labelColumns;
+    private final Set<String> missingIndicators;
+    private final ColumnProjection projection;
 
     public LongFormatParquetReader(ReaderOptions options) {
-
         this(
-                options.getDataPath(),
+                requireOptions(options).getDataPath(),
                 options.isNumeric(),
                 options.hasMissingValues(),
                 options.isRegression(),
                 options.getIdColumn(),
                 options.getTimeColumn(),
                 options.getFeatureColumns(),
-                options.getLabelColumns()
+                options.getLabelColumns(),
+                options.getNumericStorageType()
         );
     }
 
@@ -101,916 +90,724 @@ public class LongFormatParquetReader implements DatasetReader {
             List<String> featureColumns,
             List<String> labelColumns
     ) {
-        this.dataFileName = dataFileName;
+        this(dataFileName, isNumeric, hasMissingValues, isRegression,
+                idColumn, timeColumn, featureColumns, labelColumns,
+                NumericStorageType.AUTO);
+    }
+
+    public LongFormatParquetReader(
+            String dataFileName,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean isRegression,
+            String idColumn,
+            String timeColumn,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            NumericStorageType numericStorageType
+    ) {
+        this.dataFileName = requireNonblank(dataFileName, "dataFileName");
         this.isNumeric = isNumeric;
         this.hasMissingValues = hasMissingValues;
         this.isRegression = isRegression;
-        this.idColumn = idColumn;
-        this.timeColumn = timeColumn;
-
-        this.featureColumns =
-                featureColumns == null
-                        ? new ArrayList<>()
-                        : new ArrayList<>(featureColumns);
-
-        this.labelColumns =
-                labelColumns == null
-                        ? new ArrayList<>()
-                        : new ArrayList<>(labelColumns);
+        this.numericStorageType = resolveStorageType(numericStorageType);
+        this.idColumn = normalizeNullableString(idColumn);
+        this.timeColumn = normalizeNullableString(timeColumn);
+        this.featureColumns = copyColumns(featureColumns, "featureColumns", false);
+        this.labelColumns = copyColumns(labelColumns, "labelColumns", true);
+        this.missingIndicators = snapshotMissingIndicators();
+        validateOptions();
+        this.projection = buildColumnProjection();
     }
 
     @Override
     public ListObjectDataset read() throws IOException {
-        validateOptions();
-
-        if (idColumn == null || idColumn.trim().isEmpty()) {
-            return readRowWiseDataset();
-        }
-
-        return readGroupedLongFormatDataset();
+        return idColumn == null
+                ? readRowWiseDataset()
+                : readGroupedLongFormatDataset();
     }
 
     public ListObjectDataset readGroupedLongFormatDataset() throws IOException {
-
+        if (idColumn == null) {
+            throw new IllegalStateException(
+                    "Grouped long-format Parquet reading requires idColumn.");
+        }
         long start = System.nanoTime();
-
-        Map<Object, List<LongParquetRow>> groupedRows =
-                new LinkedHashMap<>();
-
-        Path path = Paths.get(dataFileName);
-
-        //try (ParquetFileReader fileReader =
-        //             ParquetFileReader.open(InputFile.of(path));
-        //     RowReader reader = fileReader.rowReader()) {
+        Path path = validateFile();
+        Map<Object, List<LongParquetRow>> groupedRows = new LinkedHashMap<>();
+        int rowNumber = 0;
 
         try (ParquetFileReader fileReader =
                      ParquetFileReader.open(InputFile.of(path));
-             RowReader reader =
-                     fileReader.buildRowReader()
-                             .projection(buildColumnProjection())
-                             .build()) {
-
-            int rowNumber = 0;
-
+             RowReader reader = fileReader.buildRowReader()
+                     .projection(projection)
+                     .build()) {
             while (reader.hasNext()) {
                 reader.next();
-
-                Object id = normalizeValue(
-                        getValue(reader, idColumn)
-                );
-
+                Object id = normalizeIdentifier(getValue(reader, idColumn));
                 if (id == null) {
                     throw new IllegalArgumentException(
-                            "Encountered null id value in column: " + idColumn
-                    );
+                            "Encountered a missing ID in Parquet column '"
+                                    + idColumn + "' at record " + rowNumber + ".");
                 }
 
-                Object timeValue = null;
-
-                if (timeColumn != null && !timeColumn.trim().isEmpty()) {
-                    timeValue = normalizeValue(
-                            getValue(reader, timeColumn)
-                    );
-                }
-
-                Object[] featureValues =
-                        new Object[featureColumns.size()];
-
-                for (int j = 0; j < featureColumns.size(); j++) {
-
-                    String featureColumn = featureColumns.get(j);
-
-                    Object rawValue =
-                            normalizeValue(
-                                    getValue(reader, featureColumn)
-                            );
-
-                    featureValues[j] =
-                            parseFeatureValue(
-                                    rawValue,
-                                    featureColumn
-                            );
-                }
-
-                Object label = parseLabelValues(reader);
-
-                LongParquetRow row =
-                        new LongParquetRow(
-                                id,
-                                timeValue,
-                                featureValues,
-                                label,
-                                rowNumber
-                        );
-
-                groupedRows
-                        .computeIfAbsent(
-                                id,
-                                ignored -> new ArrayList<>()
-                        )
-                        .add(row);
-
-                ProgressLogger.logProgress(rowNumber);
-                rowNumber++;
-            }
-        }
-
-        ListObjectDataset dataset =
-                buildDataset(groupedRows);
-
-        long end = System.nanoTime();
-
-        ProgressLogger.logDuration(start, end);
-
-        return dataset;
-    }
-
-    private ColumnProjection buildColumnProjection() {
-
-        List<String> columns = new ArrayList<>();
-
-        if (idColumn != null &&
-                !idColumn.trim().isEmpty()) {
-
-            columns.add(idColumn);
-        }
-
-        if (timeColumn != null &&
-                !timeColumn.trim().isEmpty()) {
-
-            columns.add(timeColumn);
-        }
-
-        columns.addAll(featureColumns);
-        columns.addAll(labelColumns);
-
-        return ColumnProjection.columns(
-                columns.toArray(new String[0])
-        );
-    }
-
-    private ListObjectDataset readRowWiseDataset()
-            throws IOException {
-
-        long start = System.nanoTime();
-
-        ListObjectDataset dataset =
-                new ListObjectDataset();
-
-        Path path = Paths.get(dataFileName);
-
-        //try (ParquetFileReader fileReader =
-        //             ParquetFileReader.open(InputFile.of(path));
-        //     RowReader reader = fileReader.rowReader()) {
-
-        try (ParquetFileReader fileReader =
-                     ParquetFileReader.open(InputFile.of(path));
-             RowReader reader =
-                     fileReader.buildRowReader()
-                             .projection(buildColumnProjection())
-                             .build()) {
-
-            int rowIndex = 0;
-
-            while (reader.hasNext()) {
-
-                reader.next();
-
-                Object[] featureValues =
-                        new Object[featureColumns.size()];
-
-                for (int j = 0;
-                     j < featureColumns.size();
-                     j++) {
-
-                    String featureColumn =
-                            featureColumns.get(j);
-
-                    Object rawValue =
-                            normalizeValue(
-                                    getValue(reader, featureColumn)
-                            );
-
-                    featureValues[j] =
-                            parseFeatureValue(
-                                    rawValue,
-                                    featureColumn
-                            );
-                }
-
-                Object label =
-                        parseLabelValues(reader);
-
-                Object data =
-                        buildRowWiseData(featureValues);
-
-                dataset.add(
-                        label,
-                        data,
-                        rowIndex
-                );
-
-                updateGlobalLength(data);
-
-                ProgressLogger.logProgress(rowIndex);
-                rowIndex++;
-            }
-        }
-
-        long end = System.nanoTime();
-
-        ProgressLogger.logDuration(start, end);
-
-        return dataset;
-    }
-
-    /**
-     * Retrieve a Parquet field through Hardwood's typed RowReader API.
-     *
-     * We deliberately return Object here because PF-GAP supports several
-     * kinds of feature/label values and the existing reader normalizes
-     * them afterward.
-     */
-    private static Object getValue(
-            RowReader reader,
-            String columnName
-    ) {
-        if (reader.isNull(columnName)) {
-            return null;
-        }
-
-        return reader.getValue(columnName);
-    }
-
-    private ListObjectDataset buildDataset(
-            Map<Object, List<LongParquetRow>> groupedRows
-    ) {
-        ListObjectDataset dataset =
-                new ListObjectDataset();
-
-        int instanceIndex = 0;
-
-        for (Map.Entry<Object, List<LongParquetRow>> entry :
-                groupedRows.entrySet()) {
-
-            List<LongParquetRow> rows =
-                    entry.getValue();
-
-            sortRows(rows);
-
-            Object label =
-                    inferGroupLabel(rows);
-
-            Object data =
-                    buildSeriesData(rows);
-
-            dataset.add(
-                    label,
-                    data,
-                    instanceIndex
-            );
-
-            updateGlobalLength(data);
-
-            instanceIndex++;
-        }
-
-        return dataset;
-    }
-
-    private Object buildRowWiseData(
-            Object[] featureValues
-    ) {
-        int length = featureValues.length;
-
-        if (isNumeric) {
-
-            if (hasMissingValues) {
-
-                Double[] data =
-                        new Double[length];
-
-                for (int i = 0; i < length; i++) {
-                    data[i] =
-                            toBoxedDouble(
-                                    featureValues[i]
-                            );
-                }
-
-                return data;
-            }
-
-            double[] data =
-                    new double[length];
-
-            for (int i = 0; i < length; i++) {
-                data[i] =
-                        toPrimitiveDouble(
-                                featureValues[i]
-                        );
-            }
-
-            return data;
-        }
-
-        Object[] data =
-                new Object[length];
-
-        System.arraycopy(
-                featureValues,
-                0,
-                data,
-                0,
-                length
-        );
-
-        return data;
-    }
-
-    private void sortRows(
-            List<LongParquetRow> rows
-    ) {
-        if (timeColumn == null ||
-                timeColumn.trim().isEmpty()) {
-
-            rows.sort(
-                    Comparator.comparingInt(
-                            row -> row.inputOrder
-                    )
-            );
-
-            return;
-        }
-
-        rows.sort(
-                (a, b) ->
-                        compareTimeValues(
-                                a.timeValue,
-                                b.timeValue
-                        )
-        );
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private int compareTimeValues(
-            Object a,
-            Object b
-    ) {
-        if (a == null && b == null) {
-            return 0;
-        }
-
-        if (a == null) {
-            return -1;
-        }
-
-        if (b == null) {
-            return 1;
-        }
-
-        if (a instanceof Number &&
-                b instanceof Number) {
-
-            return Double.compare(
-                    ((Number) a).doubleValue(),
-                    ((Number) b).doubleValue()
-            );
-        }
-
-        if (a instanceof Comparable &&
-                a.getClass().isInstance(b)) {
-
-            return ((Comparable) a).compareTo(b);
-        }
-
-        return a.toString()
-                .compareTo(b.toString());
-    }
-
-    private Object inferGroupLabel(
-            List<LongParquetRow> rows
-    ) {
-        if (rows.isEmpty()) {
-            return null;
-        }
-
-        Object firstLabel =
-                rows.get(0).label;
-
-        for (LongParquetRow row : rows) {
-
-            if (!labelsEqual(
-                    firstLabel,
-                    row.label
-            )) {
-
-                throw new IllegalArgumentException(
-                        "Inconsistent labels found within "
-                                + "long-format Parquet group for id: "
-                                + row.id
-                );
-            }
-        }
-
-        return firstLabel;
-    }
-
-    private boolean labelsEqual(
-            Object a,
-            Object b
-    ) {
-        if (a == null && b == null) {
-            return true;
-        }
-
-        if (a == null || b == null) {
-            return false;
-        }
-
-        return a.equals(b);
-    }
-
-    private Object buildSeriesData(
-            List<LongParquetRow> rows
-    ) {
-        int timeLength =
-                rows.size();
-
-        int dimensionCount =
-                featureColumns.size();
-
-        if (dimensionCount == 1) {
-            return buildUnivariateSeries(
-                    rows,
-                    timeLength
-            );
-        }
-
-        return buildMultivariateSeries(
-                rows,
-                dimensionCount,
-                timeLength
-        );
-    }
-
-    private Object buildUnivariateSeries(
-            List<LongParquetRow> rows,
-            int timeLength
-    ) {
-        if (isNumeric) {
-
-            if (hasMissingValues) {
-
-                Double[] data =
-                        new Double[timeLength];
-
-                for (int t = 0; t < timeLength; t++) {
-
-                    data[t] =
-                            toBoxedDouble(
-                                    rows.get(t)
-                                            .featureValues[0]
-                            );
-                }
-
-                return data;
-            }
-
-            double[] data =
-                    new double[timeLength];
-
-            for (int t = 0; t < timeLength; t++) {
-
-                data[t] =
-                        toPrimitiveDouble(
-                                rows.get(t)
-                                        .featureValues[0]
-                        );
-            }
-
-            return data;
-        }
-
-        Object[] data =
-                new Object[timeLength];
-
-        for (int t = 0; t < timeLength; t++) {
-
-            data[t] =
-                    rows.get(t)
-                            .featureValues[0];
-        }
-
-        return data;
-    }
-
-    private Object buildMultivariateSeries(
-            List<LongParquetRow> rows,
-            int dimensionCount,
-            int timeLength
-    ) {
-        if (isNumeric) {
-
-            if (hasMissingValues) {
-
-                Double[][] data =
-                        new Double[
-                                dimensionCount
-                                ][timeLength];
-
-                for (int t = 0; t < timeLength; t++) {
-
-                    LongParquetRow row =
-                            rows.get(t);
-
-                    for (int d = 0;
-                         d < dimensionCount;
-                         d++) {
-
-                        data[d][t] =
-                                toBoxedDouble(
-                                        row.featureValues[d]
-                                );
+                Object time = null;
+                if (timeColumn != null) {
+                    time = normalizeTime(getValue(reader, timeColumn));
+                    if (time == null) {
+                        throw new IllegalArgumentException(
+                                "Encountered a missing configured time in Parquet column '"
+                                        + timeColumn + "' at record " + rowNumber + ".");
                     }
                 }
 
-                return data;
+                Object[] features = readFeatureValues(reader, rowNumber);
+                Object label = readLabelValues(reader);
+                groupedRows.computeIfAbsent(id, ignored -> new ArrayList<>())
+                        .add(new LongParquetRow(
+                                id, time, features, label, rowNumber));
+                ProgressLogger.logProgress(rowNumber);
+                rowNumber++;
             }
-
-            double[][] data =
-                    new double[
-                            dimensionCount
-                            ][timeLength];
-
-            for (int t = 0; t < timeLength; t++) {
-
-                LongParquetRow row =
-                        rows.get(t);
-
-                for (int d = 0;
-                     d < dimensionCount;
-                     d++) {
-
-                    data[d][t] =
-                            toPrimitiveDouble(
-                                    row.featureValues[d]
-                            );
-                }
-            }
-
-            return data;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(
+                    "Failed while reading long-format Parquet file: " + path, e);
         }
 
-        Object[][] data =
-                new Object[
-                        dimensionCount
-                        ][timeLength];
-
-        for (int t = 0; t < timeLength; t++) {
-
-            LongParquetRow row =
-                    rows.get(t);
-
-            for (int d = 0;
-                 d < dimensionCount;
-                 d++) {
-
-                data[d][t] =
-                        row.featureValues[d];
-            }
+        if (rowNumber == 0 || groupedRows.isEmpty()) {
+            throw new IOException(
+                    "Long-format Parquet file contains no records: " + path);
         }
 
-        return data;
+        ListObjectDataset dataset = buildGroupedDataset(groupedRows);
+        ProgressLogger.logDuration(start, System.nanoTime());
+        return dataset;
     }
 
-    private Object parseLabelValues(
-            RowReader reader
-    ) {
-        if (labelColumns.isEmpty()) {
-            return null;
+    private ListObjectDataset readRowWiseDataset() throws IOException {
+        long start = System.nanoTime();
+        Path path = validateFile();
+        ListObjectDataset dataset = new ListObjectDataset();
+        int rowIndex = 0;
+        int commonLength = -1;
+        boolean unequalLengths = false;
+
+        try (ParquetFileReader fileReader =
+                     ParquetFileReader.open(InputFile.of(path));
+             RowReader reader = fileReader.buildRowReader()
+                     .projection(projection)
+                     .build()) {
+            while (reader.hasNext()) {
+                reader.next();
+                Object[] features = readFeatureValues(reader, rowIndex);
+                Object label = readLabelValues(reader);
+                Object data = materializeRow(features);
+                dataset.add(label, data, rowIndex);
+
+                int length = dataLength(data);
+                if (commonLength < 0) {
+                    commonLength = length;
+                } else if (length != commonLength) {
+                    unequalLengths = true;
+                }
+                ProgressLogger.logProgress(rowIndex);
+                rowIndex++;
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(
+                    "Failed while reading row-wise Parquet file: " + path, e);
         }
 
-        if (labelColumns.size() == 1) {
-
-            return parseLabelValue(
-                    normalizeValue(
-                            getValue(
-                                    reader,
-                                    labelColumns.get(0)
-                            )
-                    )
-            );
+        if (rowIndex == 0) {
+            throw new IOException(
+                    "Row-wise Parquet file contains no records: " + path);
         }
 
-        List<Object> labels =
-                new ArrayList<>();
+        applyDatasetLength(dataset, commonLength, unequalLengths);
+        ProgressLogger.logDuration(start, System.nanoTime());
+        return dataset;
+    }
 
-        for (String labelColumn :
-                labelColumns) {
-
-            labels.add(
-                    parseLabelValue(
-                            normalizeValue(
-                                    getValue(
-                                            reader,
-                                            labelColumn
-                                    )
-                            )
-                    )
-            );
+    private Object[] readFeatureValues(RowReader reader, int recordIndex) {
+        Object[] features = new Object[featureColumns.size()];
+        for (int index = 0; index < featureColumns.size(); index++) {
+            String column = featureColumns.get(index);
+            Object value = normalizeValue(getValue(reader, column));
+            features[index] = parseFeatureValue(value, column, recordIndex);
         }
-
-        return labels;
+        return features;
     }
 
     private Object parseFeatureValue(
             Object value,
-            String featureColumn
+            String column,
+            int recordIndex
     ) {
-        if (value == null) {
-
-            if (hasMissingValues) {
-                return null;
+        if (isMissingValue(value)) {
+            if (!hasMissingValues) {
+                throw new IllegalArgumentException(
+                        "Encountered a missing value in Parquet feature column '"
+                                + column + "' at record " + recordIndex
+                                + ", but hasMissingValues=false.");
             }
-
-            throw new IllegalArgumentException(
-                    "Encountered null value in feature column '"
-                            + featureColumn
-                            + "', but hasMissingValues=false."
-            );
-        }
-
-        if (isNumeric) {
-            return toBoxedDouble(value);
-        }
-
-        return parseGenericValue(value);
-    }
-
-    private Object parseLabelValue(
-            Object value
-    ) {
-        if (value == null) {
             return null;
         }
+        if (!isNumeric) {
+            return parseGenericValue(value);
+        }
+        return numericStorageType == NumericStorageType.FLOAT32
+                ? toFloat(value, column, recordIndex)
+                : toDouble(value, column, recordIndex);
+    }
 
+    private Object readLabelValues(RowReader reader) {
+        if (labelColumns.isEmpty()) {
+            return null;
+        }
+        if (labelColumns.size() == 1) {
+            return parseLabelValue(normalizeValue(
+                    getValue(reader, labelColumns.get(0))));
+        }
+        List<Object> labels = new ArrayList<>(labelColumns.size());
+        for (String column : labelColumns) {
+            labels.add(parseLabelValue(normalizeValue(
+                    getValue(reader, column))));
+        }
+        return Collections.unmodifiableList(labels);
+    }
+
+    private Object parseLabelValue(Object value) {
+        if (isMissingValue(value)) {
+            return null;
+        }
         if (isRegression) {
-            return toPrimitiveDouble(value);
+            return toDouble(value, "label", -1);
         }
-
-        if (value instanceof Integer) {
-            return value;
+        if (value instanceof Byte || value instanceof Short
+                || value instanceof Integer) {
+            return ((Number) value).intValue();
         }
-
-        if (value instanceof Long) {
-
-            long longValue =
-                    (Long) value;
-
-            if (longValue >= Integer.MIN_VALUE &&
-                    longValue <= Integer.MAX_VALUE) {
-
-                return (int) longValue;
-            }
-
-            return longValue;
+        if (value instanceof Long integral) {
+            return integral >= Integer.MIN_VALUE && integral <= Integer.MAX_VALUE
+                    ? integral.intValue()
+                    : integral;
         }
-
-        if (value instanceof Number) {
-
-            double doubleValue =
-                    ((Number) value).doubleValue();
-
-            if (doubleValue ==
-                    Math.rint(doubleValue)
-                    && doubleValue >= Integer.MIN_VALUE
-                    && doubleValue <= Integer.MAX_VALUE) {
-
-                return (int) doubleValue;
-            }
-
-            return doubleValue;
+        if (value instanceof Number number) {
+            return normalizeNumericLabel(number.doubleValue());
         }
-
-        String trimmed =
-                value.toString().trim();
-
-        if (MissingValueParser.isMissing(trimmed)) {
-            return null;
-        }
-
+        String token = value.toString().trim();
         try {
-            return Integer.parseInt(trimmed);
-
+            return Integer.parseInt(token);
         } catch (NumberFormatException ignored) {
-
             try {
-
-                double parsed =
-                        Double.parseDouble(trimmed);
-
-                if (parsed == Math.rint(parsed)
-                        && parsed >= Integer.MIN_VALUE
-                        && parsed <= Integer.MAX_VALUE) {
-
-                    return (int) parsed;
-                }
-
-                return parsed;
-
+                return normalizeNumericLabel(
+                        JavaDoubleParser.parseDouble(token));
             } catch (NumberFormatException ignoredAgain) {
-                return trimmed;
+                return token;
             }
         }
     }
 
-    private static Object parseGenericValue(
-            Object value
-    ) {
-        if (value == null) {
-            return null;
+    private static Object normalizeNumericLabel(double value) {
+        if (value == Math.rint(value)
+                && value >= Integer.MIN_VALUE
+                && value <= Integer.MAX_VALUE) {
+            return (int) value;
         }
-
-        Object normalized =
-                normalizeValue(value);
-
-        if (normalized == null) {
-            return null;
-        }
-
-        if (normalized instanceof String) {
-
-            String trimmed =
-                    normalized.toString().trim();
-
-            if (MissingValueParser.isMissing(trimmed)) {
-                return null;
-            }
-
-            try {
-                return Double.parseDouble(trimmed);
-
-            } catch (NumberFormatException e1) {
-
-                if (trimmed.equalsIgnoreCase("true")
-                        || trimmed.equalsIgnoreCase("false")) {
-
-                    return Boolean.parseBoolean(trimmed);
-                }
-
-                return trimmed;
-            }
-        }
-
-        return normalized;
-    }
-
-    /**
-     * Hardwood already returns ordinary Java values, so no Avro-specific
-     * normalization is normally required.
-     */
-    private static Object normalizeValue(
-            Object value
-    ) {
         return value;
     }
 
-    private static Double toBoxedDouble(
-            Object value
+    private ListObjectDataset buildGroupedDataset(
+            Map<Object, List<LongParquetRow>> groups
     ) {
-        if (value == null) {
-            return null;
+        ListObjectDataset dataset = new ListObjectDataset(groups.size());
+        int instanceIndex = 0;
+        int commonLength = -1;
+        boolean unequalLengths = false;
+
+        for (List<LongParquetRow> rows : groups.values()) {
+            sortRows(rows);
+            Object label = inferGroupLabel(rows);
+            Object data = materializeSeries(rows);
+            dataset.add(label, data, instanceIndex++);
+
+            int length = dataLength(data);
+            if (commonLength < 0) {
+                commonLength = length;
+            } else if (length != commonLength) {
+                unequalLengths = true;
+            }
         }
 
-        Object normalized =
-                normalizeValue(value);
-
-        if (normalized == null) {
-            return null;
-        }
-
-        if (normalized instanceof Number) {
-
-            return ((Number) normalized)
-                    .doubleValue();
-        }
-
-        String trimmed =
-                normalized.toString().trim();
-
-        if (MissingValueParser.isMissing(trimmed)) {
-            return null;
-        }
-
-        return Double.valueOf(trimmed);
+        applyDatasetLength(dataset, commonLength, unequalLengths);
+        return dataset;
     }
 
-    private static double toPrimitiveDouble(
-            Object value
+    private void sortRows(List<LongParquetRow> rows) {
+        if (timeColumn == null || rows.size() < 2) {
+            return;
+        }
+        rows.sort((first, second) -> {
+            int comparison = compareTimeValues(
+                    first.timeValue, second.timeValue);
+            return comparison != 0
+                    ? comparison
+                    : Integer.compare(first.inputOrder, second.inputOrder);
+        });
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static int compareTimeValues(Object first, Object second) {
+        if (first instanceof Number && second instanceof Number) {
+            return Double.compare(
+                    ((Number) first).doubleValue(),
+                    ((Number) second).doubleValue());
+        }
+        if (first instanceof Comparable
+                && first.getClass().isInstance(second)) {
+            return ((Comparable) first).compareTo(second);
+        }
+        return first.toString().compareTo(second.toString());
+    }
+
+    private Object inferGroupLabel(List<LongParquetRow> rows) {
+        Object label = rows.get(0).label;
+        for (LongParquetRow row : rows) {
+            if (!Objects.equals(label, row.label)) {
+                throw new IllegalArgumentException(
+                        "Inconsistent labels in long-format Parquet group for ID: "
+                                + row.id);
+            }
+        }
+        return label;
+    }
+
+    private Object materializeRow(Object[] features) {
+        if (!isNumeric) {
+            return features.clone();
+        }
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[] values = new float[features.length];
+            for (int index = 0; index < features.length; index++) {
+                values[index] = primitiveFloatOrNaN(features[index]);
+            }
+            return values;
+        }
+        double[] values = new double[features.length];
+        for (int index = 0; index < features.length; index++) {
+            values[index] = primitiveDoubleOrNaN(features[index]);
+        }
+        return values;
+    }
+
+    private Object materializeSeries(List<LongParquetRow> rows) {
+        int length = rows.size();
+        int dimensions = featureColumns.size();
+        if (dimensions == 1) {
+            return materializeUnivariate(rows, length);
+        }
+        return materializeMultivariate(rows, dimensions, length);
+    }
+
+    private Object materializeUnivariate(
+            List<LongParquetRow> rows,
+            int length
     ) {
+        if (!isNumeric) {
+            Object[] values = new Object[length];
+            for (int time = 0; time < length; time++) {
+                values[time] = rows.get(time).featureValues[0];
+            }
+            return values;
+        }
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[] values = new float[length];
+            for (int time = 0; time < length; time++) {
+                values[time] = primitiveFloatOrNaN(
+                        rows.get(time).featureValues[0]);
+            }
+            return values;
+        }
+        double[] values = new double[length];
+        for (int time = 0; time < length; time++) {
+            values[time] = primitiveDoubleOrNaN(
+                    rows.get(time).featureValues[0]);
+        }
+        return values;
+    }
+
+    private Object materializeMultivariate(
+            List<LongParquetRow> rows,
+            int dimensions,
+            int length
+    ) {
+        if (!isNumeric) {
+            Object[][] values = new Object[dimensions][length];
+            for (int time = 0; time < length; time++) {
+                Object[] row = rows.get(time).featureValues;
+                for (int dimension = 0;
+                     dimension < dimensions;
+                     dimension++) {
+                    values[dimension][time] = row[dimension];
+                }
+            }
+            return values;
+        }
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[][] values = new float[dimensions][length];
+            for (int time = 0; time < length; time++) {
+                Object[] row = rows.get(time).featureValues;
+                for (int dimension = 0;
+                     dimension < dimensions;
+                     dimension++) {
+                    values[dimension][time] =
+                            primitiveFloatOrNaN(row[dimension]);
+                }
+            }
+            return values;
+        }
+        double[][] values = new double[dimensions][length];
+        for (int time = 0; time < length; time++) {
+            Object[] row = rows.get(time).featureValues;
+            for (int dimension = 0;
+                 dimension < dimensions;
+                 dimension++) {
+                values[dimension][time] =
+                        primitiveDoubleOrNaN(row[dimension]);
+            }
+        }
+        return values;
+    }
+
+    private static float primitiveFloatOrNaN(Object value) {
+        return value == null
+                ? Float.NaN
+                : ((Number) value).floatValue();
+    }
+
+    private static double primitiveDoubleOrNaN(Object value) {
+        return value == null
+                ? Double.NaN
+                : ((Number) value).doubleValue();
+    }
+
+    private float toFloat(Object value, String column, int recordIndex) {
+        if (value instanceof Number number) {
+            return number.floatValue();
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue ? 1.0f : 0.0f;
+        }
+        try {
+            return JavaFloatParser.parseFloat(value.toString().trim());
+        } catch (NumberFormatException e) {
+            throw numericConversionFailure(
+                    value, column, recordIndex, "FLOAT32", e);
+        }
+    }
+
+    private double toDouble(Object value, String column, int recordIndex) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue ? 1.0d : 0.0d;
+        }
+        try {
+            return JavaDoubleParser.parseDouble(value.toString().trim());
+        } catch (NumberFormatException e) {
+            throw numericConversionFailure(
+                    value, column, recordIndex, "FLOAT64", e);
+        }
+    }
+
+    private static IllegalArgumentException numericConversionFailure(
+            Object value,
+            String column,
+            int recordIndex,
+            String targetType,
+            Exception cause
+    ) {
+        String location = recordIndex >= 0
+                ? " at record " + recordIndex
+                : "";
+        return new IllegalArgumentException(
+                "Could not convert Parquet value '" + value + "' from column '"
+                        + column + "'" + location + " to " + targetType + ".",
+                cause);
+    }
+
+    private Object parseGenericValue(Object value) {
         if (value == null) {
-
-            throw new IllegalArgumentException(
-                    "Encountered null numeric value, "
-                            + "but hasMissingValues=false."
-            );
+            return null;
         }
-
-        Object normalized =
-                normalizeValue(value);
-
-        if (normalized instanceof Number) {
-
-            return ((Number) normalized)
-                    .doubleValue();
+        if (!(value instanceof CharSequence)) {
+            return value;
         }
-
-        String trimmed =
-                normalized.toString().trim();
-
-        if (MissingValueParser.isMissing(trimmed)) {
-
-            throw new IllegalArgumentException(
-                    "Encountered missing numeric value, "
-                            + "but hasMissingValues=false."
-            );
+        String token = value.toString().trim();
+        if (isMissingToken(token)) {
+            return null;
         }
+        try {
+            return JavaDoubleParser.parseDouble(token);
+        } catch (NumberFormatException ignored) {
+            if (token.equalsIgnoreCase("true")
+                    || token.equalsIgnoreCase("false")) {
+                return Boolean.parseBoolean(token);
+            }
+            return token;
+        }
+    }
 
-        return Double.parseDouble(trimmed);
+    private Object normalizeIdentifier(Object value) {
+        Object normalized = normalizeValue(value);
+        if (isMissingValue(normalized)) {
+            return null;
+        }
+        // Preserve Parquet's typed identifier semantics. String IDs remain
+        // strings, while integral IDs retain their integral source type.
+        return normalized instanceof CharSequence
+                ? normalized.toString()
+                : normalized;
+    }
+
+    private Object normalizeTime(Object value) {
+        Object normalized = normalizeValue(value);
+        return isMissingValue(normalized) ? null : normalized;
+    }
+
+    private static Object normalizeValue(Object value) {
+        if (value instanceof byte[] bytes) {
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+        if (value instanceof Character character) {
+            return character.toString();
+        }
+        return value;
+    }
+
+    private boolean isMissingValue(Object value) {
+        if (value == null) {
+            return true;
+        }
+        return value instanceof CharSequence
+                && isMissingToken(value.toString());
+    }
+
+    private boolean isMissingToken(String token) {
+        if (token == null) {
+            return true;
+        }
+        String trimmed = token.trim();
+        return trimmed.isEmpty()
+                || missingIndicators.contains(
+                trimmed.toUpperCase(Locale.ROOT));
+    }
+
+    private ColumnProjection buildColumnProjection() {
+        List<String> columns = new ArrayList<>();
+        Set<String> used = new HashSet<>();
+        addProjectedColumn(columns, used, idColumn);
+        addProjectedColumn(columns, used, timeColumn);
+        for (String column : featureColumns) {
+            addProjectedColumn(columns, used, column);
+        }
+        for (String column : labelColumns) {
+            addProjectedColumn(columns, used, column);
+        }
+        return ColumnProjection.columns(columns.toArray(String[]::new));
+    }
+
+    private static void addProjectedColumn(
+            List<String> columns,
+            Set<String> used,
+            String column
+    ) {
+        if (column != null && used.add(column)) {
+            columns.add(column);
+        }
     }
 
     private void validateOptions() {
-
-        if (dataFileName == null ||
-                dataFileName.trim().isEmpty()) {
-
+        if (featureColumns.isEmpty()) {
             throw new IllegalArgumentException(
-                    "LongFormatParquetReader requires dataFileName."
-            );
+                    "LongFormatParquetReader requires at least one feature column.");
         }
-
-        if (featureColumns == null ||
-                featureColumns.isEmpty()) {
-
+        if (idColumn == null && timeColumn != null) {
             throw new IllegalArgumentException(
-                    "LongFormatParquetReader requires "
-                            + "at least one feature column."
-            );
+                    "timeColumn requires grouped mode with idColumn.");
+        }
+        Set<String> roles = new HashSet<>();
+        addUniqueRole(roles, idColumn, "idColumn");
+        addUniqueRole(roles, timeColumn, "timeColumn");
+        for (String column : featureColumns) {
+            addUniqueRole(roles, column, "featureColumns");
+        }
+        for (String column : labelColumns) {
+            addUniqueRole(roles, column, "labelColumns");
         }
     }
 
-    private static void updateGlobalLength(
-            Object data
+    private static void addUniqueRole(
+            Set<String> roles,
+            String column,
+            String role
     ) {
-        if (data instanceof double[]) {
-
-            AppContext.length =
-                    ((double[]) data).length;
-
-        } else if (data instanceof Double[]) {
-
-            AppContext.length =
-                    ((Double[]) data).length;
-
-        } else if (data instanceof double[][]) {
-
-            double[][] matrix =
-                    (double[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length =
-                        matrix[0].length;
-            }
-
-        } else if (data instanceof Double[][]) {
-
-            Double[][] matrix =
-                    (Double[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length =
-                        matrix[0].length;
-            }
-
-        } else if (data instanceof Object[][]) {
-
-            Object[][] matrix =
-                    (Object[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length =
-                        matrix[0].length;
-            }
-
-        } else if (data instanceof Object[]) {
-
-            AppContext.length =
-                    ((Object[]) data).length;
+        if (column != null && !roles.add(column)) {
+            throw new IllegalArgumentException(
+                    "Parquet column is assigned to multiple roles: "
+                            + column + " (detected while validating " + role + ").");
         }
     }
 
-    private static class LongParquetRow {
+    private Path validateFile() throws IOException {
+        Path path = Path.of(dataFileName);
+        if (!Files.exists(path)) {
+            throw new IOException(
+                    "Parquet data file does not exist: " + path);
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IOException(
+                    "Parquet data path is not a regular file: " + path);
+        }
+        if (!Files.isReadable(path)) {
+            throw new IOException(
+                    "Parquet data file is not readable: " + path);
+        }
+        return path;
+    }
 
+    private static Object getValue(RowReader reader, String column) {
+        return reader.isNull(column) ? null : reader.getValue(column);
+    }
+
+    private static int dataLength(Object data) {
+        if (data instanceof double[] values) {
+            return values.length;
+        }
+        if (data instanceof float[] values) {
+            return values.length;
+        }
+        if (data instanceof Object[] values) {
+            return values.length;
+        }
+        if (data instanceof double[][] values) {
+            return values.length == 0 ? 0 : values[0].length;
+        }
+        if (data instanceof float[][] values) {
+            return values.length == 0 ? 0 : values[0].length;
+        }
+        if (data instanceof Object[][] values) {
+            return values.length == 0 ? 0 : values[0].length;
+        }
+        throw new IllegalArgumentException(
+                "Unsupported Parquet observation representation: "
+                        + data.getClass().getName());
+    }
+
+    private static void applyDatasetLength(
+            ListObjectDataset dataset,
+            int commonLength,
+            boolean unequalLengths
+    ) {
+        int length = unequalLengths ? 0 : Math.max(commonLength, 0);
+        dataset.setLength(length);
+        AppContext.length = length;
+    }
+
+    private static ReaderOptions requireOptions(ReaderOptions options) {
+        if (options == null) {
+            throw new IllegalArgumentException(
+                    "LongFormatParquetReader requires non-null ReaderOptions.");
+        }
+        return options;
+    }
+
+    private static NumericStorageType resolveStorageType(
+            NumericStorageType requested
+    ) {
+        NumericStorageType value = Objects.requireNonNull(
+                requested, "NumericStorageType cannot be null.");
+        // The general row reader does not inspect physical Parquet types in
+        // advance, so AUTO intentionally uses the safe common FLOAT64 type.
+        return value == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64
+                : value;
+    }
+
+    private static String requireNonblank(String value, String role) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "LongFormatParquetReader requires " + role + ".");
+        }
+        return value.trim();
+    }
+
+    private static String normalizeNullableString(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")
+                ? null
+                : trimmed;
+    }
+
+    private static List<String> copyColumns(
+            List<String> columns,
+            String role,
+            boolean allowEmpty
+    ) {
+        if (columns == null || columns.isEmpty()) {
+            if (allowEmpty) {
+                return List.of();
+            }
+            throw new IllegalArgumentException(
+                    "LongFormatParquetReader requires at least one "
+                            + role + " entry.");
+        }
+        List<String> copy = new ArrayList<>(columns.size());
+        Set<String> used = new HashSet<>();
+        for (String column : columns) {
+            if (column == null || column.isBlank()) {
+                throw new IllegalArgumentException(
+                        role + " cannot contain null or blank column names.");
+            }
+            String normalized = column.trim();
+            if (!used.add(normalized)) {
+                throw new IllegalArgumentException(
+                        role + " contains a duplicate column: " + normalized);
+            }
+            copy.add(normalized);
+        }
+        return Collections.unmodifiableList(copy);
+    }
+
+    private static Set<String> snapshotMissingIndicators() {
+        if (AppContext.MissingStrings == null
+                || AppContext.MissingStrings.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> values = new HashSet<>();
+        for (String indicator : AppContext.MissingStrings) {
+            if (indicator == null) {
+                continue;
+            }
+            String normalized = indicator.trim();
+            if (!normalized.isEmpty()) {
+                values.add(normalized.toUpperCase(Locale.ROOT));
+            }
+        }
+        return values.isEmpty()
+                ? Set.of()
+                : Collections.unmodifiableSet(values);
+    }
+
+    private static final class LongParquetRow {
         private final Object id;
         private final Object timeValue;
         private final Object[] featureValues;
@@ -1032,80 +829,28 @@ public class LongFormatParquetReader implements DatasetReader {
         }
     }
 
-    private static class MissingValueParser {
-
-        private static Set<String> missingIndicators =
-                AppContext.MissingStrings;
-
-        public static void setMissingIndicators(
-                Set<String> indicators
-        ) {
-            missingIndicators =
-                    indicators.stream()
-                            .map(String::toUpperCase)
-                            .collect(Collectors.toSet());
-        }
-
-        public static boolean isMissing(
-                String token
-        ) {
-            if (token == null) {
-                return true;
-            }
-
-            return missingIndicators.contains(
-                    token.trim().toUpperCase()
-            );
-        }
-    }
-
     public static class ProgressLogger {
-
-        public static void logProgress(int i) {
-
-            if (i % 1000 == 0) {
-
-                if (i % 100000 == 0) {
-
-                    System.out.print("\n");
-
-                    if (i % 1000000 == 0) {
-
-                        long usedMem =
-                                AppContext.runtime.totalMemory()
-                                        - AppContext.runtime.freeMemory();
-
-                        System.out.print(
-                                i
-                                        + ":"
-                                        + usedMem / 1024 / 1024
-                                        + "mb\n"
-                        );
-                    }
-
-                } else {
-                    System.out.print(".");
-                }
+        public static void logProgress(int index) {
+            if (index % 1000 != 0) {
+                return;
             }
+            if (index % 100000 == 0) {
+                System.out.print("\n");
+                if (index % 1000000 == 0) {
+                    long usedMemory = AppContext.runtime.totalMemory()
+                            - AppContext.runtime.freeMemory();
+                    System.out.print(index + ":"
+                            + usedMemory / 1024 / 1024 + "mb\n");
+                }
+                return;
+            }
+            System.out.print(".");
         }
 
-        public static void logDuration(
-                long start,
-                long end
-        ) {
-            long elapsed =
-                    end - start;
-
-            String timeDuration =
-                    DurationFormatUtils.formatDuration(
-                            (long) (elapsed / 1e6),
-                            "H:m:s.SSS"
-                    );
-
-            System.out.println(
-                    "finished in "
-                            + timeDuration
-            );
+        public static void logDuration(long start, long end) {
+            String duration = DurationFormatUtils.formatDuration(
+                    (long) ((end - start) / 1e6), "H:m:s.SSS");
+            System.out.println("finished in " + duration);
         }
     }
 }

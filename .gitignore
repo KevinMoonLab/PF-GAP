@@ -101,6 +101,7 @@ docs/demo/training_output/Data/*.txt
 tests/tests_tmp
 docs/demo/**/*.txt
 docs/demo/**/*.json
+docs/demo/**
 
 # Common data files generated during experiments
 *.csv

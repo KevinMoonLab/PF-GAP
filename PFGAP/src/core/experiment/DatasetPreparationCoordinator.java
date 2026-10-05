@@ -8,10 +8,12 @@ import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
 import imputation.util.MissingIndicesBuilder;
 import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.PerSeriesStandardizationState;
 import preprocessing.standardization.StandardizationPipeline;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -67,10 +69,11 @@ public final class DatasetPreparationCoordinator {
                 originalTestingData
         );
 
-        StandardizationPipeline.applyPreparedStatistics(
-                originalTrainingData,
-                originalTestingData
-        );
+        StandardizationPipeline.ApplicationResult standardizationResult =
+                StandardizationPipeline.applyPreparedStatistics(
+                        originalTrainingData,
+                        originalTestingData
+                );
 
         ListObjectDataset preparedTrainingData =
                 prepareTrainingData(
@@ -100,7 +103,8 @@ public final class DatasetPreparationCoordinator {
         return new PreparedDatasets(
                 preparedTrainingData,
                 preparedTestingData,
-                datasetName
+                datasetName,
+                standardizationResult
         );
     }
 
@@ -131,9 +135,13 @@ public final class DatasetPreparationCoordinator {
                 originalTestingData
         );
 
-        StandardizationPipeline.applyEvaluationStatistics(
-                originalTestingData
-        );
+        StandardizationPipeline.ApplicationResult standardizationResult =
+                new StandardizationPipeline.ApplicationResult(
+                        List.of(),
+                        StandardizationPipeline.applyEvaluationStatistics(
+                                originalTestingData
+                        )
+                );
 
         ListObjectDataset preparedTestingData =
                 prepareTestingData(
@@ -156,7 +164,8 @@ public final class DatasetPreparationCoordinator {
         return new PreparedDatasets(
                 loadedTrainingData,
                 preparedTestingData,
-                datasetName
+                datasetName,
+                standardizationResult
         );
     }
 
@@ -478,7 +487,8 @@ public final class DatasetPreparationCoordinator {
     }
 
     /**
-     * Fully prepared datasets and their logical name.
+     * Fully prepared datasets, their logical name, and temporary per-series
+     * inverse-transformation state for user-facing output.
      *
      * <p>The record does not clone either dataset. Callers receive the exact
      * prepared objects published to {@link AppContext}.</p>
@@ -486,12 +496,17 @@ public final class DatasetPreparationCoordinator {
     public record PreparedDatasets(
             ListObjectDataset trainingData,
             ListObjectDataset testingData,
-            String datasetName
+            String datasetName,
+            StandardizationPipeline.ApplicationResult standardizationResult
     ) {
         public PreparedDatasets {
             Objects.requireNonNull(
                     trainingData,
                     "Prepared training data cannot be null."
+            );
+            Objects.requireNonNull(
+                    standardizationResult,
+                    "Standardization application result cannot be null."
             );
 
             if (datasetName == null || datasetName.isBlank()) {
@@ -499,6 +514,24 @@ public final class DatasetPreparationCoordinator {
                         "Prepared dataset name cannot be null or blank."
                 );
             }
+        }
+
+        /**
+         * Returns per-series inverse states aligned with training instances.
+         * The list is empty for reusable or disabled standardization.
+         */
+        public List<PerSeriesStandardizationState>
+        trainingStandardizationStates() {
+            return standardizationResult.trainingStates();
+        }
+
+        /**
+         * Returns per-series inverse states aligned with testing instances.
+         * The list is empty for reusable or disabled standardization.
+         */
+        public List<PerSeriesStandardizationState>
+        testingStandardizationStates() {
+            return standardizationResult.testingStates();
         }
 
         public boolean hasTestingData() {

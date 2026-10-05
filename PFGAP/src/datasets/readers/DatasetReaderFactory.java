@@ -106,6 +106,11 @@ public final class DatasetReaderFactory {
                 return new NumericDelimitedFileReader(options);
             case NPY:
                 return createNpyReader(options);
+            case LAZY_NPY:
+                return new LazyNpyReader(options);
+
+            case NUMERIC_LONG_FORMAT_PARQUET:
+                return new NumericLongFormatParquetReader(options);
 
             default:
                 throw new IllegalArgumentException(

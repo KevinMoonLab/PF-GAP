@@ -5,11 +5,14 @@ import core.ProximityForestResult;
 import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import imputation.ProximityImputation;
+import imputation.util.MissingIndices;
+import preprocessing.standardization.PerSeriesStandardizationState;
 import output.ExperimentResultRecord;
 import output.ExperimentResultWriter;
 import trees.ProximityForest;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -17,8 +20,8 @@ import java.util.Objects;
  * previously trained forest.
  *
  * <p>The runner coordinates optional test imputation, classification or
- * regression prediction, isolation scoring, requested test/train proximity
- * output, and result-record assembly. Model loading and dataset preparation
+ * regression prediction, isolation scoring, full and sparse imputed output,
+ * requested test/train proximity output, and result-record assembly. Model loading and dataset preparation
  * remain responsibilities of the top-level experiment workflow.</p>
  *
  * <p>Each invocation receives an {@link ExperimentRepetitionContext} that owns
@@ -128,6 +131,18 @@ public final class EvaluationRepetitionRunner {
          */
         proximityCoordinator.clearTestTrainResults();
 
+        outputCoordinator.writeTestingDataWhenRequested(
+                testingData,
+                datasets.testingStandardizationStates()
+        );
+
+        writeImputedOnlyMatrixMarketWhenRequested(
+                testingData,
+                datasets.testingStandardizationStates(),
+                repetition,
+                context
+        );
+
         ProximityForestResult result;
 
         if (AppContext.isIsolationMode()) {
@@ -224,7 +239,6 @@ public final class EvaluationRepetitionRunner {
         if (predictionsProduced && !AppContext.perform_test_imputation) {
             result.printResults(datasetName, repetition, "");
         }
-        outputCoordinator.writeTestingDataWhenRequested(testingData);
         if (predictionsProduced) {
             outputCoordinator.writeTestPredictionsWhenRequested(
                     result, testingData, context
@@ -260,6 +274,46 @@ public final class EvaluationRepetitionRunner {
         }
         throw new IllegalStateException(
                 "Structured evaluation requires enhanced predictions, OOD scores, or both."
+        );
+    }
+
+    /**
+     * Writes the sparse originally-missing testing values after imputation.
+     *
+     * <p>The AppContext fields used here are added with the CLI wiring:
+     * {@code output_test_imputed_csr} and {@code test_imputed_csr_file}.</p>
+     */
+    private void writeImputedOnlyMatrixMarketWhenRequested(
+            ListObjectDataset testingData,
+            List<PerSeriesStandardizationState> standardizationStates,
+            int repetition,
+            ExperimentRepetitionContext context
+    ) throws Exception {
+        if (!AppContext.output_test_imputed_csr) {
+            return;
+        }
+
+        MissingIndices missing = Objects.requireNonNull(
+                testingData.getMissingIndices(),
+                "Testing MissingIndices cannot be null when imputed-only "
+                        + "CSR output is requested."
+        );
+        String configuredName = AppContext.test_imputed_csr_file;
+        String fileName = configuredName == null || configuredName.isBlank()
+                ? "testing_imputed_values.mtx"
+                : configuredName.trim();
+        Path path = artifactPaths.resolveRepeated(fileName, repetition);
+
+        Path written = outputCoordinator.writeImputedValuesMatrixMarket(
+                testingData,
+                missing,
+                standardizationStates,
+                path,
+                "PFGAP originally missing testing values"
+        );
+        context.addArtifact(
+                "testingImputedValues",
+                artifactPaths.relativeArtifactPath(written)
         );
     }
 

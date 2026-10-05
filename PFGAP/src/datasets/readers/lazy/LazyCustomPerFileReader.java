@@ -2,6 +2,8 @@ package datasets.readers.lazy;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
+import datasets.readers.interop.JavaReaderLoader;
 import datasets.readers.DatasetReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
@@ -11,8 +13,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,6 +42,12 @@ import java.util.stream.Stream;
  * standardization statistics are supplied for a numeric custom reader, PFGAP
  * wraps the reconstructed plugin reader and standardizes each materialized
  * instance exactly once.</p>
+ *
+ * <p>Standard per-file observations preserve the dimension axis and return
+ * {@code float[dimension][time]}, {@code double[dimension][time]}, or
+ * {@code Object[dimension][time]}. A univariate series remains
+ * {@code [1][time]}. The reconstructed runtime pipeline validates this
+ * contract before optional built-in standardization.</p>
  *
  * <p>Example descriptor:</p>
  *
@@ -80,6 +90,7 @@ public final class LazyCustomPerFileReader
     private final boolean isNumeric;
     private final boolean hasMissingValues;
     private final boolean customReaderThreadSafe;
+    private final NumericStorageType numericStorageType;
     private final StandardizationStats standardizationStats;
 
     private final String readerKey;
@@ -103,6 +114,7 @@ public final class LazyCustomPerFileReader
                 options.isNumeric(),
                 options.hasMissingValues(),
                 options.isCustomReaderThreadSafe(),
+                options.getNumericStorageType(),
                 options.getStandardizationStats(),
                 options.isTest()
                         ? "test"
@@ -135,6 +147,7 @@ public final class LazyCustomPerFileReader
                 isNumeric,
                 hasMissingValues,
                 false,
+                NumericStorageType.AUTO,
                 null,
                 readerKey
         );
@@ -171,6 +184,7 @@ public final class LazyCustomPerFileReader
             boolean isNumeric,
             boolean hasMissingValues,
             boolean customReaderThreadSafe,
+            NumericStorageType numericStorageType,
             StandardizationStats standardizationStats,
             String readerKey
     ) {
@@ -186,9 +200,11 @@ public final class LazyCustomPerFileReader
                 );
 
         this.customReaderDescriptor =
-                requireNonblank(
-                        customReaderDescriptor,
-                        "customReaderDescriptor"
+                JavaReaderLoader.normalizeDescriptor(
+                        requireNonblank(
+                                customReaderDescriptor,
+                                "customReaderDescriptor"
+                        )
                 );
 
         this.customReaderParameters =
@@ -197,9 +213,7 @@ public final class LazyCustomPerFileReader
                 );
 
         this.featureColumns =
-                featureColumns == null
-                        ? List.of()
-                        : List.copyOf(
+                copyFeatureColumns(
                         featureColumns
                 );
 
@@ -217,6 +231,11 @@ public final class LazyCustomPerFileReader
 
         this.customReaderThreadSafe =
                 customReaderThreadSafe;
+
+        this.numericStorageType =
+                numericStorageType == null
+                        ? NumericStorageType.AUTO
+                        : numericStorageType;
 
         if (standardizationStats != null && !isNumeric) {
             throw new IllegalArgumentException(
@@ -265,6 +284,7 @@ public final class LazyCustomPerFileReader
                 isNumeric,
                 hasMissingValues,
                 customReaderThreadSafe,
+                NumericStorageType.AUTO,
                 null,
                 readerKey
         );
@@ -294,6 +314,7 @@ public final class LazyCustomPerFileReader
                 isNumeric,
                 hasMissingValues,
                 customReaderThreadSafe,
+                NumericStorageType.AUTO,
                 standardizationStats,
                 readerKey
         );
@@ -345,6 +366,7 @@ public final class LazyCustomPerFileReader
                         standardizationStats,
                         LazySeriesReaderSpec
                                 .DEFAULT_INITIAL_TIME_CAPACITY,
+                        numericStorageType,
                         customReaderDescriptor,
                         customReaderParameters,
                         customReaderThreadSafe,
@@ -398,6 +420,7 @@ public final class LazyCustomPerFileReader
         dataset.setLength(
                 0
         );
+        AppContext.length = 0;
 
         return dataset;
     }
@@ -585,6 +608,30 @@ public final class LazyCustomPerFileReader
         }
 
         return trimmed;
+    }
+
+    private static List<String> copyFeatureColumns(
+            List<String> featureColumns
+    ) {
+        if (featureColumns == null || featureColumns.isEmpty()) {
+            return List.of();
+        }
+        List<String> copy = new ArrayList<>(featureColumns.size());
+        Set<String> used = new HashSet<>();
+        for (String value : featureColumns) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Custom-reader feature columns cannot be blank.");
+            }
+            String normalized = value.trim();
+            if (!used.add(normalized)) {
+                throw new IllegalArgumentException(
+                        "Duplicate custom-reader feature column: "
+                                + normalized);
+            }
+            copy.add(normalized);
+        }
+        return List.copyOf(copy);
     }
 
     private static Map<String, String> copyParameters(

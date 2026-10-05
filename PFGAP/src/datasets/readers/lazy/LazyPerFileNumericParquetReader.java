@@ -2,7 +2,9 @@ package datasets.readers.lazy;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import datasets.readers.DatasetReader;
+import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
 import preprocessing.standardization.StandardizationStats;
@@ -14,6 +16,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,22 +45,19 @@ import java.util.stream.Stream;
  * <p>Returned representations:</p>
  *
  * <pre>
- * one feature, no missing values:
- *     double[time]
+ * FLOAT32:
+ *     float[dimension][time]
  *
- * multiple features, no missing values:
+ * FLOAT64:
  *     double[dimension][time]
  *
- * one feature, missing values:
- *     Double[time]
- *
- * multiple features, missing values:
- *     Double[dimension][time]
+ * Missing numeric values are represented by primitive NaN. A single feature
+ * remains [1][time].
  * </pre>
  *
- * <p>This reader assumes that Parquet records are already stored in the
- * required time order. The optional time column is therefore not projected
- * or decoded merely for sorting. Physical Parquet record order is preserved.</p>
+ * <p>FILE_ORDER preserves physical Parquet record order without projecting
+ * the time column. SORT_DOUBLE_TIME projects and stably sorts by a supported
+ * fixed-width numeric time column.</p>
  *
  * <p>The reader supports null feature values when
  * {@code hasMissingValues=true}. Hardwood validity information is retained
@@ -115,6 +115,9 @@ public class LazyPerFileNumericParquetReader
     private final String readerKey;
     private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
+    private final NumericStorageType numericStorageType;
+    private final NumericPerFileParquetSeriesReader.TimeOrderPolicy
+            timeOrderPolicy;
 
     /**
      * Constructs the lazy reader from ordinary PFGAP reader options.
@@ -138,13 +141,23 @@ public class LazyPerFileNumericParquetReader
                         ? "test"
                         : "train",
                 options.getStandardizationStats(),
-                DEFAULT_INITIAL_TIME_CAPACITY
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
+                options.getNumericStorageType()
         );
 
         if (!options.isNumeric()) {
             throw new IllegalArgumentException(
                     "LazyPerFileNumericParquetReader requires "
                             + "ReaderOptions.isNumeric=true."
+            );
+        }
+
+        if (options.getLabelColumns() != null
+                && !options.getLabelColumns().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "LazyPerFileNumericParquetReader does not interpret "
+                            + "per-file columns as observation labels."
             );
         }
     }
@@ -169,7 +182,9 @@ public class LazyPerFileNumericParquetReader
                 filePattern,
                 readerKey,
                 standardizationStats,
-                DEFAULT_INITIAL_TIME_CAPACITY
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
+                NumericStorageType.AUTO
         );
     }
 
@@ -178,7 +193,7 @@ public class LazyPerFileNumericParquetReader
      *
      * @param dataPath             directory or single Parquet file
      * @param timeColumn           optional descriptive time column
-     * @param featureColumns       projected DOUBLE feature columns
+     * @param featureColumns       projected numeric feature columns
      * @param hasMissingValues     whether null feature values are permitted
      * @param filePattern          required for directory input
      * @param readerKey            runtime lazy-reader registry key
@@ -194,6 +209,31 @@ public class LazyPerFileNumericParquetReader
             String readerKey,
             StandardizationStats standardizationStats,
             int initialTimeCapacity
+    ) {
+        this(
+                dataPath, timeColumn, featureColumns, hasMissingValues,
+                filePattern, readerKey, standardizationStats,
+                initialTimeCapacity,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER,
+                NumericStorageType.AUTO
+        );
+    }
+
+    /**
+     * Full constructor including ordering and materialized numeric storage.
+     */
+    public LazyPerFileNumericParquetReader(
+            String dataPath,
+            String timeColumn,
+            List<String> featureColumns,
+            boolean hasMissingValues,
+            String filePattern,
+            String readerKey,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                    timeOrderPolicy,
+            NumericStorageType numericStorageType
     ) {
         this.dataPath =
                 normalizeNullableString(
@@ -244,6 +284,18 @@ public class LazyPerFileNumericParquetReader
         this.initialTimeCapacity =
                 initialTimeCapacity;
 
+        this.timeOrderPolicy =
+                timeOrderPolicy == null
+                        ? NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                        .FILE_ORDER
+                        : timeOrderPolicy;
+
+        this.numericStorageType =
+                Objects.requireNonNull(
+                        numericStorageType,
+                        "numericStorageType cannot be null."
+                );
+
         validateConstructionOptions();
     }
 
@@ -286,7 +338,9 @@ public class LazyPerFileNumericParquetReader
                         null,
                         false,
                         standardizationStats,
-                        initialTimeCapacity
+                        initialTimeCapacity,
+                        numericStorageType,
+                        timeOrderPolicy
                 );
 
         AppContext.registerLazySeriesReader(
@@ -334,11 +388,21 @@ public class LazyPerFileNumericParquetReader
         dataset.setLength(
                 0
         );
+        AppContext.length = 0;
 
         return dataset;
     }
 
     private void validateConstructionOptions() {
+        if (timeOrderPolicy
+                == NumericPerFileParquetSeriesReader.TimeOrderPolicy
+                .SORT_DOUBLE_TIME
+                && timeColumn == null) {
+            throw new IllegalArgumentException(
+                    "SORT_DOUBLE_TIME requires a time column."
+            );
+        }
+
         if (timeColumn != null
                 && featureColumns.contains(timeColumn)) {
 

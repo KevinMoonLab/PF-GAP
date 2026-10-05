@@ -8,44 +8,34 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Owns a dynamically loaded custom series reader and the class loader used
- * to load it.
+ * Owns a dynamically loaded custom series reader and its class loader.
  *
- * <p>The class loader must remain open for the lifetime of the reader. A
- * custom-reader implementation may load helper classes, resources, service
- * providers, or other JAR contents after its constructor has returned.
- * Closing the class loader immediately after instantiation could therefore
- * break later reader operations.</p>
+ * <p>The class loader remains open for the lifetime of the reader because a
+ * plugin may load helper classes, resources, or service providers after its
+ * constructor returns. This object must therefore be retained and closed by
+ * the runtime adapter rather than discarded after plugin construction.</p>
  *
- * <p>When this object is closed, its URLClassLoader is closed as well. The
- * reader instance itself does not need to implement AutoCloseable, but if it
- * does, its close method is invoked before the class loader is closed.</p>
+ * <p>When closed, an {@link AutoCloseable} plugin is closed before its
+ * {@link URLClassLoader}. Cleanup is idempotent, and a class-loader cleanup
+ * failure is suppressed onto an earlier plugin cleanup failure.</p>
  *
- * <p>This object is a runtime resource and must not be serialized. Saved lazy
- * models should store the custom-reader descriptor and configuration
- * parameters, then reconstruct a new LoadedCustomReader in the new JVM.</p>
+ * <p>This is a runtime resource and must not be serialized. Saved models store
+ * the normalized descriptor and serializable reader configuration, then load
+ * a new plugin instance in the destination JVM.</p>
  */
-public final class LoadedCustomReader
-        implements AutoCloseable {
-
+public final class LoadedCustomReader implements AutoCloseable {
     private final CustomSeriesReader reader;
     private final URLClassLoader classLoader;
     private final String descriptor;
     private final String implementationClassName;
-    private final AtomicBoolean closed;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
-     * Creates a loaded-reader resource.
+     * Creates a validated loaded-reader resource.
      *
-     * <p>This constructor is package-private because instances should be
-     * created by {@link JavaReaderLoader}, which is responsible for validating
-     * the descriptor, loading the class, checking the required interface, and
-     * constructing the plugin.</p>
-     *
-     * @param reader                  loaded custom reader instance
-     * @param classLoader             loader that owns the plugin classes
-     * @param descriptor              original plugin descriptor
-     * @param implementationClassName fully qualified implementation class name
+     * <p>This constructor is package-private because
+     * {@link JavaReaderLoader} owns descriptor validation, class loading, type
+     * checking, and reflective construction.</p>
      */
     LoadedCustomReader(
             CustomSeriesReader reader,
@@ -53,176 +43,107 @@ public final class LoadedCustomReader
             String descriptor,
             String implementationClassName
     ) {
-        this.reader =
-                Objects.requireNonNull(
-                        reader,
-                        "LoadedCustomReader requires a reader instance."
-                );
-
-        this.classLoader =
-                Objects.requireNonNull(
-                        classLoader,
-                        "LoadedCustomReader requires a URLClassLoader."
-                );
-
-        if (descriptor == null || descriptor.isBlank()) {
-            throw new IllegalArgumentException(
-                    "LoadedCustomReader requires a nonempty descriptor."
-            );
-        }
-
-        if (implementationClassName == null
-                || implementationClassName.isBlank()) {
-
-            throw new IllegalArgumentException(
-                    "LoadedCustomReader requires a nonempty "
-                            + "implementation class name."
-            );
-        }
-
-        this.descriptor =
-                descriptor.trim();
-
-        this.implementationClassName =
-                implementationClassName.trim();
-
-        this.closed =
-                new AtomicBoolean(
-                        false
-                );
+        this.reader = Objects.requireNonNull(
+                reader, "LoadedCustomReader requires a reader instance.");
+        this.classLoader = Objects.requireNonNull(
+                classLoader,
+                "LoadedCustomReader requires a URLClassLoader.");
+        this.descriptor = requireNonblank(descriptor, "descriptor");
+        this.implementationClassName = requireNonblank(
+                implementationClassName, "implementation class name");
     }
 
     /**
-     * Returns the loaded custom reader.
+     * Returns the loaded plugin instance.
      *
-     * @return custom reader instance
-     * @throws IllegalStateException if this resource has already been closed
+     * @throws IllegalStateException if ownership has already been released
      */
     public CustomSeriesReader getReader() {
         requireOpen();
-
         return reader;
     }
 
     /**
-     * Returns the class loader that owns the custom reader.
+     * Returns the plugin class loader for diagnostics or plugin-resource use.
      *
-     * <p>Most callers should not need direct access to the loader. It is
-     * exposed for diagnostics and future plugin-resource use.</p>
-     *
-     * @return plugin class loader
-     * @throws IllegalStateException if this resource has already been closed
+     * @throws IllegalStateException if ownership has already been released
      */
     public ClassLoader getClassLoader() {
         requireOpen();
-
         return classLoader;
     }
 
-    /**
-     * Returns the descriptor used to load this plugin.
-     *
-     * @return original normalized descriptor
-     */
     public String getDescriptor() {
         return descriptor;
     }
 
-    /**
-     * Returns the fully qualified implementation class name.
-     *
-     * @return plugin implementation class name
-     */
     public String getImplementationClassName() {
         return implementationClassName;
     }
 
     /**
-     * Returns whether this resource has been closed.
+     * Returns whether closure has started.
      *
-     * @return true after successful or attempted closure
+     * <p>A true value means cleanup was attempted. It does not imply that
+     * every cleanup operation succeeded.</p>
      */
     public boolean isClosed() {
         return closed.get();
     }
 
     /**
-     * Closes the plugin and its class loader.
+     * Closes the plugin and then its class loader.
      *
-     * <p>Closure is idempotent. Calling this method more than once has no
-     * effect after the first call.</p>
-     *
-     * <p>If the custom reader implements AutoCloseable, it is closed before
-     * its class loader. If both operations fail, the class-loader exception is
-     * added as a suppressed exception to the reader-close exception.</p>
+     * <p>Closure is idempotent. The class loader is always given a cleanup
+     * attempt, including when plugin cleanup throws an exception or error.</p>
      *
      * @throws Exception if plugin or class-loader cleanup fails
      */
     @Override
-    public void close()
-            throws Exception {
-
-        if (!closed.compareAndSet(
-                false,
-                true
-        )) {
+    public void close() throws Exception {
+        if (!closed.compareAndSet(false, true)) {
             return;
         }
 
-        Exception readerFailure =
-                null;
-
+        Throwable primaryFailure = null;
         if (reader instanceof AutoCloseable closeableReader) {
             try {
                 closeableReader.close();
-            } catch (Exception e) {
-                readerFailure =
-                        e;
+            } catch (Throwable failure) {
+                primaryFailure = failure;
             }
         }
-
-        IOException classLoaderFailure =
-                null;
 
         try {
             classLoader.close();
-        } catch (IOException e) {
-            classLoaderFailure =
-                    e;
-        }
-
-        if (readerFailure != null) {
-            if (classLoaderFailure != null) {
-                readerFailure.addSuppressed(
-                        classLoaderFailure
-                );
+        } catch (IOException classLoaderFailure) {
+            if (primaryFailure == null) {
+                primaryFailure = classLoaderFailure;
+            } else {
+                primaryFailure.addSuppressed(classLoaderFailure);
             }
-
-            throw readerFailure;
         }
 
-        if (classLoaderFailure != null) {
-            throw classLoaderFailure;
-        }
+        rethrow(primaryFailure);
     }
 
     /**
      * Closes this resource while converting checked cleanup failures into an
-     * IllegalStateException.
-     *
-     * <p>This is useful from application-context cleanup code that cannot
-     * conveniently propagate checked exceptions.</p>
+     * {@link IllegalStateException}. Runtime exceptions and errors retain
+     * their original type.
      */
     public void closeUnchecked() {
         try {
             close();
-        } catch (Exception e) {
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Exception failure) {
             throw new IllegalStateException(
                     "Failed to close custom reader '"
                             + implementationClassName
                             + "' loaded from descriptor: "
                             + descriptor,
-                    e
+                    failure
             );
         }
     }
@@ -231,22 +152,38 @@ public final class LoadedCustomReader
         if (closed.get()) {
             throw new IllegalStateException(
                     "Custom reader has already been closed: "
-                            + implementationClassName
-            );
+                            + implementationClassName);
         }
+    }
+
+    private static String requireNonblank(String value, String role) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "LoadedCustomReader requires a nonempty " + role + ".");
+        }
+        return value.trim();
+    }
+
+    private static void rethrow(Throwable failure) throws Exception {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof Exception exception) {
+            throw exception;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new IllegalStateException(
+                "Unexpected custom-reader cleanup failure.", failure);
     }
 
     @Override
     public String toString() {
         return "LoadedCustomReader{"
-                + "implementationClassName='"
-                + implementationClassName
-                + '\''
-                + ", descriptor='"
-                + descriptor
-                + '\''
-                + ", closed="
-                + closed.get()
+                + "implementationClassName='" + implementationClassName + '\''
+                + ", descriptor='" + descriptor + '\''
+                + ", closed=" + closed.get()
                 + '}';
     }
 }

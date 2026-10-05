@@ -2,7 +2,9 @@ package datasets.readers.lazy;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import datasets.readers.DatasetReader;
+import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
 import preprocessing.standardization.StandardizationStats;
@@ -12,57 +14,35 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-// import java.util.Comparator;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * DatasetReader for lazy per-file Parquet time-series datasets.
+ * Lazy coordinator for general per-file Parquet time-series datasets.
  *
- * Storage assumption:
+ * <p>One Parquet file is one observation, one record is one time position,
+ * and one selected feature column is one dimension. Dataset construction
+ * discovers files and stores one {@link LazySeriesRef} per observation. The
+ * registered {@code PerFileParquetSeriesReader} materializes values later.</p>
  *
- *      one Parquet file = one dataset instance / one time series
+ * <p>Materialized observations are always two-dimensional:</p>
+ * <ul>
+ *     <li>{@code float[dimension][time]} for FLOAT32 numeric data</li>
+ *     <li>{@code double[dimension][time]} for FLOAT64 numeric data</li>
+ *     <li>{@code Object[dimension][time]} for generic data</li>
+ * </ul>
  *
- * The dataPath may identify:
- *
- *      1. A directory containing the per-instance Parquet files.
- *         In this case, filePattern must identify and numerically order
- *         the desired files.
- *
- *      2. A single Parquet file.
- *         In this case, filePattern is not required.
- *
- * Example directory configuration:
- *
- *      dataPath:
- *          /path/to/training
- *
- *      filePattern:
- *          trial_*.{run:03d}_freqN.parquet
- *
- * Supported numeric placeholders include:
- *
- *      {num}
- *      {num:03d}
- *      {run}
- *      {run:03d}
- *
- * Glob wildcards '*' and '?' may appear outside the numeric placeholder.
- *
- * This reader does not deserialize the time-series values while building
- * the ListObjectDataset. Each dataset item is represented by a
- * LazySeriesRef. PerFileParquetSeriesReader materializes an individual
- * series only when requested by lazy distance evaluation.
- *
- * Labels:
- *
- *      This initial implementation assigns null labels.
- *      External label-file support can be added without changing the lazy
- *      data path.
+ * <p>Numeric missing values use primitive NaN. Generic missing values use
+ * null. One selected feature remains {@code [1][time]}.</p>
  */
-public class LazyPerFileParquetReader implements DatasetReader {
+public final class LazyPerFileParquetReader implements DatasetReader {
+    private static final int DEFAULT_INITIAL_TIME_CAPACITY = 256;
 
     private final String dataPath;
     private final boolean isNumeric;
@@ -74,20 +54,18 @@ public class LazyPerFileParquetReader implements DatasetReader {
     private final String readerKey;
     private final String filePattern;
     private final StandardizationStats standardizationStats;
+    private final int initialTimeCapacity;
+    private final NumericStorageType numericStorageType;
 
     public LazyPerFileParquetReader(ReaderOptions options) {
-        this(
-                options.getDataPath(),
-                options.isNumeric(),
-                options.hasMissingValues(),
-                options.isRegression(),
-                options.getTimeColumn(),
-                options.getFeatureColumns(),
-                options.getLabelColumns(),
+        this(requireOptions(options).getDataPath(),
+                options.isNumeric(), options.hasMissingValues(),
+                options.isRegression(), options.getTimeColumn(),
+                options.getFeatureColumns(), options.getLabelColumns(),
                 options.isTest() ? "test" : "train",
-                options.getFilePattern(),
-                options.getStandardizationStats()
-        );
+                options.getFilePattern(), options.getStandardizationStats(),
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                options.getNumericStorageType());
     }
 
     public LazyPerFileParquetReader(
@@ -102,477 +80,330 @@ public class LazyPerFileParquetReader implements DatasetReader {
             String filePattern,
             StandardizationStats standardizationStats
     ) {
-        this.dataPath = dataPath;
+        this(dataPath, isNumeric, hasMissingValues, isRegression, timeColumn,
+                featureColumns, labelColumns, readerKey, filePattern,
+                standardizationStats, DEFAULT_INITIAL_TIME_CAPACITY,
+                NumericStorageType.AUTO);
+    }
+
+    public LazyPerFileParquetReader(
+            String dataPath,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean isRegression,
+            String timeColumn,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            String readerKey,
+            String filePattern,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity
+    ) {
+        this(dataPath, isNumeric, hasMissingValues, isRegression, timeColumn,
+                featureColumns, labelColumns, readerKey, filePattern,
+                standardizationStats, initialTimeCapacity,
+                NumericStorageType.AUTO);
+    }
+
+    public LazyPerFileParquetReader(
+            String dataPath,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean isRegression,
+            String timeColumn,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            String readerKey,
+            String filePattern,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            NumericStorageType numericStorageType
+    ) {
+        this.dataPath = normalizeNullableString(dataPath);
         this.isNumeric = isNumeric;
         this.hasMissingValues = hasMissingValues;
         this.isRegression = isRegression;
-        this.timeColumn = timeColumn;
-
-        this.featureColumns =
-                featureColumns == null
-                        ? new ArrayList<>()
-                        : new ArrayList<>(featureColumns);
-
-        this.labelColumns =
-                labelColumns == null
-                        ? new ArrayList<>()
-                        : new ArrayList<>(labelColumns);
-
-        if (readerKey == null || readerKey.isBlank()) {
-            throw new IllegalArgumentException(
-                    "LazyPerFileParquetReader requires a non-empty readerKey."
-            );
-        }
-
-        this.readerKey = readerKey;
-
-        this.filePattern =
-                filePattern == null || filePattern.isBlank()
-                        ? null
-                        : filePattern.trim();
-
+        this.timeColumn = normalizeNullableString(timeColumn);
+        this.featureColumns = copyAndValidateFeatures(featureColumns);
+        this.labelColumns = copyList(labelColumns);
+        this.readerKey = requireNonblank(readerKey, "readerKey");
+        this.filePattern = normalizeNullableString(filePattern);
         this.standardizationStats = standardizationStats;
+        if (initialTimeCapacity < 1) {
+            throw new IllegalArgumentException(
+                    "initialTimeCapacity must be at least 1.");
+        }
+        this.initialTimeCapacity = initialTimeCapacity;
+        this.numericStorageType = Objects.requireNonNull(
+                numericStorageType, "numericStorageType cannot be null.");
+        validateOptions();
     }
 
     @Override
     public ListObjectDataset read() throws IOException {
-        validateOptions();
+        List<Path> files = discoverFiles();
 
-        List<Path> files =
-                discoverFiles();
-
-        /*AppContext.registerLazySeriesReader(
+        LazySeriesReaderSpec spec = new LazySeriesReaderSpec(
                 readerKey,
-                new PerFileParquetSeriesReader(
-                        timeColumn,
-                        featureColumns,
-                        isNumeric,
-                        hasMissingValues
-                )
-        );*/
-
-        LazySeriesReaderSpec readerSpec =
-                new LazySeriesReaderSpec(
-                        readerKey,
-                        ReaderType.LAZY_PER_FILE_PARQUET,
-                        timeColumn,
-                        featureColumns,
-                        isNumeric,
-                        hasMissingValues,
-                        standardizationStats
-                );
-
-        AppContext.registerLazySeriesReader(
-                readerSpec
+                ReaderType.LAZY_PER_FILE_PARQUET,
+                timeColumn,
+                featureColumns,
+                isNumeric,
+                hasMissingValues,
+                null,
+                false,
+                standardizationStats,
+                initialTimeCapacity,
+                numericStorageType,
+                NumericPerFileParquetSeriesReader.TimeOrderPolicy.FILE_ORDER
         );
+        AppContext.registerLazySeriesReader(spec);
 
-        ListObjectDataset dataset =
-                new ListObjectDataset(files.size());
-
-        for (int i = 0; i < files.size(); i++) {
-            Path file =
-                    files.get(i);
-
-            Object label =
-                    inferLabel(file, i);
-
-            LazySeriesRef ref =
-                    new LazySeriesRef(
-                            readerKey,
-                            i,
-                            file
-                    );
-
+        ListObjectDataset dataset = new ListObjectDataset(files.size());
+        for (int instance = 0; instance < files.size(); instance++) {
+            Path file = files.get(instance);
             dataset.add(
-                    label,
-                    ref,
-                    i
+                    inferLabel(file, instance),
+                    new LazySeriesRef(readerKey, instance, file),
+                    instance
             );
         }
 
-        /*
-         * Individual series may have unequal lengths. No series files are
-         * opened while constructing this dataset.
-         */
         dataset.setLength(0);
-
+        AppContext.length = 0;
         return dataset;
     }
 
     private void validateOptions() {
-        if (dataPath == null ||
-                dataPath.trim().isEmpty()) {
-
+        if (!labelColumns.isEmpty()) {
             throw new IllegalArgumentException(
-                    "LazyPerFileParquetReader requires dataPath."
-            );
+                    "LazyPerFileParquetReader does not interpret per-file "
+                            + "columns as observation labels.");
         }
-
-        if (featureColumns == null ||
-                featureColumns.isEmpty()) {
-
+        if (timeColumn != null && featureColumns.contains(timeColumn)) {
             throw new IllegalArgumentException(
-                    "LazyPerFileParquetReader requires at least one feature column."
-            );
+                    "The time column cannot also be a feature column: "
+                            + timeColumn);
+        }
+        if (standardizationStats != null) {
+            if (!isNumeric) {
+                throw new IllegalArgumentException(
+                        "Standardization statistics require numeric data.");
+            }
+            standardizationStats.validateFeatureCompatibility(featureColumns);
         }
     }
 
     private List<Path> discoverFiles() throws IOException {
-        Path path =
-                Paths.get(dataPath);
-
-        if (!Files.exists(path)) {
+        if (dataPath == null || dataPath.isBlank()) {
+            throw new IllegalArgumentException(
+                    "LazyPerFileParquetReader requires dataPath.");
+        }
+        Path path = Paths.get(dataPath);
+        if (!Files.exists(path) || !Files.isReadable(path)) {
             throw new IOException(
-                    "Per-file Parquet data path does not exist: "
-                            + dataPath
-            );
+                    "Per-file Parquet data path is not readable: " + dataPath);
         }
-
-        if (Files.isDirectory(path)) {
-            if (filePattern == null || filePattern.isBlank()) {
-                throw new IllegalArgumentException(
-                        "LazyPerFileParquetReader requires file_pattern when "
-                                + "dataPath is a directory. The pattern must "
-                                + "contain one numeric placeholder, such as "
-                                + "trial_*.{run:03d}_freq.parquet."
-                );
-            }
-
-            return discoverFromPattern(
-                    path,
-                    filePattern
-            );
-        }
-
         if (Files.isRegularFile(path)) {
-            if (!path.getFileName()
-                    .toString()
-                    .toLowerCase()
-                    .endsWith(".parquet")) {
-
+            if (!isParquetFile(path)) {
                 throw new IOException(
-                        "LazyPerFileParquetReader expected a .parquet file: "
-                                + dataPath
-                );
+                        "Expected a .parquet file: " + dataPath);
             }
-
             return List.of(path);
         }
-
-        throw new IOException(
-                "Per-file Parquet data path must be a directory "
-                        + "or a regular .parquet file: "
-                        + dataPath
-        );
+        if (!Files.isDirectory(path)) {
+            throw new IOException(
+                    "Per-file Parquet data path must be a directory or a "
+                            + "regular .parquet file: " + dataPath);
+        }
+        if (filePattern == null || filePattern.isBlank()) {
+            throw new IllegalArgumentException(
+                    "filePattern is required for directory input and must "
+                            + "contain exactly one numeric placeholder.");
+        }
+        return discoverFromPattern(path, filePattern);
     }
-
-    /*private List<Path> discoverFromDirectory(
-            Path directory
-    ) throws IOException {
-
-        try (Stream<Path> stream = Files.list(directory)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .filter(path ->
-                            path.getFileName()
-                                    .toString()
-                                    .toLowerCase()
-                                    .endsWith(".parquet")
-                    )
-                    .sorted(Comparator.comparing(
-                            path -> path.getFileName().toString()
-                    ))
-                    .toList();
-        }
-    }*/
-
-    /*private List<Path> discoverFromNumericPattern(
-            String patternWithNum
-    ) throws IOException {
-
-        Path patternPath =
-                Paths.get(patternWithNum);
-
-        Path parent =
-                patternPath.getParent();
-
-        if (parent == null) {
-            parent = Paths.get(".");
-        }
-
-        String filePattern =
-                patternPath.getFileName().toString();
-
-        NumericPattern numericPattern =
-                NumericPattern.from(filePattern);
-
-        try (Stream<Path> stream = Files.list(parent)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .filter(path ->
-                            numericPattern.matches(
-                                    path.getFileName().toString()
-                            )
-                    )
-                    .sorted((a, b) ->
-                            Integer.compare(
-                                    numericPattern.extractNumber(
-                                            a.getFileName().toString()
-                                    ),
-                                    numericPattern.extractNumber(
-                                            b.getFileName().toString()
-                                    )
-                            )
-                    )
-                    .toList();
-        }
-    }*/
 
     private List<Path> discoverFromPattern(
             Path directory,
-            String filePattern
+            String patternText
     ) throws IOException {
-
-        NumericPattern numericPattern =
-                NumericPattern.from(filePattern);
-
-        List<Path> files;
-
+        NumericPattern pattern = NumericPattern.from(patternText);
+        List<IndexedPath> indexed = new ArrayList<>();
         try (Stream<Path> stream = Files.list(directory)) {
-            files = stream
-                    .filter(Files::isRegularFile)
-                    .filter(path ->
-                            numericPattern.matches(
-                                    path.getFileName().toString()
-                            )
-                    )
-                    .sorted((a, b) -> {
-                        long aNumber =
-                                numericPattern.extractNumber(
-                                        a.getFileName().toString()
-                                );
-
-                        long bNumber =
-                                numericPattern.extractNumber(
-                                        b.getFileName().toString()
-                                );
-
-                        int numericComparison =
-                                Long.compare(
-                                        aNumber,
-                                        bNumber
-                                );
-
-                        if (numericComparison != 0) {
-                            return numericComparison;
+            stream.filter(Files::isRegularFile)
+                    .filter(LazyPerFileParquetReader::isParquetFile)
+                    .forEach(path -> {
+                        String fileName = path.getFileName().toString();
+                        Long sequence = pattern.tryExtractNumber(fileName);
+                        if (sequence != null) {
+                            indexed.add(new IndexedPath(
+                                    path, fileName, sequence));
                         }
-
-                        /*
-                         * Stable deterministic tie-breaker in case two filenames
-                         * contain the same numeric field.
-                         */
-                        return a.getFileName()
-                                .toString()
-                                .compareTo(
-                                        b.getFileName().toString()
-                                );
-                    })
-                    .toList();
+                    });
         }
-
-        if (files.isEmpty()) {
+        if (indexed.isEmpty()) {
             throw new IOException(
-                    "No Parquet files in directory "
-                            + directory
-                            + " matched pattern: "
-                            + filePattern
-            );
+                    "No Parquet files in " + directory
+                            + " matched pattern: " + patternText);
         }
-
-        return files;
+        indexed.sort(Comparator
+                .comparingLong(IndexedPath::sequenceNumber)
+                .thenComparing(IndexedPath::fileName));
+        List<Path> result = new ArrayList<>(indexed.size());
+        for (IndexedPath value : indexed) {
+            result.add(value.path());
+        }
+        return List.copyOf(result);
     }
 
-    /**
-     * Placeholder for future label conventions.
-     *
-     * Later options:
-     *
-     *      filename -> label from CSV
-     *      filename -> label encoded in name
-     *      external metadata table
-     *
-     * For now, return null so unsupervised/outlier workflows still work,
-     * and supervised workflows can be wired once label conventions are fixed.
-     */
-    private Object inferLabel(
-            Path file,
-            int instanceIndex
-    ) {
+    private static boolean isParquetFile(Path path) {
+        return path.getFileName().toString()
+                .toLowerCase(java.util.Locale.ROOT)
+                .endsWith(".parquet");
+    }
+
+    private Object inferLabel(Path file, int instanceIndex) {
         return null;
     }
 
-    private static class NumericPattern {
+    private static ReaderOptions requireOptions(ReaderOptions options) {
+        if (options == null) {
+            throw new IllegalArgumentException(
+                    "LazyPerFileParquetReader requires ReaderOptions.");
+        }
+        return options;
+    }
 
-        private static final Pattern PLACEHOLDER_PATTERN =
-                Pattern.compile(
-                        "\\{([A-Za-z_][A-Za-z0-9_]*)(?::0?(\\d+)d)?}"
-                );
+    private static List<String> copyAndValidateFeatures(
+            List<String> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "At least one feature column is required.");
+        }
+        List<String> result = new ArrayList<>(values.size());
+        Set<String> seen = new HashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Feature columns cannot contain blank values.");
+            }
+            String normalized = value.trim();
+            if (!seen.add(normalized)) {
+                throw new IllegalArgumentException(
+                        "Duplicate feature column: " + normalized);
+            }
+            result.add(normalized);
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<String> copyList(List<String> values) {
+        return values == null || values.isEmpty()
+                ? List.of() : List.copyOf(values);
+    }
+
+    private static String requireNonblank(String value, String role) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(role + " cannot be blank.");
+        }
+        return value.trim();
+    }
+
+    private static String normalizeNullableString(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")
+                ? null : trimmed;
+    }
+
+    private record IndexedPath(
+            Path path,
+            String fileName,
+            long sequenceNumber
+    ) {
+    }
+
+    private static final class NumericPattern {
+        private static final Pattern PLACEHOLDER = Pattern.compile(
+                "\\{([A-Za-z_][A-Za-z0-9_]*)(?::0?(\\d+)d)?}");
 
         private final Pattern regex;
         private final String numericFieldName;
 
-        private NumericPattern(
-                Pattern regex,
-                String numericFieldName
-        ) {
+        private NumericPattern(Pattern regex, String numericFieldName) {
             this.regex = regex;
             this.numericFieldName = numericFieldName;
         }
 
-        private static NumericPattern from(
-                String filePattern
-        ) {
-            if (filePattern == null || filePattern.isBlank()) {
+        private static NumericPattern from(String pattern) {
+            Matcher matcher = PLACEHOLDER.matcher(pattern);
+            if (!matcher.find()) {
                 throw new IllegalArgumentException(
-                        "Per-file pattern cannot be null or blank."
-                );
+                        "Pattern must contain one numeric placeholder such as "
+                                + "{num}, {num:04d}, {run}, or {run:03d}: "
+                                + pattern);
             }
-
-            Matcher placeholderMatcher =
-                    PLACEHOLDER_PATTERN.matcher(filePattern);
-
-            if (!placeholderMatcher.find()) {
+            String fieldName = matcher.group(1);
+            String widthText = matcher.group(2);
+            int start = matcher.start();
+            int end = matcher.end();
+            if (matcher.find()) {
                 throw new IllegalArgumentException(
-                        "Per-file pattern must contain one numeric placeholder, "
-                                + "such as {num}, {num:03d}, {run}, or {run:03d}: "
-                                + filePattern
-                );
+                        "Pattern supports exactly one numeric placeholder: "
+                                + pattern);
             }
-
-            String fieldName =
-                    placeholderMatcher.group(1);
-
-            String widthText =
-                    placeholderMatcher.group(2);
-
-            int placeholderStart =
-                    placeholderMatcher.start();
-
-            int placeholderEnd =
-                    placeholderMatcher.end();
-
-            if (placeholderMatcher.find()) {
-                throw new IllegalArgumentException(
-                        "Per-file pattern currently supports exactly one "
-                                + "numeric placeholder: "
-                                + filePattern
-                );
-            }
-
-            String prefix =
-                    filePattern.substring(
-                            0,
-                            placeholderStart
-                    );
-
-            String suffix =
-                    filePattern.substring(
-                            placeholderEnd
-                    );
-
-            String numericRegex =
-                    widthText == null
-                            ? "(\\d+)"
-                            : "(\\d{" + Integer.parseInt(widthText) + "})";
-
-            String regexText =
-                    "^"
-                            + globFragmentToRegex(prefix)
-                            + numericRegex
-                            + globFragmentToRegex(suffix)
-                            + "$";
-
-            return new NumericPattern(
-                    Pattern.compile(regexText),
-                    fieldName
-            );
+            String numeric = widthText == null
+                    ? "(\\d+)"
+                    : "(\\d{" + Integer.parseInt(widthText) + "})";
+            String regex = "^"
+                    + globFragment(pattern.substring(0, start))
+                    + numeric
+                    + globFragment(pattern.substring(end)) + "$";
+            return new NumericPattern(Pattern.compile(regex), fieldName);
         }
 
-        private static String globFragmentToRegex(
-                String fragment
-        ) {
-            StringBuilder regex =
-                    new StringBuilder();
+        private Long tryExtractNumber(String fileName) {
+            Matcher matcher = regex.matcher(fileName);
+            if (!matcher.matches()) {
+                return null;
+            }
+            try {
+                return Long.parseLong(matcher.group(1));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                        "Numeric field '" + numericFieldName
+                                + "' exceeds long range in filename: "
+                                + fileName, e);
+            }
+        }
 
-            StringBuilder literal =
-                    new StringBuilder();
-
-            for (int i = 0; i < fragment.length(); i++) {
-                char current =
-                        fragment.charAt(i);
-
-                if (current == '*') {
-                    appendQuotedLiteral(regex, literal);
-                    regex.append(".*");
-                } else if (current == '?') {
-                    appendQuotedLiteral(regex, literal);
-                    regex.append(".");
+        private static String globFragment(String fragment) {
+            StringBuilder regex = new StringBuilder();
+            StringBuilder literal = new StringBuilder();
+            for (int index = 0; index < fragment.length(); index++) {
+                char current = fragment.charAt(index);
+                if (current == '*' || current == '?') {
+                    appendLiteral(regex, literal);
+                    regex.append(current == '*' ? ".*" : ".");
                 } else {
                     literal.append(current);
                 }
             }
-
-            appendQuotedLiteral(regex, literal);
-
+            appendLiteral(regex, literal);
             return regex.toString();
         }
 
-        private static void appendQuotedLiteral(
+        private static void appendLiteral(
                 StringBuilder regex,
                 StringBuilder literal
         ) {
-            if (literal.length() == 0) {
-                return;
-            }
-
-            regex.append(
-                    Pattern.quote(literal.toString())
-            );
-
-            literal.setLength(0);
-        }
-
-        private boolean matches(
-                String fileName
-        ) {
-            return regex.matcher(fileName).matches();
-        }
-
-        private long extractNumber(
-                String fileName
-        ) {
-            Matcher matcher =
-                    regex.matcher(fileName);
-
-            if (!matcher.matches()) {
-                throw new IllegalArgumentException(
-                        "File does not match per-file pattern: "
-                                + fileName
-                );
-            }
-
-            try {
-                return Long.parseLong(
-                        matcher.group(1)
-                );
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        "Numeric field '"
-                                + numericFieldName
-                                + "' is too large in filename: "
-                                + fileName,
-                        e
-                );
+            if (literal.length() > 0) {
+                regex.append(Pattern.quote(literal.toString()));
+                literal.setLength(0);
             }
         }
     }

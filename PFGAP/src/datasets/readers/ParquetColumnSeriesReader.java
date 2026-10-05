@@ -3,16 +3,18 @@ package datasets.readers;
 import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import dev.hardwood.InputFile;
 import dev.hardwood.reader.ColumnReader;
 import dev.hardwood.reader.ColumnReaders;
+import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.reader.RowReader;
 import dev.hardwood.reader.Validity;
 import dev.hardwood.schema.ColumnProjection;
 import preprocessing.standardization.StandardizationStats;
-//import preprocessing.standardization.Standardizer;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -21,112 +23,66 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /**
- * Reads one ordinary Parquet file as a collection of univariate series.
- *
- * <p>Dataset convention:</p>
- *
- * <pre>
- * one selected Parquet column = one PFGAP dataset instance
- * one Parquet record = one position in that univariate instance
- * </pre>
- *
- * <p>For example, this Parquet table:</p>
+ * Reads selected columns from one ordinary Parquet file as separate
+ * one-dimensional PFGAP observations.
  *
  * <pre>
- * series_0   series_1   series_2
- * 1.0        4.0        7.0
- * 2.0        5.0        8.0
- * 3.0        6.0        9.0
+ * one selected Parquet column = one dataset observation
+ * one Parquet record          = one position in that observation
  * </pre>
  *
- * <p>produces three PFGAP instances:</p>
+ * <p>This representation is useful when a Parquet table stores one complete
+ * univariate series per column. It is not the row-wise tabular interpretation
+ * used by {@link LongFormatParquetReader}, and it is not a multivariate
+ * observation. Labels are intentionally unsupported because the selected
+ * columns themselves are the dataset observations.</p>
  *
- * <pre>
- * [1.0, 2.0, 3.0]
- * [4.0, 5.0, 6.0]
- * [7.0, 8.0, 9.0]
- * </pre>
+ * <p>Numeric mode uses Hardwood's batch-oriented {@link ColumnReaders} API and
+ * supports physical DOUBLE, FLOAT, INT64, and INT32 columns. FLOAT32 produces
+ * primitive {@code float[]}; FLOAT64 produces primitive {@code double[]}.
+ * AUTO preserves FLOAT only when every selected column is physically FLOAT;
+ * otherwise all selected observations are promoted to FLOAT64. Parquet nulls
+ * become primitive NaN when missing values are enabled. Boxed numeric arrays
+ * are never produced.</p>
  *
- * <p>Numeric flat DOUBLE columns use Hardwood's batch-oriented
- * {@link ColumnReaders} API. This avoids row-by-row access, generic object
- * materialization, and boxing when missing values are absent.</p>
- *
- * <p>Nonnumeric columns use Hardwood's {@link RowReader} API as a
- * compatibility path because it performs logical-type conversion and
- * supports generic values.</p>
- *
- * <p>Returned representations:</p>
- *
- * <pre>
- * numeric column, no missing values:
- *     double[]
- *
- * numeric column, missing values enabled:
- *     Double[]
- *
- * generic column:
- *     Object[]
- * </pre>
- *
- * <p>Labels are currently {@code null}. A label column in this file would
- * contain one value per Parquet record rather than one label per selected
- * series, so it does not naturally satisfy the one-column-per-instance
- * convention. Per-series labels should be supplied through separate metadata
- * or another explicit label mechanism.</p>
- *
- * <p>For multivariate time-series Parquet data, use a long-format reader, a
- * per-file reader, or a user-defined reader.</p>
+ * <p>Generic mode uses Hardwood's projected {@link RowReader} compatibility
+ * path so logical and heterogeneous values can be returned as
+ * {@code Object[]} observations.</p>
  */
-public class ParquetColumnSeriesReader
-        implements DatasetReader {
-
-    private static final int DEFAULT_INITIAL_SERIES_CAPACITY =
-            4096;
+public class ParquetColumnSeriesReader implements DatasetReader {
+    private static final int DEFAULT_INITIAL_SERIES_CAPACITY = 4096;
 
     private final String dataFileName;
     private final List<String> featureColumns;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
-    //private final StandardizationStats standardizationStats;
+    private final NumericStorageType requestedStorageType;
     private final int initialSeriesCapacity;
-
     private final ColumnProjection projection;
     private final Set<String> missingIndicators;
 
-    /**
-     * Constructs the reader from PFGAP reader options.
-     */
-    public ParquetColumnSeriesReader(
-            ReaderOptions options
-    ) {
-        this(
-                requireOptions(options).getDataPath(),
-                options.getFeatureColumns(),
-                options.isNumeric(),
+    public ParquetColumnSeriesReader(ReaderOptions options) {
+        this(requireOptions(options).getDataPath(),
+                options.getFeatureColumns(), options.isNumeric(),
                 options.hasMissingValues(),
                 options.getStandardizationStats(),
-                DEFAULT_INITIAL_SERIES_CAPACITY
-        );
-
+                DEFAULT_INITIAL_SERIES_CAPACITY,
+                options.getNumericStorageType());
         if (options.getLabelColumns() != null
                 && !options.getLabelColumns().isEmpty()) {
-
             throw new IllegalArgumentException(
-                    "ParquetFileReader does not interpret ordinary Parquet "
-                            + "columns as per-series labels. Each selected "
-                            + "feature column is itself one dataset instance. "
-                            + "Use separate metadata or another reader for "
-                            + "labels."
-            );
+                    "ParquetColumnSeriesReader does not interpret ordinary "
+                            + "Parquet columns as per-series labels. Each "
+                            + "selected feature column is one dataset "
+                            + "observation. Use separate metadata or another "
+                            + "reader for labels.");
         }
     }
 
-    /**
-     * Constructs the reader with the default initial series capacity.
-     */
     public ParquetColumnSeriesReader(
             String dataFileName,
             List<String> featureColumns,
@@ -134,28 +90,11 @@ public class ParquetColumnSeriesReader
             boolean hasMissingValues,
             StandardizationStats standardizationStats
     ) {
-        this(
-                dataFileName,
-                featureColumns,
-                isNumeric,
-                hasMissingValues,
-                standardizationStats,
-                DEFAULT_INITIAL_SERIES_CAPACITY
-        );
+        this(dataFileName, featureColumns, isNumeric, hasMissingValues,
+                standardizationStats, DEFAULT_INITIAL_SERIES_CAPACITY,
+                NumericStorageType.AUTO);
     }
 
-    /**
-     * Full constructor.
-     *
-     * @param dataFileName          Parquet file
-     * @param featureColumns        columns that become dataset instances
-     * @param isNumeric             whether selected columns are numerical
-     * @param hasMissingValues      whether null or configured missing values
-     *                              are permitted
-     * @param standardizationStats  optional standardization statistics
-     * @param initialSeriesCapacity initial allocation hint per selected
-     *                              column
-     */
     public ParquetColumnSeriesReader(
             String dataFileName,
             List<String> featureColumns,
@@ -164,1023 +103,613 @@ public class ParquetColumnSeriesReader
             StandardizationStats standardizationStats,
             int initialSeriesCapacity
     ) {
-        this.dataFileName =
-                requireNonblank(
-                        dataFileName,
-                        "dataFileName"
-                );
+        this(dataFileName, featureColumns, isNumeric, hasMissingValues,
+                standardizationStats, initialSeriesCapacity,
+                NumericStorageType.AUTO);
+    }
 
-        this.featureColumns =
-                copyAndValidateFeatureColumns(
-                        featureColumns
-                );
-
-        this.isNumeric =
-                isNumeric;
-
-        this.hasMissingValues =
-                hasMissingValues;
-
-        /*
-         * Retain the constructor parameter for source compatibility and
-         * standardization-configuration validation. This eager reader always
-         * returns raw arrays. StandardizationPipeline transforms the completed
-         * eager dataset exactly once.
-         */
-        validateStandardizationConfiguration(standardizationStats);
-
+    public ParquetColumnSeriesReader(
+            String dataFileName,
+            List<String> featureColumns,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats,
+            int initialSeriesCapacity,
+            NumericStorageType numericStorageType
+    ) {
+        this.dataFileName = requireNonblank(dataFileName, "dataFileName");
+        this.featureColumns = copyAndValidateFeatureColumns(featureColumns);
+        this.isNumeric = isNumeric;
+        this.hasMissingValues = hasMissingValues;
+        this.requestedStorageType = Objects.requireNonNull(
+                numericStorageType, "numericStorageType cannot be null.");
         if (initialSeriesCapacity < 1) {
             throw new IllegalArgumentException(
-                    "ParquetFileReader initialSeriesCapacity must be "
-                            + "at least 1. Received: "
-                            + initialSeriesCapacity
-                            + "."
-            );
+                    "initialSeriesCapacity must be at least 1. Received: "
+                            + initialSeriesCapacity + ".");
         }
-
-        this.initialSeriesCapacity =
-                initialSeriesCapacity;
-
-        this.missingIndicators =
-                snapshotMissingIndicators();
-
+        this.initialSeriesCapacity = initialSeriesCapacity;
         validateStandardizationConfiguration(standardizationStats);
-
-        this.projection =
-                ColumnProjection.columns(
-                        this.featureColumns.toArray(
-                                String[]::new
-                        )
-                );
+        this.missingIndicators = snapshotMissingIndicators();
+        this.projection = ColumnProjection.columns(
+                this.featureColumns.toArray(String[]::new));
     }
 
     @Override
-    public ListObjectDataset read()
-            throws IOException {
-
-        Path file =
-                validateFile();
-
-        if (isNumeric) {
-            return readNumericColumns(
-                    file
-            );
-        }
-
-        return readGenericColumns(
-                file
-        );
+    public ListObjectDataset read() throws IOException {
+        Path file = validateFile();
+        return isNumeric
+                ? readNumericColumns(file)
+                : readGenericColumns(file);
     }
 
-    /**
-     * Reads selected physical DOUBLE columns in batches.
-     */
-    private ListObjectDataset readNumericColumns(
-            Path file
-    ) throws IOException {
+    private ListObjectDataset readNumericColumns(Path file)
+            throws IOException {
+        ValueKind[] kinds = null;
+        NumericStorageType outputType = null;
+        NumericBuffer[] buffers = null;
+        MissingBuffer[] missing = hasMissingValues
+                ? new MissingBuffer[featureColumns.size()] : null;
+        int recordCount = 0;
 
-        int columnCount =
-                featureColumns.size();
-
-        PrimitiveDoubleBuffer[] valueBuffers =
-                new PrimitiveDoubleBuffer[columnCount];
-
-        MissingBuffer[] missingBuffers =
-                hasMissingValues
-                        ? new MissingBuffer[columnCount]
-                        : null;
-
-        for (int columnIndex = 0;
-             columnIndex < columnCount;
-             columnIndex++) {
-
-            valueBuffers[columnIndex] =
-                    new PrimitiveDoubleBuffer(
-                            initialSeriesCapacity
-                    );
-
-            if (hasMissingValues) {
-                missingBuffers[columnIndex] =
-                        new MissingBuffer(
-                                initialSeriesCapacity
-                        );
-            }
-        }
-
-        int recordCount =
-                0;
-
-        /*
-         * The fully qualified class name avoids a naming collision with this
-         * PFGAP reader.
-         */
-        try (dev.hardwood.reader.ParquetFileReader hardwoodReader =
-                     dev.hardwood.reader.ParquetFileReader.open(
-                             InputFile.of(
-                                     file
-                             )
-                     );
-
-             ColumnReaders columns =
-                     hardwoodReader.buildColumnReaders(
-                                     projection
-                             )
-                             .build()) {
-
+        try (ParquetFileReader parquet =
+                     ParquetFileReader.open(InputFile.of(file));
+             ColumnReaders columns = parquet.buildColumnReaders(projection)
+                     .build()) {
             while (columns.nextBatch()) {
-                int batchRecordCount =
-                        columns.getRecordCount();
-
-                if (batchRecordCount == 0) {
+                int batchCount = columns.getRecordCount();
+                if (batchCount == 0) {
                     continue;
                 }
-
-                for (int columnIndex = 0;
-                     columnIndex < columnCount;
-                     columnIndex++) {
-
-                    ColumnReader columnReader =
-                            columns.getColumnReader(
-                                    columnIndex
-                            );
-
-                    appendNumericBatch(
-                            columnReader,
-                            batchRecordCount,
-                            valueBuffers[columnIndex],
-                            hasMissingValues
-                                    ? missingBuffers[columnIndex]
-                                    : null,
-                            featureColumns.get(columnIndex),
-                            recordCount,
-                            file
-                    );
+                if (kinds == null) {
+                    kinds = detectNumericKinds(columns, file);
+                    outputType = resolveOutputType(kinds);
+                    buffers = createNumericBuffers(outputType);
+                    if (missing != null) {
+                        for (int i = 0; i < missing.length; i++) {
+                            missing[i] = new MissingBuffer(
+                                    initialSeriesCapacity);
+                        }
+                    }
                 }
-
-                recordCount +=
-                        batchRecordCount;
-            }
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            throw new IOException(
-                    "Failed while reading numeric Parquet columns from: "
-                            + file,
-                    e
-            );
-        }
-
-        if (recordCount == 0) {
-            throw new IOException(
-                    "Parquet file contains no records: "
-                            + file
-            );
-        }
-
-        ListObjectDataset dataset =
-                new ListObjectDataset(
-                        columnCount
-                );
-
-        for (int columnIndex = 0;
-             columnIndex < columnCount;
-             columnIndex++) {
-
-            if (valueBuffers[columnIndex].size()
-                    != recordCount) {
-
-                throw new IllegalStateException(
-                        "Parquet column '"
-                                + featureColumns.get(columnIndex)
-                                + "' produced "
-                                + valueBuffers[columnIndex].size()
-                                + " values, but "
-                                + recordCount
-                                + " records were expected."
-                );
-            }
-
-            Object series;
-
-            if (hasMissingValues) {
-                if (missingBuffers[columnIndex].size()
-                        != recordCount) {
-
-                    throw new IllegalStateException(
-                            "Missing-position buffer for Parquet column '"
-                                    + featureColumns.get(columnIndex)
-                                    + "' has an inconsistent length."
-                    );
-                }
-
-                series =
-                        valueBuffers[columnIndex]
-                                .toNullableBoxedArray(
-                                        missingBuffers[columnIndex]
-                                );
-            } else {
-                series =
-                        valueBuffers[columnIndex].toArray();
-            }
-
-            dataset.add(
-                    null,
-                    series,
-                    columnIndex
-            );
-        }
-
-        dataset.setLength(
-                recordCount
-        );
-
-        AppContext.length =
-                recordCount;
-
-        return dataset;
-    }
-
-    /**
-     * Appends one Hardwood primitive DOUBLE batch.
-     *
-     * <p>Hardwood provides one validity object per batch. Hoisting
-     * {@code hasNulls()} preserves a bulk-copy fast path for the common
-     * no-null case.</p>
-     */
-    private void appendNumericBatch(
-            ColumnReader columnReader,
-            int batchRecordCount,
-            PrimitiveDoubleBuffer valueBuffer,
-            MissingBuffer missingBuffer,
-            String columnName,
-            int recordOffset,
-            Path file
-    ) {
-        double[] values;
-
-        try {
-            values =
-                    columnReader.getDoubles();
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException(
-                    "ParquetFileReader currently requires numeric column '"
-                            + columnName
-                            + "' to have Parquet physical type DOUBLE in file "
-                            + file
-                            + ". Integer, float, decimal, and other physical "
-                            + "types require explicit type dispatch.",
-                    e
-            );
-        }
-
-        if (values.length < batchRecordCount) {
-            throw new IllegalStateException(
-                    "Hardwood returned fewer primitive values than records "
-                            + "for column '"
-                            + columnName
-                            + "' in file "
-                            + file
-                            + ". Records="
-                            + batchRecordCount
-                            + ", values="
-                            + values.length
-                            + "."
-            );
-        }
-
-        Validity validity =
-                columnReader.getLeafValidity();
-
-        boolean batchHasNulls =
-                validity.hasNulls();
-
-        if (!batchHasNulls) {
-            valueBuffer.addAll(
-                    values,
-                    0,
-                    batchRecordCount
-            );
-
-            if (missingBuffer != null) {
-                missingBuffer.addRepeated(
-                        false,
-                        batchRecordCount
-                );
-            }
-
-            return;
-        }
-
-        if (!hasMissingValues) {
-            for (int recordIndex = 0;
-                 recordIndex < batchRecordCount;
-                 recordIndex++) {
-
-                if (validity.isNull(recordIndex)) {
-                    throw new IllegalArgumentException(
-                            "Encountered null in Parquet column '"
-                                    + columnName
-                                    + "' in file "
-                                    + file
-                                    + " at record "
-                                    + (recordOffset + recordIndex)
-                                    + ", but hasMissingValues=false."
-                    );
-                }
-            }
-        }
-
-        for (int recordIndex = 0;
-             recordIndex < batchRecordCount;
-             recordIndex++) {
-
-            boolean missing =
-                    validity.isNull(
-                            recordIndex
-                    );
-
-            valueBuffer.add(
-                    missing
-                            ? 0.0
-                            : values[recordIndex]
-            );
-
-            if (missingBuffer != null) {
-                missingBuffer.add(
-                        missing
-                );
-            }
-        }
-    }
-
-    /**
-     * Reads generic columns through Hardwood's row API.
-     *
-     * <p>This remains the compatibility path for strings, Booleans, logical
-     * dates or timestamps, decimals, and other values that cannot be safely
-     * consumed through {@code getDoubles()}.</p>
-     */
-    private ListObjectDataset readGenericColumns(
-            Path file
-    ) throws IOException {
-
-        ObjectBuffer[] buffers =
-                new ObjectBuffer[featureColumns.size()];
-
-        for (int columnIndex = 0;
-             columnIndex < buffers.length;
-             columnIndex++) {
-
-            buffers[columnIndex] =
-                    new ObjectBuffer(
-                            initialSeriesCapacity
-                    );
-        }
-
-        int recordCount =
-                0;
-
-        try (dev.hardwood.reader.ParquetFileReader hardwoodReader =
-                     dev.hardwood.reader.ParquetFileReader.open(
-                             InputFile.of(
-                                     file
-                             )
-                     );
-
-             RowReader rowReader =
-                     hardwoodReader.buildRowReader()
-                             .projection(
-                                     projection
-                             )
-                             .build()) {
-
-            while (rowReader.hasNext()) {
-                rowReader.next();
 
                 for (int columnIndex = 0;
                      columnIndex < featureColumns.size();
                      columnIndex++) {
-
-                    String columnName =
-                            featureColumns.get(
-                                    columnIndex
-                            );
-
-                    Object value;
-
-                    if (rowReader.isNull(columnName)) {
-                        if (!hasMissingValues) {
-                            throw new IllegalArgumentException(
-                                    "Encountered null in Parquet column '"
-                                            + columnName
-                                            + "' in file "
-                                            + file
-                                            + " at record "
-                                            + recordCount
-                                            + ", but hasMissingValues=false."
-                            );
-                        }
-
-                        value =
-                                null;
-                    } else {
-                        value =
-                                parseGenericValue(
-                                        rowReader.getValue(
-                                                columnName
-                                        )
-                                );
-
-                        if (value == null
-                                && !hasMissingValues) {
-
-                            throw new IllegalArgumentException(
-                                    "Encountered a configured missing value "
-                                            + "in Parquet column '"
-                                            + columnName
-                                            + "' in file "
-                                            + file
-                                            + " at record "
-                                            + recordCount
-                                            + ", but hasMissingValues=false."
-                            );
-                        }
-                    }
-
-                    buffers[columnIndex].add(
-                            value
-                    );
+                    String name = featureColumns.get(columnIndex);
+                    ColumnReader reader = columns.getColumnReader(name);
+                    Object values = readValues(
+                            reader, kinds[columnIndex], name, file);
+                    Validity validity = reader.getLeafValidity();
+                    appendNumericBatch(values, kinds[columnIndex], validity,
+                            batchCount, buffers[columnIndex],
+                            missing == null ? null : missing[columnIndex],
+                            name, recordCount, file);
                 }
-
-                recordCount++;
+                recordCount += batchCount;
+                ProgressLogger.logProgress(recordCount);
             }
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new IOException(
-                    "Failed while reading generic Parquet columns from: "
-                            + file,
-                    e
-            );
+                    "Failed while reading numeric Parquet column series from "
+                            + file + ".", e);
+        }
+
+        if (recordCount == 0 || buffers == null) {
+            throw new IOException(
+                    "Parquet file contains no records: " + file);
+        }
+
+        ListObjectDataset dataset =
+                new ListObjectDataset(featureColumns.size());
+        for (int column = 0; column < featureColumns.size(); column++) {
+            Object observation = buffers[column].toArray(
+                    missing == null ? null : missing[column]);
+            dataset.add(null, observation, column);
+        }
+        dataset.setLength(recordCount);
+        AppContext.length = recordCount;
+        return dataset;
+    }
+
+    private ValueKind[] detectNumericKinds(
+            ColumnReaders columns,
+            Path file
+    ) {
+        ValueKind[] kinds = new ValueKind[featureColumns.size()];
+        for (int i = 0; i < featureColumns.size(); i++) {
+            String name = featureColumns.get(i);
+            kinds[i] = detectNumericKind(
+                    columns.getColumnReader(name), name, file);
+        }
+        return kinds;
+    }
+
+    private NumericStorageType resolveOutputType(ValueKind[] kinds) {
+        if (requestedStorageType != NumericStorageType.AUTO) {
+            return requestedStorageType;
+        }
+        for (ValueKind kind : kinds) {
+            if (kind != ValueKind.FLOAT) {
+                return NumericStorageType.FLOAT64;
+            }
+        }
+        return NumericStorageType.FLOAT32;
+    }
+
+    private NumericBuffer[] createNumericBuffers(
+            NumericStorageType outputType
+    ) {
+        NumericBuffer[] buffers =
+                new NumericBuffer[featureColumns.size()];
+        for (int i = 0; i < buffers.length; i++) {
+            buffers[i] = outputType == NumericStorageType.FLOAT32
+                    ? new FloatBuffer(initialSeriesCapacity)
+                    : new DoubleBuffer(initialSeriesCapacity);
+        }
+        return buffers;
+    }
+
+    private void appendNumericBatch(
+            Object sourceValues,
+            ValueKind sourceKind,
+            Validity validity,
+            int count,
+            NumericBuffer destination,
+            MissingBuffer missing,
+            String column,
+            int recordOffset,
+            Path file
+    ) {
+        boolean hasNulls = validity.hasNulls();
+        if (!hasNulls) {
+            destination.addAll(sourceValues, sourceKind, count);
+            if (missing != null) {
+                missing.addRepeated(false, count);
+            }
+            return;
+        }
+
+        for (int row = 0; row < count; row++) {
+            boolean isNull = validity.isNull(row);
+            if (isNull && !hasMissingValues) {
+                throw new IllegalArgumentException(
+                        "Null value in Parquet column '" + column
+                                + "' at record " + (recordOffset + row)
+                                + " in " + file
+                                + ", but hasMissingValues=false.");
+            }
+            destination.add(sourceValues, sourceKind, row, isNull);
+            if (missing != null) {
+                missing.add(isNull);
+            }
+        }
+    }
+
+    private ListObjectDataset readGenericColumns(Path file)
+            throws IOException {
+        ObjectBuffer[] buffers = new ObjectBuffer[featureColumns.size()];
+        for (int i = 0; i < buffers.length; i++) {
+            buffers[i] = new ObjectBuffer(initialSeriesCapacity);
+        }
+        int recordCount = 0;
+
+        try (ParquetFileReader parquet =
+                     ParquetFileReader.open(InputFile.of(file));
+             RowReader reader = parquet.buildRowReader()
+                     .projection(projection)
+                     .build()) {
+            while (reader.hasNext()) {
+                reader.next();
+                for (int column = 0;
+                     column < featureColumns.size();
+                     column++) {
+                    String name = featureColumns.get(column);
+                    Object raw = reader.isNull(name)
+                            ? null : reader.getValue(name);
+                    Object value = parseGenericValue(raw);
+                    if (value == null && !hasMissingValues) {
+                        throw new IllegalArgumentException(
+                                "Missing value in Parquet column '" + name
+                                        + "' at record " + recordCount
+                                        + ", but hasMissingValues=false.");
+                    }
+                    buffers[column].add(value);
+                }
+                recordCount++;
+                ProgressLogger.logProgress(recordCount);
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(
+                    "Failed while reading generic Parquet column series from "
+                            + file + ".", e);
         }
 
         if (recordCount == 0) {
             throw new IOException(
-                    "Parquet file contains no records: "
-                            + file
-            );
+                    "Parquet file contains no records: " + file);
         }
-
         ListObjectDataset dataset =
-                new ListObjectDataset(
-                        featureColumns.size()
-                );
-
-        for (int columnIndex = 0;
-             columnIndex < buffers.length;
-             columnIndex++) {
-
-            if (buffers[columnIndex].size()
-                    != recordCount) {
-
-                throw new IllegalStateException(
-                        "Generic Parquet column '"
-                                + featureColumns.get(columnIndex)
-                                + "' produced an inconsistent number "
-                                + "of values."
-                );
-            }
-
-            dataset.add(
-                    null,
-                    buffers[columnIndex].toArray(),
-                    columnIndex
-            );
+                new ListObjectDataset(featureColumns.size());
+        for (int column = 0; column < buffers.length; column++) {
+            dataset.add(null, buffers[column].toArray(), column);
         }
-
-        dataset.setLength(
-                recordCount
-        );
-
-        AppContext.length =
-                recordCount;
-
+        dataset.setLength(recordCount);
+        AppContext.length = recordCount;
         return dataset;
     }
 
-    private Object parseGenericValue(
-            Object value
-    ) {
+    private Object parseGenericValue(Object value) {
         if (value == null) {
             return null;
         }
-
-        /*
-         * Preserve objects already converted by Hardwood's logical-type
-         * handling, including dates, timestamps, decimals, UUIDs, and
-         * Booleans.
-         */
+        if (value instanceof byte[] bytes) {
+            value = new String(bytes, StandardCharsets.UTF_8);
+        }
         if (!(value instanceof CharSequence)) {
             return value;
         }
-
-        String token =
-                value.toString()
-                        .trim();
-
+        String token = value.toString().trim();
         if (isMissingToken(token)) {
             return null;
         }
-
         try {
-            return JavaDoubleParser.parseDouble(
-                    token
-            );
+            return JavaDoubleParser.parseDouble(token);
         } catch (NumberFormatException ignored) {
             if (token.equalsIgnoreCase("true")
                     || token.equalsIgnoreCase("false")) {
-
-                return Boolean.parseBoolean(
-                        token
-                );
+                return Boolean.parseBoolean(token);
             }
-
             return token;
         }
     }
 
-    private boolean isMissingToken(
-            String token
-    ) {
+    private boolean isMissingToken(String token) {
         if (token == null) {
             return true;
         }
-
-        String trimmed =
-                token.trim();
-
-        if (trimmed.isEmpty()) {
-            return true;
-        }
-
-        return missingIndicators.contains(
-                trimmed.toUpperCase(
-                        Locale.ROOT
-                )
-        );
+        String trimmed = token.trim();
+        return trimmed.isEmpty()
+                || missingIndicators.contains(
+                trimmed.toUpperCase(Locale.ROOT));
     }
 
-    /**
-     * Validates standardization for the column-as-instance convention.
-     *
-     * <p>Each selected Parquet column becomes one univariate instance, so
-     * standardization statistics must describe exactly one input dimension.
-     * Feature-name-based compatibility across all selected columns is not
-     * meaningful here because the column names identify instances rather than
-     * dimensions.</p>
-     */
-    private void validateStandardizationConfiguration(StandardizationStats standardizationStats) {
-        if (standardizationStats == null) {
-            return;
-        }
-
-        if (!isNumeric) {
+    private void validateStandardizationConfiguration(
+            StandardizationStats standardizationStats
+    ) {
+        if (standardizationStats != null && !isNumeric) {
             throw new IllegalArgumentException(
                     "Standardization statistics cannot be used with "
-                            + "ParquetColumnSeriesReader when isNumeric=false."
-            );
+                            + "ParquetColumnSeriesReader when isNumeric=false.");
         }
-
-        /*
-         * We deliberately do not call:
-         *
-         * standardizationStats.validateFeatureCompatibility(featureColumns)
-         *
-         * because featureColumns are dataset instances under this reader's
-         * convention, not dimensions within one instance. Standardizer will
-         * validate the realized univariate representation when applied.
-         */
+        // Selected columns are observations, not dimensions. Feature-name
+        // compatibility across selected columns is therefore not meaningful.
     }
 
-    private Path validateFile()
-            throws IOException {
-
-        Path file =
-                Path.of(
-                        dataFileName
-                );
-
-        if (!Files.exists(file)) {
+    private Path validateFile() throws IOException {
+        Path file = Path.of(dataFileName);
+        if (!Files.isRegularFile(file) || !Files.isReadable(file)) {
             throw new IOException(
-                    "Parquet data file does not exist: "
-                            + file
-            );
+                    "Parquet file is not a readable regular file: " + file);
         }
-
-        if (!Files.isRegularFile(file)) {
-            throw new IOException(
-                    "Parquet data path is not a regular file: "
-                            + file
-            );
-        }
-
-        if (!Files.isReadable(file)) {
-            throw new IOException(
-                    "Parquet data file is not readable: "
-                            + file
-            );
-        }
-
         return file;
     }
 
-    private static ReaderOptions requireOptions(
-            ReaderOptions options
+    private static ValueKind detectNumericKind(
+            ColumnReader reader,
+            String column,
+            Path file
     ) {
+        RuntimeException last = null;
+        for (ValueKind kind : ValueKind.values()) {
+            try {
+                readValues(reader, kind, column, file);
+                return kind;
+            } catch (RuntimeException e) {
+                last = e;
+            }
+        }
+        throw new IllegalArgumentException(
+                "Parquet column '" + column + "' in " + file
+                        + " is not a supported fixed-width numeric column. "
+                        + "Supported physical types are DOUBLE, FLOAT, "
+                        + "INT64, and INT32.", last);
+    }
+
+    private static Object readValues(
+            ColumnReader reader,
+            ValueKind kind,
+            String column,
+            Path file
+    ) {
+        try {
+            return switch (kind) {
+                case DOUBLE -> reader.getDoubles();
+                case FLOAT -> reader.getFloats();
+                case LONG -> reader.getLongs();
+                case INT -> reader.getInts();
+            };
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    "Parquet column '" + column + "' in " + file
+                            + " is incompatible with " + kind + ".", e);
+        }
+    }
+
+    private static ReaderOptions requireOptions(ReaderOptions options) {
         if (options == null) {
             throw new IllegalArgumentException(
-                    "ParquetFileReader requires non-null ReaderOptions."
-            );
+                    "ParquetColumnSeriesReader requires ReaderOptions.");
         }
-
         return options;
     }
 
-    private static String requireNonblank(
-            String value,
-            String argumentName
-    ) {
+    private static String requireNonblank(String value, String role) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(
-                    "ParquetFileReader requires "
-                            + argumentName
-                            + "."
-            );
+            throw new IllegalArgumentException(role + " cannot be blank.");
         }
-
         return value.trim();
     }
 
     private static List<String> copyAndValidateFeatureColumns(
-            List<String> featureColumns
+            List<String> columns
     ) {
-        if (featureColumns == null || featureColumns.isEmpty()) {
+        if (columns == null || columns.isEmpty()) {
             throw new IllegalArgumentException(
-                    "ParquetFileReader requires at least one selected "
-                            + "feature column."
-            );
+                    "ParquetColumnSeriesReader requires at least one "
+                            + "feature column.");
         }
-
-        List<String> copy =
-                new ArrayList<>(
-                        featureColumns.size()
-                );
-
-        Set<String> used =
-                new HashSet<>();
-
-        for (String featureColumn : featureColumns) {
-            if (featureColumn == null
-                    || featureColumn.isBlank()) {
-
+        List<String> copy = new ArrayList<>(columns.size());
+        Set<String> seen = new HashSet<>();
+        for (String column : columns) {
+            String normalized = requireNonblank(
+                    column, "feature column");
+            if (!seen.add(normalized)) {
                 throw new IllegalArgumentException(
-                        "Parquet feature-column names cannot be null "
-                                + "or blank."
-                );
+                        "Duplicate Parquet feature column: " + normalized);
             }
-
-            String normalized =
-                    featureColumn.trim();
-
-            if (!used.add(normalized)) {
-                throw new IllegalArgumentException(
-                        "Parquet feature column was selected more than once: "
-                                + normalized
-                );
-            }
-
-            copy.add(
-                    normalized
-            );
+            copy.add(normalized);
         }
-
-        return List.copyOf(
-                copy
-        );
+        return List.copyOf(copy);
     }
 
     private static Set<String> snapshotMissingIndicators() {
         if (AppContext.MissingStrings == null
                 || AppContext.MissingStrings.isEmpty()) {
-
             return Set.of();
         }
-
-        Set<String> normalized =
-                new HashSet<>();
-
+        Set<String> result = new HashSet<>();
         for (String indicator : AppContext.MissingStrings) {
-            if (indicator == null) {
-                continue;
-            }
-
-            String trimmed =
-                    indicator.trim();
-
-            if (!trimmed.isEmpty()) {
-                normalized.add(
-                        trimmed.toUpperCase(
-                                Locale.ROOT
-                        )
-                );
+            if (indicator != null && !indicator.isBlank()) {
+                result.add(indicator.trim().toUpperCase(Locale.ROOT));
             }
         }
-
-        if (normalized.isEmpty()) {
-            return Set.of();
-        }
-
-        return Collections.unmodifiableSet(
-                normalized
-        );
+        return result.isEmpty()
+                ? Set.of() : Collections.unmodifiableSet(result);
     }
 
-    private static int nextCapacity(
-            int currentCapacity,
-            int requiredCapacity
-    ) {
-        int expanded =
-                currentCapacity <= Integer.MAX_VALUE / 2
-                        ? currentCapacity << 1
-                        : Integer.MAX_VALUE;
+    private enum ValueKind { DOUBLE, FLOAT, LONG, INT }
 
-        if (expanded < requiredCapacity) {
-            expanded =
-                    requiredCapacity;
-        }
-
-        if (expanded < 0
-                || expanded < currentCapacity) {
-
-            throw new OutOfMemoryError(
-                    "Required Parquet series buffer is too large."
-            );
-        }
-
-        return expanded;
+    private interface NumericBuffer {
+        int size();
+        void add(Object source, ValueKind kind, int index, boolean missing);
+        void addAll(Object source, ValueKind kind, int count);
+        Object toArray(MissingBuffer missing);
     }
 
-    private static final class PrimitiveDoubleBuffer {
-
-        private double[] values;
+    private static final class FloatBuffer implements NumericBuffer {
+        private float[] values;
         private int size;
 
-        private PrimitiveDoubleBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new double[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
+        private FloatBuffer(int capacity) {
+            values = new float[Math.max(1, capacity)];
         }
 
-        private void add(
-                double value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
-        }
-
-        private void addAll(
-                double[] source,
-                int offset,
-                int length
-        ) {
-            if (length == 0) {
-                return;
-            }
-
-            ensureCapacity(
-                    size + length
-            );
-
-            System.arraycopy(
-                    source,
-                    offset,
-                    values,
-                    size,
-                    length
-            );
-
-            size +=
-                    length;
-        }
-
-        private int size() {
+        @Override
+        public int size() {
             return size;
         }
 
-        private double[] toArray() {
-            if (size == values.length) {
-                return values;
-            }
-
-            return Arrays.copyOf(
-                    values,
-                    size
-            );
+        @Override
+        public void add(Object source, ValueKind kind,
+                        int index, boolean missing) {
+            ensure(size + 1);
+            values[size++] = missing ? 0.0f : floatAt(source, kind, index);
         }
 
-        private Double[] toNullableBoxedArray(
-                MissingBuffer missing
-        ) {
-            if (missing.size() != size) {
-                throw new IllegalStateException(
-                        "Numeric and missing-position buffers have "
-                                + "different lengths."
-                );
+        @Override
+        public void addAll(Object source, ValueKind kind, int count) {
+            ensure(size + count);
+            if (kind == ValueKind.FLOAT) {
+                System.arraycopy(source, 0, values, size, count);
+                size += count;
+                return;
             }
-
-            Double[] result =
-                    new Double[size];
-
-            for (int index = 0;
-                 index < size;
-                 index++) {
-
-                result[index] =
-                        missing.get(index)
-                                ? null
-                                : values[index];
+            for (int i = 0; i < count; i++) {
+                values[size++] = floatAt(source, kind, i);
             }
+        }
 
+        @Override
+        public Object toArray(MissingBuffer missing) {
+            float[] result = Arrays.copyOf(values, size);
+            if (missing != null) {
+                missing.validateLength(size);
+                for (int i = 0; i < size; i++) {
+                    if (missing.get(i)) {
+                        result[i] = Float.NaN;
+                    }
+                }
+            }
             return result;
         }
 
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
-                return;
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
             }
-
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
         }
     }
 
-    private static final class MissingBuffer {
-
-        private boolean[] values;
+    private static final class DoubleBuffer implements NumericBuffer {
+        private double[] values;
         private int size;
 
-        private MissingBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new boolean[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
+        private DoubleBuffer(int capacity) {
+            values = new double[Math.max(1, capacity)];
         }
 
-        private void add(
-                boolean value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
-        }
-
-        private void addRepeated(
-                boolean value,
-                int count
-        ) {
-            if (count == 0) {
-                return;
-            }
-
-            ensureCapacity(
-                    size + count
-            );
-
-            if (value) {
-                Arrays.fill(
-                        values,
-                        size,
-                        size + count,
-                        true
-                );
-            }
-
-            size +=
-                    count;
-        }
-
-        private boolean get(
-                int index
-        ) {
-            return values[index];
-        }
-
-        private int size() {
+        @Override
+        public int size() {
             return size;
         }
 
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
+        @Override
+        public void add(Object source, ValueKind kind,
+                        int index, boolean missing) {
+            ensure(size + 1);
+            values[size++] = missing ? 0.0d : doubleAt(source, kind, index);
+        }
+
+        @Override
+        public void addAll(Object source, ValueKind kind, int count) {
+            ensure(size + count);
+            if (kind == ValueKind.DOUBLE) {
+                System.arraycopy(source, 0, values, size, count);
+                size += count;
                 return;
             }
+            for (int i = 0; i < count; i++) {
+                values[size++] = doubleAt(source, kind, i);
+            }
+        }
 
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
+        @Override
+        public Object toArray(MissingBuffer missing) {
+            double[] result = Arrays.copyOf(values, size);
+            if (missing != null) {
+                missing.validateLength(size);
+                for (int i = 0; i < size; i++) {
+                    if (missing.get(i)) {
+                        result[i] = Double.NaN;
+                    }
+                }
+            }
+            return result;
+        }
+
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
+            }
+        }
+    }
+
+    private static float floatAt(Object source, ValueKind kind, int index) {
+        return switch (kind) {
+            case DOUBLE -> (float) ((double[]) source)[index];
+            case FLOAT -> ((float[]) source)[index];
+            case LONG -> (float) ((long[]) source)[index];
+            case INT -> ((int[]) source)[index];
+        };
+    }
+
+    private static double doubleAt(Object source, ValueKind kind, int index) {
+        return switch (kind) {
+            case DOUBLE -> ((double[]) source)[index];
+            case FLOAT -> ((float[]) source)[index];
+            case LONG -> ((long[]) source)[index];
+            case INT -> ((int[]) source)[index];
+        };
+    }
+
+    private static final class MissingBuffer {
+        private boolean[] values;
+        private int size;
+
+        private MissingBuffer(int capacity) {
+            values = new boolean[Math.max(1, capacity)];
+        }
+
+        private void add(boolean value) {
+            ensure(size + 1);
+            values[size++] = value;
+        }
+
+        private void addRepeated(boolean value, int count) {
+            ensure(size + count);
+            Arrays.fill(values, size, size + count, value);
+            size += count;
+        }
+
+        private boolean get(int index) {
+            return values[index];
+        }
+
+        private void validateLength(int expected) {
+            if (size != expected) {
+                throw new IllegalStateException(
+                        "Numeric and missing buffers have different lengths.");
+            }
+        }
+
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
+            }
         }
     }
 
     private static final class ObjectBuffer {
-
         private Object[] values;
         private int size;
 
-        private ObjectBuffer(
-                int initialCapacity
-        ) {
-            values =
-                    new Object[
-                            Math.max(
-                                    1,
-                                    initialCapacity
-                            )
-                            ];
+        private ObjectBuffer(int capacity) {
+            values = new Object[Math.max(1, capacity)];
         }
 
-        private void add(
-                Object value
-        ) {
-            ensureCapacity(
-                    size + 1
-            );
-
-            values[size++] =
-                    value;
-        }
-
-        private int size() {
-            return size;
+        private void add(Object value) {
+            ensure(size + 1);
+            values[size++] = value;
         }
 
         private Object[] toArray() {
-            if (size == values.length) {
-                return values;
-            }
-
-            return Arrays.copyOf(
-                    values,
-                    size
-            );
+            return Arrays.copyOf(values, size);
         }
 
-        private void ensureCapacity(
-                int requiredCapacity
-        ) {
-            if (requiredCapacity <= values.length) {
-                return;
+        private void ensure(int required) {
+            if (required > values.length) {
+                values = Arrays.copyOf(values,
+                        nextCapacity(values.length, required));
             }
+        }
+    }
 
-            values =
-                    Arrays.copyOf(
-                            values,
-                            nextCapacity(
-                                    values.length,
-                                    requiredCapacity
-                            )
-                    );
+    private static int nextCapacity(int current, int required) {
+        int expanded = current <= Integer.MAX_VALUE / 2
+                ? current << 1 : Integer.MAX_VALUE;
+        if (expanded < required) {
+            expanded = required;
+        }
+        if (expanded < current) {
+            throw new OutOfMemoryError(
+                    "Required Parquet column buffer is too large.");
+        }
+        return expanded;
+    }
+
+    public static class ProgressLogger {
+        public static void logProgress(int count) {
+            if (count > 0 && count % 100000 == 0) {
+                System.out.print(".");
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ package datasets.readers;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import preprocessing.standardization.StandardizationStats;
 
 import java.io.IOException;
@@ -9,103 +10,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Eager DatasetReader for high-throughput numeric per-file delimited
- * time-series datasets.
+ * Eager coordinator for high-throughput numeric per-file delimited
+ * multivariate time-series datasets.
  *
- * <p>Storage assumption:</p>
+ * <p>One file is one observation, one selected column is one dimension, and
+ * one record is one time position. Per-file observations are always
+ * two-dimensional, including the single-dimension case.</p>
  *
- * <pre>
- * one delimited file = one dataset instance / time series
- * one CSV record = one time point
- * one selected column = one time-series dimension
- * </pre>
- *
- * <p>Every discovered file is materialized during {@link #read()} by
- * {@link NumericPerFileDelimitedSeriesReader}.</p>
- *
- * <p>This eager dataset reader always returns raw, unstandardized numeric
- * arrays. Standardization statistics may be present in {@link ReaderOptions}
- * because the same option object is also used by lazy readers, but eager
- * transformation is coordinated after reading. This prevents reader-time
- * transformation from being applied a second time by the eager workflow.</p>
- *
- * <p>Returned instance representation:</p>
- *
- * <pre>
- * double[dimension][time]
- * </pre>
- *
- * <p>This reader is deliberately specialized for numeric files without
- * missing values. Use {@link PerFileDelimitedReader} when numeric missing
- * values, nonnumeric values, or mixed data must be supported.</p>
- *
- * <p>The data path may identify:</p>
- *
- * <ol>
- *     <li>
- *         A directory containing one delimited file per instance. In this
- *         case, {@code filePattern} is required and must contain exactly one
- *         numeric placeholder.
- *     </li>
- *     <li>
- *         A single regular file. In this case, {@code filePattern} is not
- *         required and the resulting dataset contains one instance.
- *     </li>
- * </ol>
- *
- * <p>Example directory configuration:</p>
- *
- * <pre>
- * dataPath:
- *     /path/to/training
- *
- * filePattern:
- *     series_{num:04d}.csv
- * </pre>
- *
- * <p>Other valid patterns include:</p>
- *
- * <pre>
- * trial_*.{run:03d}_freqN.tsv
- * series_{instance}.csv
- * sample_?_{num:05d}.txt
- * </pre>
- *
- * <p>Supported numeric placeholders include:</p>
- *
- * <pre>
- * {num}
- * {num:04d}
- * {run}
- * {run:03d}
- * {instance}
- * {instance:05d}
- * </pre>
- *
- * <p>The placeholder name is arbitrary but must be a valid identifier.
- * Glob wildcards {@code *} and {@code ?} may occur outside the numeric
- * placeholder.</p>
- *
- * <p>Labels are currently assigned as {@code null}, matching the existing
- * per-file reader behavior. External label files, filename-based labels,
- * and metadata-table labels can be added separately without changing the
- * numeric series materializer.</p>
- *
- * <p>This initial implementation reads files sequentially. That gives us a
- * clean benchmark of the specialized FastCSV callback path without
- * introducing file-level parallelism as a confounding factor.</p>
+ * <p>The eager reader returns raw primitive matrices and leaves
+ * standardization to the eager dataset pipeline. It selects the FLOAT32 or
+ * FLOAT64 path once before the file loop and invokes the paired series
+ * reader's typed method directly.</p>
  */
-public class NumericPerFileDelimitedReader
-        implements DatasetReader {
-
-    private static final int DEFAULT_INITIAL_TIME_CAPACITY =
-            256;
+public final class NumericPerFileDelimitedReader implements DatasetReader {
+    private static final int DEFAULT_INITIAL_TIME_CAPACITY = 256;
 
     private final String dataPath;
     private final String entrySeparator;
@@ -116,54 +42,27 @@ public class NumericPerFileDelimitedReader
     private final boolean isTest;
     private final boolean isRegression;
     private final int initialTimeCapacity;
+    private final NumericStorageType storageType;
 
-    /**
-     * Constructs the reader from ordinary PFGAP reader options.
-     *
-     * <p>The specialized reader requires:</p>
-     *
-     * <ul>
-     *     <li>{@code isNumeric=true}</li>
-     *     <li>{@code hasMissingValues=false}</li>
-     * </ul>
-     *
-     * @param options PFGAP reader options
-     */
-    public NumericPerFileDelimitedReader(
-            ReaderOptions options
-    ) {
-        this(
-                requireOptions(options).getDataPath(),
-                options.getEntrySeparator(),
-                options.hasHeader(),
-                options.getTimeColumn(),
-                options.getFeatureColumns(),
-                options.getFilePattern(),
-                options.isTest(),
-                options.isRegression(),
-                options.getStandardizationStats(),
-                DEFAULT_INITIAL_TIME_CAPACITY
-        );
-
+    public NumericPerFileDelimitedReader(ReaderOptions options) {
+        this(requireOptions(options).getDataPath(),
+                options.getEntrySeparator(), options.hasHeader(),
+                options.getTimeColumn(), options.getFeatureColumns(),
+                options.getFilePattern(), options.isTest(),
+                options.isRegression(), options.getStandardizationStats(),
+                DEFAULT_INITIAL_TIME_CAPACITY,
+                options.getNumericStorageType());
         if (!options.isNumeric()) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader requires "
-                            + "ReaderOptions.isNumeric=true."
-            );
+                    "NumericPerFileDelimitedReader requires isNumeric=true.");
         }
-
         if (options.hasMissingValues()) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader does not support "
-                            + "missing values. Use PerFileDelimitedReader "
-                            + "when hasMissingValues=true."
-            );
+                    "NumericPerFileDelimitedReader does not support missing "
+                            + "values. Use PerFileDelimitedReader instead.");
         }
     }
 
-    /**
-     * Constructs the eager reader using the default initial time capacity.
-     */
     public NumericPerFileDelimitedReader(
             String dataPath,
             String entrySeparator,
@@ -175,29 +74,11 @@ public class NumericPerFileDelimitedReader
             boolean isRegression,
             StandardizationStats standardizationStats
     ) {
-        this(
-                dataPath,
-                entrySeparator,
-                hasHeader,
-                timeColumn,
-                featureColumns,
-                filePattern,
-                isTest,
-                isRegression,
-                standardizationStats,
-                DEFAULT_INITIAL_TIME_CAPACITY
-        );
+        this(dataPath, entrySeparator, hasHeader, timeColumn, featureColumns,
+                filePattern, isTest, isRegression, standardizationStats,
+                DEFAULT_INITIAL_TIME_CAPACITY, NumericStorageType.AUTO);
     }
 
-    /**
-     * Constructs the eager reader with an explicit per-dimension initial time
-     * capacity.
-     *
-     * <p>When the approximate number of time points per file is known,
-     * supplying that number can reduce dynamic-buffer expansion and copying.
-     * The value is an initial capacity rather than a required fixed length,
-     * so unequal-length files remain supported.</p>
-     */
     public NumericPerFileDelimitedReader(
             String dataPath,
             String entrySeparator,
@@ -210,728 +91,432 @@ public class NumericPerFileDelimitedReader
             StandardizationStats standardizationStats,
             int initialTimeCapacity
     ) {
-        this.dataPath =
-                normalizeNullableString(
-                        dataPath
-                );
+        this(dataPath, entrySeparator, hasHeader, timeColumn, featureColumns,
+                filePattern, isTest, isRegression, standardizationStats,
+                initialTimeCapacity, NumericStorageType.AUTO);
+    }
 
-        this.entrySeparator =
-                normalizeSeparator(
-                        entrySeparator
-                );
-
-        this.hasHeader =
-                hasHeader;
-
-        this.timeColumn =
-                normalizeNullableString(
-                        timeColumn
-                );
-
-        this.featureColumns =
-                featureColumns == null
-                        ? List.of()
-                        : List.copyOf(
-                        featureColumns
-                );
-
-        this.filePattern =
-                normalizeNullableString(
-                        filePattern
-                );
-
-        this.isTest =
-                isTest;
-
-        this.isRegression =
-                isRegression;
-
-        /*
-         * Retain this constructor parameter for source compatibility and for
-         * early feature-order validation. The eager reader deliberately does
-         * not retain or apply the statistics. Lazy readers own reader-time
-         * standardization; eager workflows transform the completed dataset.
-         */
-        if (standardizationStats != null
-                && !this.featureColumns.isEmpty()) {
-
-            standardizationStats.validateFeatureCompatibility(
-                    this.featureColumns
-            );
-        }
-
+    public NumericPerFileDelimitedReader(
+            String dataPath,
+            String entrySeparator,
+            boolean hasHeader,
+            String timeColumn,
+            List<String> featureColumns,
+            String filePattern,
+            boolean isTest,
+            boolean isRegression,
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity,
+            NumericStorageType numericStorageType
+    ) {
+        this.dataPath = normalizeNullableString(dataPath);
+        this.entrySeparator = normalizeSeparator(entrySeparator);
+        this.hasHeader = hasHeader;
+        this.timeColumn = normalizeNullableString(timeColumn);
+        this.featureColumns = featureColumns == null
+                ? List.of() : List.copyOf(featureColumns);
+        this.filePattern = normalizeNullableString(filePattern);
+        this.isTest = isTest;
+        this.isRegression = isRegression;
         if (initialTimeCapacity < 1) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader initialTimeCapacity "
-                            + "must be at least 1. Received: "
-                            + initialTimeCapacity
-                            + "."
-            );
+                    "initialTimeCapacity must be at least 1. Received: "
+                            + initialTimeCapacity + ".");
         }
+        this.initialTimeCapacity = initialTimeCapacity;
+        NumericStorageType requested = Objects.requireNonNull(
+                numericStorageType, "numericStorageType cannot be null.");
+        this.storageType = requested == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64 : requested;
 
-        this.initialTimeCapacity =
-                initialTimeCapacity;
-
+        if (standardizationStats != null && !this.featureColumns.isEmpty()) {
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns);
+        }
         validateConstructionOptions();
     }
 
-    /**
-     * Discovers and eagerly materializes every configured numeric
-     * per-instance file.
-     *
-     * @return eager dataset containing raw, unstandardized
-     *         {@code double[][]} instances
-     * @throws IOException if files cannot be discovered or materialized
-     */
     @Override
-    public ListObjectDataset read()
-            throws IOException {
-
+    public ListObjectDataset read() throws IOException {
         validateReadOptions();
-
-        List<Path> files =
-                discoverFiles();
+        List<Path> files = discoverFiles();
 
         NumericPerFileDelimitedSeriesReader seriesReader =
                 new NumericPerFileDelimitedSeriesReader(
-                        entrySeparator,
-                        hasHeader,
-                        timeColumn,
-                        featureColumns,
-                        null,
-                        initialTimeCapacity
-                );
+                        entrySeparator, hasHeader, timeColumn, featureColumns,
+                        null, initialTimeCapacity, storageType);
 
-        ListObjectDataset dataset =
-                new ListObjectDataset(
-                        files.size()
-                );
+        return storageType == NumericStorageType.FLOAT32
+                ? readFloatDataset(files, seriesReader)
+                : readDoubleDataset(files, seriesReader);
+    }
 
-        int commonTimeLength =
-                -1;
+    private ListObjectDataset readFloatDataset(
+            List<Path> files,
+            NumericPerFileDelimitedSeriesReader seriesReader
+    ) throws IOException {
+        ListObjectDataset dataset = new ListObjectDataset(files.size());
+        int commonLength = -1;
+        boolean unequalLengths = false;
 
-        boolean unequalTimeLengths =
-                false;
-
-        for (int instanceIndex = 0;
-             instanceIndex < files.size();
-             instanceIndex++) {
-
-            Path file =
-                    files.get(instanceIndex);
-
-            double[][] series;
-
+        for (int instance = 0; instance < files.size(); instance++) {
+            Path file = files.get(instance);
+            final float[][] series;
             try {
-                series =
-                        seriesReader.readFile(
-                                file
-                        );
+                series = seriesReader.readFloatFile(file);
             } catch (IOException e) {
-                throw new IOException(
-                        "Failed to eagerly materialize numeric "
-                                + "per-file delimited instance "
-                                + instanceIndex
-                                + " from file "
-                                + file
-                                + ".",
-                        e
-                );
+                throw materializationIOException(instance, file, e);
             } catch (RuntimeException e) {
-                throw new IllegalArgumentException(
-                        "Failed to eagerly materialize numeric "
-                                + "per-file delimited instance "
-                                + instanceIndex
-                                + " from file "
-                                + file
-                                + ".",
-                        e
-                );
+                throw materializationRuntimeException(instance, file, e);
             }
-
-            validateMaterializedSeries(
-                    series,
-                    file,
-                    instanceIndex
-            );
-
-            Object label =
-                    inferLabel(
-                            file,
-                            instanceIndex
-                    );
-
-            dataset.add(
-                    label,
-                    series,
-                    instanceIndex
-            );
-
-            int timeLength =
-                    series[0].length;
-
-            if (commonTimeLength < 0) {
-                commonTimeLength =
-                        timeLength;
-            } else if (timeLength != commonTimeLength) {
-                unequalTimeLengths =
-                        true;
+            int length = validateSeries(series, file, instance);
+            dataset.add(inferLabel(file, instance), series, instance);
+            if (commonLength < 0) {
+                commonLength = length;
+            } else if (length != commonLength) {
+                unequalLengths = true;
             }
-
-            /*
-             * ProgressLogger retains the same progress-reporting behavior as
-             * the other eager delimited reader.
-             */
-            DelimitedFileReader.ProgressLogger.logProgress(
-                    instanceIndex
-            );
+            DelimitedFileReader.ProgressLogger.logProgress(instance);
         }
+        return finalizeDataset(dataset, commonLength, unequalLengths);
+    }
 
-        /*
-         * ListObjectDataset.length and AppContext.length historically
-         * represent one common per-instance time length. That value is only
-         * meaningful when all materialized files have the same time length.
-         *
-         * A value of zero communicates that no single global length applies.
-         */
-        int datasetLength =
-                unequalTimeLengths
-                        ? 0
-                        : Math.max(
-                        commonTimeLength,
-                        0
-                );
+    private ListObjectDataset readDoubleDataset(
+            List<Path> files,
+            NumericPerFileDelimitedSeriesReader seriesReader
+    ) throws IOException {
+        ListObjectDataset dataset = new ListObjectDataset(files.size());
+        int commonLength = -1;
+        boolean unequalLengths = false;
 
-        dataset.setLength(
-                datasetLength
-        );
+        for (int instance = 0; instance < files.size(); instance++) {
+            Path file = files.get(instance);
+            final double[][] series;
+            try {
+                series = seriesReader.readDoubleFile(file);
+            } catch (IOException e) {
+                throw materializationIOException(instance, file, e);
+            } catch (RuntimeException e) {
+                throw materializationRuntimeException(instance, file, e);
+            }
+            int length = validateSeries(series, file, instance);
+            dataset.add(inferLabel(file, instance), series, instance);
+            if (commonLength < 0) {
+                commonLength = length;
+            } else if (length != commonLength) {
+                unequalLengths = true;
+            }
+            DelimitedFileReader.ProgressLogger.logProgress(instance);
+        }
+        return finalizeDataset(dataset, commonLength, unequalLengths);
+    }
 
-        AppContext.length =
-                datasetLength;
-
+    private static ListObjectDataset finalizeDataset(
+            ListObjectDataset dataset,
+            int commonLength,
+            boolean unequalLengths
+    ) {
+        int length = unequalLengths ? 0 : Math.max(commonLength, 0);
+        dataset.setLength(length);
+        AppContext.length = length;
         return dataset;
+    }
+
+    private static int validateSeries(
+            float[][] series,
+            Path file,
+            int instance
+    ) {
+        if (series == null || series.length == 0) {
+            throw invalidSeries(file, instance, "no dimensions");
+        }
+        if (series[0] == null || series[0].length == 0) {
+            throw invalidSeries(file, instance, "an empty first dimension");
+        }
+        int length = series[0].length;
+        for (int dimension = 1;
+             dimension < series.length;
+             dimension++) {
+            if (series[dimension] == null) {
+                throw invalidSeries(file, instance,
+                        "a null dimension at index " + dimension);
+            }
+            if (series[dimension].length != length) {
+                throw invalidSeries(file, instance,
+                        "dimension " + dimension + " has length "
+                                + series[dimension].length
+                                + " instead of " + length);
+            }
+        }
+        return length;
+    }
+
+    private static int validateSeries(
+            double[][] series,
+            Path file,
+            int instance
+    ) {
+        if (series == null || series.length == 0) {
+            throw invalidSeries(file, instance, "no dimensions");
+        }
+        if (series[0] == null || series[0].length == 0) {
+            throw invalidSeries(file, instance, "an empty first dimension");
+        }
+        int length = series[0].length;
+        for (int dimension = 1;
+             dimension < series.length;
+             dimension++) {
+            if (series[dimension] == null) {
+                throw invalidSeries(file, instance,
+                        "a null dimension at index " + dimension);
+            }
+            if (series[dimension].length != length) {
+                throw invalidSeries(file, instance,
+                        "dimension " + dimension + " has length "
+                                + series[dimension].length
+                                + " instead of " + length);
+            }
+        }
+        return length;
+    }
+
+    private static IllegalStateException invalidSeries(
+            Path file,
+            int instance,
+            String detail
+    ) {
+        return new IllegalStateException(
+                "Numeric series reader returned " + detail
+                        + " for instance " + instance
+                        + " from file " + file + ".");
+    }
+
+    private static IOException materializationIOException(
+            int instance,
+            Path file,
+            IOException cause
+    ) {
+        return new IOException(
+                "Failed to eagerly materialize numeric per-file delimited "
+                        + "instance " + instance + " from file " + file + ".",
+                cause);
+    }
+
+    private static IllegalArgumentException materializationRuntimeException(
+            int instance,
+            Path file,
+            RuntimeException cause
+    ) {
+        return new IllegalArgumentException(
+                "Failed to eagerly materialize numeric per-file delimited "
+                        + "instance " + instance + " from file " + file + ".",
+                cause);
     }
 
     private void validateConstructionOptions() {
         if (entrySeparator == null || entrySeparator.isEmpty()) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader requires a non-empty "
-                            + "entry separator."
-            );
+                    "A non-empty entry separator is required.");
         }
-
         if (entrySeparator.length() != 1) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader requires a "
-                            + "single-character entry separator. Received: '"
-                            + entrySeparator
-                            + "'."
-            );
+                    "A single-character entry separator is required: '"
+                            + entrySeparator + "'.");
         }
-
-        char separator =
-                entrySeparator.charAt(0);
-
+        char separator = entrySeparator.charAt(0);
         if (separator == '\n' || separator == '\r') {
             throw new IllegalArgumentException(
-                    "A line-separator character cannot be used as "
-                            + "the entry separator."
-            );
+                    "A line separator cannot be the entry separator.");
         }
-
-        for (String featureColumn : featureColumns) {
-            if (featureColumn == null
-                    || featureColumn.isBlank()) {
-
+        for (String feature : featureColumns) {
+            if (feature == null || feature.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Numeric per-file feature-column names or indices "
-                                + "cannot be null or blank."
-                );
+                        "Feature names or indices cannot be blank.");
             }
         }
-
     }
 
     private void validateReadOptions() {
         if (dataPath == null || dataPath.isBlank()) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader requires dataPath."
-            );
+                    "NumericPerFileDelimitedReader requires dataPath.");
         }
     }
 
-    private List<Path> discoverFiles()
-            throws IOException {
-
-        Path path =
-                Paths.get(
-                        dataPath
-                );
-
+    private List<Path> discoverFiles() throws IOException {
+        Path path = Paths.get(dataPath);
         if (!Files.exists(path)) {
             throw new IOException(
                     "Numeric per-file delimited data path does not exist: "
-                            + dataPath
-            );
+                            + dataPath);
         }
-
-        if (Files.isDirectory(path)) {
-            if (filePattern == null || filePattern.isBlank()) {
-                throw new IllegalArgumentException(
-                        "NumericPerFileDelimitedReader requires "
-                                + "filePattern when dataPath is a directory. "
-                                + "The pattern must contain exactly one "
-                                + "numeric placeholder, such as "
-                                + "series_{num:04d}.csv or "
-                                + "trial_*.{run:03d}_freqN.tsv."
-                );
-            }
-
-            return discoverFromPattern(
-                    path,
-                    filePattern
-            );
-        }
-
         if (Files.isRegularFile(path)) {
-            return List.of(
-                    path
-            );
+            return List.of(path);
         }
-
-        throw new IOException(
-                "Numeric per-file delimited data path must be a directory "
-                        + "or a regular file: "
-                        + dataPath
-        );
+        if (!Files.isDirectory(path)) {
+            throw new IOException(
+                    "Numeric per-file delimited data path must be a directory "
+                            + "or regular file: " + dataPath);
+        }
+        if (filePattern == null || filePattern.isBlank()) {
+            throw new IllegalArgumentException(
+                    "filePattern is required for a directory and must contain "
+                            + "one numeric placeholder.");
+        }
+        return discoverFromPattern(path, filePattern);
     }
 
-    /**
-     * Discovers files and extracts each numerical sort key exactly once.
-     *
-     * <p>This avoids repeatedly applying the pattern and parsing the sequence
-     * number from inside the sorting comparator.</p>
-     */
     private List<Path> discoverFromPattern(
             Path directory,
             String patternText
     ) throws IOException {
-
-        NumericPattern numericPattern =
-                NumericPattern.from(
-                        patternText
-                );
-
-        List<IndexedPath> indexedPaths =
-                new ArrayList<>();
-
-        try (Stream<Path> stream =
-                     Files.list(
-                             directory
-                     )) {
-
-            stream.filter(Files::isRegularFile)
-                    .forEach(path -> {
-                        String fileName =
-                                path.getFileName()
-                                        .toString();
-
-                        Long sequenceNumber =
-                                numericPattern.tryExtractNumber(
-                                        fileName
-                                );
-
-                        if (sequenceNumber != null) {
-                            indexedPaths.add(
-                                    new IndexedPath(
-                                            path,
-                                            fileName,
-                                            sequenceNumber
-                                    )
-                            );
-                        }
-                    });
-        }
-
-        if (indexedPaths.isEmpty()) {
-            throw new IOException(
-                    "No numeric delimited files in directory "
-                            + directory
-                            + " matched pattern: "
-                            + patternText
-            );
-        }
-
-        indexedPaths.sort(
-                (first, second) -> {
-                    int numericComparison =
-                            Long.compare(
-                                    first.sequenceNumber,
-                                    second.sequenceNumber
-                            );
-
-                    if (numericComparison != 0) {
-                        return numericComparison;
-                    }
-
-                    return first.fileName.compareTo(
-                            second.fileName
-                    );
+        NumericPattern pattern = NumericPattern.from(patternText);
+        List<IndexedPath> indexed = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(directory)) {
+            stream.filter(Files::isRegularFile).forEach(path -> {
+                String fileName = path.getFileName().toString();
+                Long sequence = pattern.tryExtractNumber(fileName);
+                if (sequence != null) {
+                    indexed.add(new IndexedPath(path, fileName, sequence));
                 }
-        );
-
-        List<Path> files =
-                new ArrayList<>(
-                        indexedPaths.size()
-                );
-
-        for (IndexedPath indexedPath : indexedPaths) {
-            files.add(
-                    indexedPath.path
-            );
+            });
         }
-
-        return files;
+        if (indexed.isEmpty()) {
+            throw new IOException(
+                    "No numeric delimited files in directory " + directory
+                            + " matched pattern: " + patternText);
+        }
+        indexed.sort(Comparator
+                .comparingLong(IndexedPath::sequenceNumber)
+                .thenComparing(IndexedPath::fileName));
+        List<Path> files = new ArrayList<>(indexed.size());
+        for (IndexedPath value : indexed) {
+            files.add(value.path());
+        }
+        return List.copyOf(files);
     }
 
-    private void validateMaterializedSeries(
-            double[][] series,
-            Path file,
-            int instanceIndex
-    ) {
-        if (series == null) {
-            throw new IllegalStateException(
-                    "Numeric series reader returned null for instance "
-                            + instanceIndex
-                            + " from file "
-                            + file
-                            + "."
-            );
-        }
-
-        if (series.length == 0) {
-            throw new IllegalStateException(
-                    "Numeric series reader returned no dimensions for "
-                            + "instance "
-                            + instanceIndex
-                            + " from file "
-                            + file
-                            + "."
-            );
-        }
-
-        if (series[0] == null) {
-            throw new IllegalStateException(
-                    "Numeric series reader returned a null first "
-                            + "dimension for instance "
-                            + instanceIndex
-                            + " from file "
-                            + file
-                            + "."
-            );
-        }
-
-        int expectedTimeLength =
-                series[0].length;
-
-        if (expectedTimeLength == 0) {
-            throw new IllegalStateException(
-                    "Numeric series reader returned an empty time series "
-                            + "for instance "
-                            + instanceIndex
-                            + " from file "
-                            + file
-                            + "."
-            );
-        }
-
-        for (int dimension = 1;
-             dimension < series.length;
-             dimension++) {
-
-            if (series[dimension] == null) {
-                throw new IllegalStateException(
-                        "Numeric series reader returned a null dimension "
-                                + dimension
-                                + " for instance "
-                                + instanceIndex
-                                + " from file "
-                                + file
-                                + "."
-                );
-            }
-
-            if (series[dimension].length != expectedTimeLength) {
-                throw new IllegalStateException(
-                        "Numeric series reader returned inconsistent "
-                                + "dimension lengths for instance "
-                                + instanceIndex
-                                + " from file "
-                                + file
-                                + ". Expected "
-                                + expectedTimeLength
-                                + " time points but dimension "
-                                + dimension
-                                + " contains "
-                                + series[dimension].length
-                                + "."
-                );
-            }
-        }
-    }
-
-    /**
-     * Placeholder for future per-file label conventions.
-     *
-     * <p>Potential sources include an external label file, a filename-based
-     * mapping, or an external metadata table.</p>
-     */
-    private Object inferLabel(
-            Path file,
-            int instanceIndex
-    ) {
+    /** Placeholder for future per-file label conventions. */
+    private Object inferLabel(Path file, int instanceIndex) {
         return null;
     }
 
-    private static ReaderOptions requireOptions(
-            ReaderOptions options
-    ) {
+    private static ReaderOptions requireOptions(ReaderOptions options) {
         if (options == null) {
             throw new IllegalArgumentException(
-                    "NumericPerFileDelimitedReader requires "
-                            + "non-null ReaderOptions."
-            );
+                    "NumericPerFileDelimitedReader requires ReaderOptions.");
         }
-
         return options;
     }
 
-    private static String normalizeSeparator(
-            String separator
-    ) {
-        if (separator == null) {
-            return null;
-        }
-
-        return switch (separator) {
-            case "\\t" -> "\t";
-            case "\\n" -> "\n";
-            case "\\r" -> "\r";
-            default -> separator;
-        };
-    }
-
-    private static String normalizeNullableString(
-            String value
-    ) {
+    private static String normalizeSeparator(String value) {
         if (value == null) {
             return null;
         }
-
-        String trimmed =
-                value.trim();
-
-        if (trimmed.isEmpty()
-                || trimmed.equalsIgnoreCase("None")) {
-
-            return null;
-        }
-
-        return trimmed;
+        return switch (value) {
+            case "\\t" -> "\t";
+            case "\\n" -> "\n";
+            case "\\r" -> "\r";
+            default -> value;
+        };
     }
 
-    private static final class IndexedPath {
-
-        private final Path path;
-        private final String fileName;
-        private final long sequenceNumber;
-
-        private IndexedPath(
-                Path path,
-                String fileName,
-                long sequenceNumber
-        ) {
-            this.path =
-                    path;
-
-            this.fileName =
-                    fileName;
-
-            this.sequenceNumber =
-                    sequenceNumber;
+    private static String normalizeNullableString(String value) {
+        if (value == null) {
+            return null;
         }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")
+                ? null : trimmed;
+    }
+
+    private record IndexedPath(
+            Path path,
+            String fileName,
+            long sequenceNumber
+    ) {
     }
 
     /**
-     * Converts a filename pattern containing exactly one numeric placeholder
-     * into a regular expression.
+     * Filename matcher with one arbitrary named numeric placeholder and glob
+     * support outside the placeholder.
      */
     private static final class NumericPattern {
-
-        private static final Pattern PLACEHOLDER_PATTERN =
-                Pattern.compile(
-                        "\\{([A-Za-z_][A-Za-z0-9_]*)(?::0?(\\d+)d)?}"
-                );
+        private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
+                "\\{([A-Za-z_][A-Za-z0-9_]*)(?::0?(\\d+)d)?}");
 
         private final Pattern regex;
         private final String numericFieldName;
 
-        private NumericPattern(
-                Pattern regex,
-                String numericFieldName
-        ) {
-            this.regex =
-                    regex;
-
-            this.numericFieldName =
-                    numericFieldName;
+        private NumericPattern(Pattern regex, String numericFieldName) {
+            this.regex = regex;
+            this.numericFieldName = numericFieldName;
         }
 
-        private static NumericPattern from(
-                String filePattern
-        ) {
+        private static NumericPattern from(String filePattern) {
             if (filePattern == null || filePattern.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Per-file pattern cannot be null or blank."
-                );
+                        "Per-file pattern cannot be blank.");
             }
-
-            Matcher placeholderMatcher =
-                    PLACEHOLDER_PATTERN.matcher(
-                            filePattern
-                    );
-
-            if (!placeholderMatcher.find()) {
+            Matcher matcher = PLACEHOLDER_PATTERN.matcher(filePattern);
+            if (!matcher.find()) {
                 throw new IllegalArgumentException(
-                        "Per-file pattern must contain exactly one "
-                                + "numeric placeholder, such as {num}, "
-                                + "{num:04d}, {run}, or {run:03d}: "
-                                + filePattern
-                );
+                        "Per-file pattern must contain exactly one numeric "
+                                + "placeholder such as {num}, {num:04d}, "
+                                + "{run}, or {run:03d}: " + filePattern);
             }
-
-            String fieldName =
-                    placeholderMatcher.group(1);
-
-            String widthText =
-                    placeholderMatcher.group(2);
-
-            int placeholderStart =
-                    placeholderMatcher.start();
-
-            int placeholderEnd =
-                    placeholderMatcher.end();
-
-            if (placeholderMatcher.find()) {
+            String fieldName = matcher.group(1);
+            String widthText = matcher.group(2);
+            int start = matcher.start();
+            int end = matcher.end();
+            if (matcher.find()) {
                 throw new IllegalArgumentException(
-                        "Per-file pattern currently supports exactly one "
-                                + "numeric placeholder: "
-                                + filePattern
-                );
+                        "Per-file pattern supports exactly one numeric "
+                                + "placeholder: " + filePattern);
             }
-
-            String prefix =
-                    filePattern.substring(
-                            0,
-                            placeholderStart
-                    );
-
-            String suffix =
-                    filePattern.substring(
-                            placeholderEnd
-                    );
-
-            String numericRegex =
-                    widthText == null
-                            ? "(\\d+)"
-                            : "(\\d{"
-                            + Integer.parseInt(widthText)
-                            + "})";
-
-            String regexText =
-                    "^"
-                            + globFragmentToRegex(prefix)
-                            + numericRegex
-                            + globFragmentToRegex(suffix)
-                            + "$";
-
+            String numericRegex = widthText == null
+                    ? "(\\d+)"
+                    : "(\\d{" + Integer.parseInt(widthText) + "})";
+            String regexText = "^"
+                    + globFragmentToRegex(filePattern.substring(0, start))
+                    + numericRegex
+                    + globFragmentToRegex(filePattern.substring(end))
+                    + "$";
             return new NumericPattern(
-                    Pattern.compile(
-                            regexText
-                    ),
-                    fieldName
-            );
+                    Pattern.compile(regexText), fieldName);
         }
 
-        private Long tryExtractNumber(
-                String fileName
-        ) {
-            Matcher matcher =
-                    regex.matcher(
-                            fileName
-                    );
-
+        private Long tryExtractNumber(String fileName) {
+            Matcher matcher = regex.matcher(fileName);
             if (!matcher.matches()) {
                 return null;
             }
-
             try {
-                return Long.parseLong(
-                        matcher.group(1)
-                );
+                return Long.parseLong(matcher.group(1));
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException(
-                        "Numeric field '"
-                                + numericFieldName
-                                + "' is too large in filename: "
-                                + fileName,
-                        e
-                );
+                        "Numeric field '" + numericFieldName
+                                + "' exceeds long range in filename: "
+                                + fileName, e);
             }
         }
 
-        private static String globFragmentToRegex(
-                String fragment
-        ) {
-            StringBuilder regex =
-                    new StringBuilder();
-
-            StringBuilder literal =
-                    new StringBuilder();
-
-            for (int index = 0;
-                 index < fragment.length();
-                 index++) {
-
-                char current =
-                        fragment.charAt(index);
-
+        private static String globFragmentToRegex(String fragment) {
+            StringBuilder regex = new StringBuilder();
+            StringBuilder literal = new StringBuilder();
+            for (int index = 0; index < fragment.length(); index++) {
+                char current = fragment.charAt(index);
                 if (current == '*') {
-                    appendQuotedLiteral(
-                            regex,
-                            literal
-                    );
-
+                    appendQuotedLiteral(regex, literal);
                     regex.append(".*");
                 } else if (current == '?') {
-                    appendQuotedLiteral(
-                            regex,
-                            literal
-                    );
-
-                    regex.append(".");
+                    appendQuotedLiteral(regex, literal);
+                    regex.append('.');
                 } else {
-                    literal.append(
-                            current
-                    );
+                    literal.append(current);
                 }
             }
-
-            appendQuotedLiteral(
-                    regex,
-                    literal
-            );
-
+            appendQuotedLiteral(regex, literal);
             return regex.toString();
         }
 
@@ -942,16 +527,8 @@ public class NumericPerFileDelimitedReader
             if (literal.length() == 0) {
                 return;
             }
-
-            regex.append(
-                    Pattern.quote(
-                            literal.toString()
-                    )
-            );
-
-            literal.setLength(
-                    0
-            );
+            regex.append(Pattern.quote(literal.toString()));
+            literal.setLength(0);
         }
     }
 }

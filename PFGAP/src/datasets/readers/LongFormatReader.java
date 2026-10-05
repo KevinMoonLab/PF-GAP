@@ -3,6 +3,7 @@ package datasets.readers;
 import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.NumericStorageType;
 import de.siegmar.fastcsv.reader.CsvReader;
 import de.siegmar.fastcsv.reader.CsvRecord;
 import org.apache.commons.lang3.time.DurationFormatUtils;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 
 /**
  * General reader for long-format delimited time-series data.
@@ -47,16 +49,13 @@ import java.util.Set;
  * <p>Output representations:</p>
  *
  * <pre>
- * One feature:
- *     numeric, no missing:   double[]
- *     numeric, missing:      Double[]
- *     generic:               Object[]
- *
- * Multiple features:
- *     numeric, no missing:   double[feature][time]
- *     numeric, missing:      Double[feature][time]
- *     generic:               Object[feature][time]
+ * Numeric FLOAT64: double[] or double[feature][time]
+ * Numeric FLOAT32: float[] or float[feature][time]
+ * Generic:         Object[] or Object[feature][time]
  * </pre>
+ *
+ * <p>Numeric output is always primitive. Missing numeric values are represented
+ * by NaN. Boxed numeric arrays are intentionally unsupported.</p>
  *
  * <p>Labels:</p>
  *
@@ -82,6 +81,7 @@ public class LongFormatReader
     private final boolean isNumeric;
     private final boolean hasMissingValues;
     private final boolean isRegression;
+    private final NumericStorageType numericStorageType;
 
     private final String idColumn;
     private final String timeColumn;
@@ -102,7 +102,8 @@ public class LongFormatReader
                 options.getIdColumn(),
                 options.getTimeColumn(),
                 options.getFeatureColumns(),
-                options.getLabelColumns()
+                options.getLabelColumns(),
+                options.getNumericStorageType()
         );
     }
 
@@ -117,6 +118,34 @@ public class LongFormatReader
             String timeColumn,
             List<String> featureColumns,
             List<String> labelColumns
+    ) {
+        this(
+                dataFileName,
+                entrySeparator,
+                hasHeader,
+                isNumeric,
+                hasMissingValues,
+                isRegression,
+                idColumn,
+                timeColumn,
+                featureColumns,
+                labelColumns,
+                NumericStorageType.AUTO
+        );
+    }
+
+    public LongFormatReader(
+            String dataFileName,
+            String entrySeparator,
+            boolean hasHeader,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean isRegression,
+            String idColumn,
+            String timeColumn,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            NumericStorageType numericStorageType
     ) {
         this.dataFileName =
                 requireNonblank(
@@ -143,6 +172,9 @@ public class LongFormatReader
 
         this.isRegression =
                 isRegression;
+
+        this.numericStorageType =
+                resolveStorageType(numericStorageType);
 
         this.idColumn =
                 normalizeNullableString(
@@ -1130,54 +1162,37 @@ public class LongFormatReader
             List<LongRow> rows,
             int timeLength
     ) {
-        if (isNumeric) {
-            if (hasMissingValues) {
-                Double[] data =
-                        new Double[timeLength];
-
-                for (int timeIndex = 0;
-                     timeIndex < timeLength;
-                     timeIndex++) {
-
-                    data[timeIndex] =
-                            toBoxedDouble(
-                                    rows.get(timeIndex)
-                                            .featureValues[0]
-                            );
-                }
-
-                return data;
-            }
-
-            double[] data =
-                    new double[timeLength];
-
+        if (!isNumeric) {
+            Object[] data = new Object[timeLength];
             for (int timeIndex = 0;
                  timeIndex < timeLength;
                  timeIndex++) {
-
                 data[timeIndex] =
-                        toPrimitiveDouble(
-                                rows.get(timeIndex)
-                                        .featureValues[0]
-                        );
+                        rows.get(timeIndex).featureValues[0];
             }
-
             return data;
         }
 
-        Object[] data =
-                new Object[timeLength];
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[] data = new float[timeLength];
+            for (int timeIndex = 0;
+                 timeIndex < timeLength;
+                 timeIndex++) {
+                data[timeIndex] = toPrimitiveFloatAllowMissing(
+                        rows.get(timeIndex).featureValues[0]
+                );
+            }
+            return data;
+        }
 
+        double[] data = new double[timeLength];
         for (int timeIndex = 0;
              timeIndex < timeLength;
              timeIndex++) {
-
-            data[timeIndex] =
-                    rows.get(timeIndex)
-                            .featureValues[0];
+            data[timeIndex] = toPrimitiveDoubleAllowMissing(
+                    rows.get(timeIndex).featureValues[0]
+            );
         }
-
         return data;
     }
 
@@ -1186,161 +1201,92 @@ public class LongFormatReader
             int dimensionCount,
             int timeLength
     ) {
-        if (isNumeric) {
-            if (hasMissingValues) {
-                Double[][] data =
-                        new Double[dimensionCount][timeLength];
-
-                for (int timeIndex = 0;
-                     timeIndex < timeLength;
-                     timeIndex++) {
-
-                    Object[] values =
-                            rows.get(timeIndex)
-                                    .featureValues;
-
-                    for (int dimension = 0;
-                         dimension < dimensionCount;
-                         dimension++) {
-
-                        data[dimension][timeIndex] =
-                                toBoxedDouble(
-                                        values[dimension]
-                                );
-                    }
-                }
-
-                return data;
-            }
-
-            double[][] data =
-                    new double[dimensionCount][timeLength];
-
+        if (!isNumeric) {
+            Object[][] data = new Object[dimensionCount][timeLength];
             for (int timeIndex = 0;
                  timeIndex < timeLength;
                  timeIndex++) {
-
-                Object[] values =
-                        rows.get(timeIndex)
-                                .featureValues;
-
+                Object[] values = rows.get(timeIndex).featureValues;
                 for (int dimension = 0;
                      dimension < dimensionCount;
                      dimension++) {
-
-                    data[dimension][timeIndex] =
-                            toPrimitiveDouble(
-                                    values[dimension]
-                            );
+                    data[dimension][timeIndex] = values[dimension];
                 }
             }
-
             return data;
         }
 
-        Object[][] data =
-                new Object[dimensionCount][timeLength];
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[][] data = new float[dimensionCount][timeLength];
+            for (int timeIndex = 0;
+                 timeIndex < timeLength;
+                 timeIndex++) {
+                Object[] values = rows.get(timeIndex).featureValues;
+                for (int dimension = 0;
+                     dimension < dimensionCount;
+                     dimension++) {
+                    data[dimension][timeIndex] =
+                            toPrimitiveFloatAllowMissing(values[dimension]);
+                }
+            }
+            return data;
+        }
 
+        double[][] data = new double[dimensionCount][timeLength];
         for (int timeIndex = 0;
              timeIndex < timeLength;
              timeIndex++) {
-
-            Object[] values =
-                    rows.get(timeIndex)
-                            .featureValues;
-
+            Object[] values = rows.get(timeIndex).featureValues;
             for (int dimension = 0;
                  dimension < dimensionCount;
                  dimension++) {
-
                 data[dimension][timeIndex] =
-                        values[dimension];
+                        toPrimitiveDoubleAllowMissing(values[dimension]);
             }
         }
-
         return data;
     }
 
     private Object buildRowWiseData(
             Object[] featureValues
     ) {
-        int length =
-                featureValues.length;
-
-        if (isNumeric) {
-            if (hasMissingValues) {
-                Double[] data =
-                        new Double[length];
-
-                for (int index = 0;
-                     index < length;
-                     index++) {
-
-                    data[index] =
-                            toBoxedDouble(
-                                    featureValues[index]
-                            );
-                }
-
-                return data;
-            }
-
-            double[] data =
-                    new double[length];
-
-            for (int index = 0;
-                 index < length;
-                 index++) {
-
+        if (!isNumeric) {
+            return featureValues.clone();
+        }
+        if (numericStorageType == NumericStorageType.FLOAT32) {
+            float[] data = new float[featureValues.length];
+            for (int index = 0; index < featureValues.length; index++) {
                 data[index] =
-                        toPrimitiveDouble(
-                                featureValues[index]
-                        );
+                        toPrimitiveFloatAllowMissing(featureValues[index]);
             }
-
             return data;
         }
-
-        return featureValues.clone();
+        double[] data = new double[featureValues.length];
+        for (int index = 0; index < featureValues.length; index++) {
+            data[index] =
+                    toPrimitiveDoubleAllowMissing(featureValues[index]);
+        }
+        return data;
     }
 
-    private static Double toBoxedDouble(
+    private static double toPrimitiveDoubleAllowMissing(
             Object value
     ) {
         if (value == null) {
-            return null;
+            return Double.NaN;
         }
-
-        if (value instanceof Double doubleValue) {
-            return doubleValue;
-        }
-
         if (value instanceof Number number) {
             return number.doubleValue();
         }
-
-        return JavaDoubleParser.parseDouble(
-                value.toString()
-        );
+        return JavaDoubleParser.parseDouble(value.toString());
     }
 
-    private static double toPrimitiveDouble(
+    private static float toPrimitiveFloatAllowMissing(
             Object value
     ) {
-        if (value == null) {
-            throw new IllegalArgumentException(
-                    "Encountered null numeric value, but "
-                            + "hasMissingValues=false."
-            );
-        }
-
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-
-        return JavaDoubleParser.parseDouble(
-                value.toString()
-        );
+        return value == null
+                ? Float.NaN
+                : (float) toPrimitiveDoubleAllowMissing(value);
     }
 
     private static int getDataLength(
@@ -1349,33 +1295,21 @@ public class LongFormatReader
         if (data instanceof double[] array) {
             return array.length;
         }
-
-        if (data instanceof Double[] array) {
+        if (data instanceof float[] array) {
             return array.length;
         }
-
         if (data instanceof double[][] matrix) {
-            return matrix.length == 0
-                    ? 0
-                    : matrix[0].length;
+            return matrix.length == 0 ? 0 : matrix[0].length;
         }
-
-        if (data instanceof Double[][] matrix) {
-            return matrix.length == 0
-                    ? 0
-                    : matrix[0].length;
+        if (data instanceof float[][] matrix) {
+            return matrix.length == 0 ? 0 : matrix[0].length;
         }
-
         if (data instanceof Object[][] matrix) {
-            return matrix.length == 0
-                    ? 0
-                    : matrix[0].length;
+            return matrix.length == 0 ? 0 : matrix[0].length;
         }
-
         if (data instanceof Object[] array) {
             return array.length;
         }
-
         return 0;
     }
 
@@ -1565,6 +1499,18 @@ public class LongFormatReader
         return Collections.unmodifiableSet(
                 normalized
         );
+    }
+
+    private static NumericStorageType resolveStorageType(
+            NumericStorageType requested
+    ) {
+        NumericStorageType value = Objects.requireNonNull(
+                requested,
+                "NumericStorageType cannot be null."
+        );
+        return value == NumericStorageType.AUTO
+                ? NumericStorageType.FLOAT64
+                : value;
     }
 
     private void validateOptions() {

@@ -171,6 +171,11 @@ public class AppContext {
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;
 	public static boolean impute_test = false;
+	// Sparse output containing only originally missing cells after imputation.
+	public static boolean output_train_imputed_csr = false;
+	public static boolean output_test_imputed_csr = false;
+	public static String train_imputed_csr_file = "training_imputed_values.mtx";
+	public static String test_imputed_csr_file = "testing_imputed_values.mtx";
 	public static boolean DTWImpute = false;
 	public static HashSet<String> MissingStrings;
 	public static Map<Integer, Object> meta_predictions;
@@ -365,6 +370,10 @@ public class AppContext {
 			lazySeriesReaders =
 			new ConcurrentHashMap<>();
 
+	private static final Map<String, LazySeriesReaderSpec>
+			lazySeriesReaderSpecs =
+			new ConcurrentHashMap<>();
+
 	public static void registerLazySeriesReaderSpec(
 			LazySeriesReaderSpec spec
 	) {
@@ -380,7 +389,13 @@ public class AppContext {
 		);
 	}
 
-	public static void registerLazySeriesReader(
+	/**
+	 * Constructs and registers one reusable lazy series reader.
+	 *
+	 * <p>The replacement is constructed before either registry is modified, so
+	 * a construction failure leaves the previous registration intact.</p>
+	 */
+	public static synchronized void registerLazySeriesReader(
 			LazySeriesReaderSpec spec
 	) {
 		if (spec == null) {
@@ -389,56 +404,73 @@ public class AppContext {
 			);
 		}
 
-		LazySeriesReader reader =
+		LazySeriesReader replacement =
 				LazySeriesReaderFactory.create(spec);
-
-		lazySeriesReaderSpecs.put(
-				spec.getReaderKey(),
-				spec
-		);
-
-		lazySeriesReaders.put(
-				spec.getReaderKey(),
-				reader
-		);
+		String key = spec.getReaderKey();
+		LazySeriesReader previous = lazySeriesReaders.put(key, replacement);
+		lazySeriesReaderSpecs.put(key, spec);
+		closeReplacedLazySeriesReader(previous, replacement);
 	}
 
 	public static Map<String, LazySeriesReaderSpec>
 	getLazySeriesReaderSpecsSnapshot() {
-		return new LinkedHashMap<>(
-				lazySeriesReaderSpecs
-		);
+		return new LinkedHashMap<>(lazySeriesReaderSpecs);
 	}
 
-	public static void restoreLazySeriesReaderSpecs(
+	/**
+	 * Reconstructs all readers before replacing the active registry.
+	 */
+	public static synchronized void restoreLazySeriesReaderSpecs(
 			Map<String, LazySeriesReaderSpec> specs
 	) {
-		lazySeriesReaders.clear();
-		lazySeriesReaderSpecs.clear();
+		Map<String, LazySeriesReader> replacements =
+				new LinkedHashMap<>();
 
-		if (specs == null || specs.isEmpty()) {
-			return;
+		try {
+			if (specs != null) {
+				for (LazySeriesReaderSpec spec : specs.values()) {
+					if (spec == null) {
+						throw new IllegalArgumentException(
+								"Lazy reader specifications cannot contain null."
+						);
+					}
+					replacements.put(
+							spec.getReaderKey(),
+							LazySeriesReaderFactory.create(spec)
+					);
+				}
+			}
+		} catch (RuntimeException | Error failure) {
+			closeLazySeriesReaders(replacements.values(), failure);
+			throw failure;
 		}
 
-		for (LazySeriesReaderSpec spec : specs.values()) {
-			registerLazySeriesReader(spec);
+		List<LazySeriesReader> previous =
+				new ArrayList<>(lazySeriesReaders.values());
+		lazySeriesReaders.clear();
+		lazySeriesReaders.putAll(replacements);
+		lazySeriesReaderSpecs.clear();
+		if (specs != null) {
+			for (LazySeriesReaderSpec spec : specs.values()) {
+				lazySeriesReaderSpecs.put(spec.getReaderKey(), spec);
+			}
 		}
+		closeLazySeriesReaders(previous, null);
 	}
 
-	public static void clearLazySeriesReaders() {
+	public static synchronized void clearLazySeriesReaders() {
+		List<LazySeriesReader> previous =
+				new ArrayList<>(lazySeriesReaders.values());
 		lazySeriesReaders.clear();
 		lazySeriesReaderSpecs.clear();
+		closeLazySeriesReaders(previous, null);
 	}
 
-	//public static void registerLazySeriesReader(
-	//		String key,
-	//		LazySeriesReader reader
-	//) {
-	//	isLazyDataset = true;
-	//	lazySeriesReaders.put(key, reader);
-	//}
-
-	public static void registerLazySeriesReader(
+	/**
+	 * Registers a runtime-only reader. This overload intentionally does not
+	 * create a serializable reconstruction specification.
+	 */
+	public static synchronized void registerLazySeriesReader(
 			String readerKey,
 			LazySeriesReader reader
 	) {
@@ -447,54 +479,69 @@ public class AppContext {
 					"Lazy reader key cannot be null or blank."
 			);
 		}
-
 		if (reader == null) {
 			throw new IllegalArgumentException(
 					"LazySeriesReader cannot be null."
 			);
 		}
 
-		lazySeriesReaders.put(
-				readerKey,
-				reader
-		);
+		LazySeriesReader previous =
+				lazySeriesReaders.put(readerKey.trim(), reader);
+		closeReplacedLazySeriesReader(previous, reader);
 	}
 
-	public static LazySeriesReader getLazySeriesReader(
-			String key
-	) {
-		LazySeriesReader reader =
-				lazySeriesReaders.get(key);
-
+	public static LazySeriesReader getLazySeriesReader(String key) {
+		LazySeriesReader reader = lazySeriesReaders.get(key);
 		if (reader == null) {
 			throw new IllegalStateException(
 					"No LazySeriesReader registered for key: " + key
 			);
 		}
-
 		return reader;
 	}
 
-	private static final Map<String, LazySeriesReaderSpec>
-			lazySeriesReaderSpecs =
-			new ConcurrentHashMap<>();
+	private static void closeReplacedLazySeriesReader(
+			LazySeriesReader previous,
+			LazySeriesReader replacement
+	) {
+		if (previous != null && previous != replacement) {
+			closeLazySeriesReaders(List.of(previous), null);
+		}
+	}
 
-	//public static void clearLazySeriesReaders() {
-	//	isLazyDataset = false;
-	//	lazySeriesReaders.clear();
-	//}
+	private static void closeLazySeriesReaders(
+			Collection<LazySeriesReader> readers,
+			Throwable primaryFailure
+	) {
+		RuntimeException cleanupFailure = null;
+		Set<LazySeriesReader> closed =
+				Collections.newSetFromMap(new IdentityHashMap<>());
 
-	/*public static LazySeriesReader getDefaultLazySeriesReader() {
-		if (lazySeriesReaders.size() == 1) {
-			return lazySeriesReaders.values().iterator().next();
+		for (LazySeriesReader reader : readers) {
+			if (!(reader instanceof AutoCloseable closeable)
+					|| !closed.add(reader)) {
+				continue;
+			}
+			try {
+				closeable.close();
+			} catch (Exception failure) {
+				if (primaryFailure != null) {
+					primaryFailure.addSuppressed(failure);
+				} else if (cleanupFailure == null) {
+					cleanupFailure = new IllegalStateException(
+							"Failed to close a lazy series reader.",
+							failure
+					);
+				} else {
+					cleanupFailure.addSuppressed(failure);
+				}
+			}
 		}
 
-		throw new IllegalStateException(
-				"Multiple LazySeriesReaders are registered. "
-						+ "Custom LazyDistanceFunction currently requires "
-						+ "a single lazy reader configuration."
-		);
-	}*/
+		if (primaryFailure == null && cleanupFailure != null) {
+			throw cleanupFailure;
+		}
+	}
 
 	public static Object readLazySeries(
 			LazySeriesRef ref

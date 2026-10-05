@@ -86,6 +86,8 @@ public enum ReaderType {
      * to reserve as an explicit reader type.
      */
     NESTED_PARQUET,
+    /** Shared-array lazy NPY reader using axis 0 as instances. */
+    LAZY_NPY,
     LAZY_PER_FILE_PARQUET,
     PER_FILE_PARQUET,
     PER_FILE_DELIMITED,
@@ -98,4 +100,11 @@ public enum ReaderType {
     PARQUET_COLUMN_FILE_READER,
     PER_FILE_CUSTOM,
     LAZY_PER_FILE_CUSTOM,
+    /**
+     * Optimized numeric long-format Parquet reader.
+     *
+     * Rows are grouped by an instance identifier and numeric feature columns
+     * are materialized directly into primitive float or double observations.
+     */
+    NUMERIC_LONG_FORMAT_PARQUET,
 }

@@ -629,8 +629,8 @@ public class HDF5Reader
         }
 
         if (hasMissingValues) {
-            Double[][] result =
-                    new Double[source.length][];
+            double[][] result =
+                    new double[source.length][];
 
             for (int index = 0;
                  index < source.length;
@@ -885,8 +885,8 @@ public class HDF5Reader
 
         if (isNumeric) {
             if (hasMissingValues) {
-                Double[] result =
-                        new Double[length];
+                double[] result =
+                        new double[length];
 
                 for (int index = 0;
                      index < length;
@@ -977,8 +977,8 @@ public class HDF5Reader
 
         if (isNumeric) {
             if (hasMissingValues) {
-                Double[][] result =
-                        new Double[dimensionCount][timeLength];
+                double[][] result =
+                        new double[dimensionCount][timeLength];
 
                 for (int dimension = 0;
                      dimension < dimensionCount;
@@ -1084,8 +1084,8 @@ public class HDF5Reader
     ) {
         if (isNumeric) {
             if (hasMissingValues) {
-                Double[] result =
-                        new Double[timeLength];
+                double[] result =
+                        new double[timeLength];
 
                 for (int time = 0;
                      time < timeLength;
@@ -1200,8 +1200,8 @@ public class HDF5Reader
 
         if (isNumeric) {
             if (hasMissingValues) {
-                Double[][] result =
-                        new Double[pixels][channels];
+                double[][] result =
+                        new double[channels][pixels];
 
                 for (int heightIndex = 0;
                      heightIndex < height;
@@ -1245,7 +1245,7 @@ public class HDF5Reader
             }
 
             double[][] result =
-                    new double[pixels][channels];
+                    new double[channels][pixels];
 
             for (int heightIndex = 0;
                  heightIndex < height;
@@ -1289,7 +1289,7 @@ public class HDF5Reader
         }
 
         Object[][] result =
-                new Object[pixels][channels];
+                new Object[channels][pixels];
 
         for (int heightIndex = 0;
              heightIndex < height;
@@ -2111,11 +2111,11 @@ public class HDF5Reader
         return result;
     }
 
-    private static Double[] boxDoubles(
+    private static double[] boxDoubles(
             double[] source
     ) {
-        Double[] result =
-                new Double[source.length];
+        double[] result =
+                new double[source.length];
 
         for (int index = 0;
              index < source.length;

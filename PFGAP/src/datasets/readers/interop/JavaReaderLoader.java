@@ -39,6 +39,10 @@ import java.util.Objects;
  * ambiguity associated with loading individual packaged {@code .class}
  * files. It also permits the plugin to include helper classes and resources.</p>
  *
+ * <p>The loader uses the PFGAP class loader as its parent. The public plugin
+ * API and shared project types therefore retain class identity, while plugin
+ * implementation classes and private dependencies are loaded from the JAR.</p>
+ *
  * <p>The loaded implementation must:</p>
  *
  * <ul>
@@ -80,75 +84,40 @@ public final class JavaReaderLoader {
     public static LoadedCustomReader load(
             String descriptor
     ) throws IOException, ReflectiveOperationException {
+        ParsedReaderDescriptor parsed = parseDescriptor(descriptor);
+        Path jarPath = validateJarPath(parsed.jarPath());
+        URL jarUrl = toUrl(jarPath);
 
-        ParsedReaderDescriptor parsed =
-                parseDescriptor(
-                        descriptor
-                );
-
-        Path jarPath =
-                validateJarPath(
-                        parsed.jarPath()
-                );
-
-        URL jarUrl =
-                toUrl(
-                        jarPath
-                );
-
-        URLClassLoader classLoader =
-                new URLClassLoader(
-                        new URL[]{jarUrl},
-                        CustomSeriesReader.class.getClassLoader()
-                );
-
-        boolean loadSucceeded =
-                false;
+        URLClassLoader classLoader = new URLClassLoader(
+                "pfgap-custom-reader:" + parsed.className(),
+                new URL[]{jarUrl},
+                CustomSeriesReader.class.getClassLoader()
+        );
 
         try {
-            Class<?> implementationClass =
-                    Class.forName(
-                            parsed.className(),
-                            true,
-                            classLoader
-                    );
-
+            Class<?> implementationClass = Class.forName(
+                    parsed.className(), true, classLoader);
             validateImplementationClass(
-                    implementationClass,
-                    parsed,
-                    jarPath
+                    implementationClass, parsed, jarPath);
+            Constructor<?> constructor = requireNoArgumentConstructor(
+                    implementationClass, parsed, jarPath);
+            CustomSeriesReader reader = instantiate(
+                    constructor, parsed, jarPath);
+
+            return new LoadedCustomReader(
+                    reader,
+                    classLoader,
+                    parsed.normalizedDescriptor(),
+                    parsed.className()
             );
-
-            Constructor<?> constructor =
-                    requireNoArgumentConstructor(
-                            implementationClass,
-                            parsed,
-                            jarPath
-                    );
-
-            CustomSeriesReader reader =
-                    instantiate(
-                            constructor,
-                            parsed,
-                            jarPath
-                    );
-
-            LoadedCustomReader loadedReader =
-                    new LoadedCustomReader(
-                            reader,
-                            classLoader,
-                            parsed.normalizedDescriptor(),
-                            parsed.className()
-                    );
-
-            loadSucceeded =
-                    true;
-
-            return loadedReader;
-        } finally {
-            if (!loadSucceeded) {
+        } catch (ReflectiveOperationException
+                 | RuntimeException | Error failure) {
+            try {
                 classLoader.close();
+            } catch (IOException closeFailure) {
+                failure.addSuppressed(closeFailure);
             }
+            throw failure;
         }
     }
 
@@ -158,6 +127,12 @@ public final class JavaReaderLoader {
      * @param descriptor custom-reader descriptor
      * @return parsed descriptor
      */
+    public static String normalizeDescriptor(
+            String descriptor
+    ) {
+        return parseDescriptor(descriptor).normalizedDescriptor();
+    }
+
     private static ParsedReaderDescriptor parseDescriptor(
             String descriptor
     ) {
