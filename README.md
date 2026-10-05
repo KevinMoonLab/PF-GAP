@@ -1,253 +1,423 @@
-# PF-GAP
+# PFGAP
 
-[![Java](https://img.shields.io/badge/Java-17%2B-blue.svg)](https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+PFGAP is a Java-based framework and command-line application for Proximity Forest learning and proximity-based analysis on time series and structured data. It extends the Proximity Forest family with generalized proximities, classification and regression, iterative imputation, outlier and out-of-distribution scoring, multivariate and unequal-length data support, flexible dataset readers, and extensible distance functions.
 
-PF-GAP is a flexible, extensible framework for proximity-based learning on time series and structured data. It builds on the original [Proximity Forest (PF)](https://github.com/fpetitjean/ProximityForest) model and introduces:
+> **Project status:** PFGAP is under active development toward version 1.0. Compatibility-sensitive workflows should retain the PFGAP revision, Java runtime, preprocessing artifacts, external extension artifacts, and configuration used by an experiment.
 
-- **GAP proximities**
-    - Supervised imputation (test and train sets)
-    - Intra-class outlier scores
-    - Returnable for visualization, SVM kernel, etc.
-- **Custom distance functions** (in Python, Maple, or Java)
-- **Support for multivariate and variable-length time series**
-- **Parallel training and proximity computation**
-- **Flexible data formatting and imputation options**
-- **Regression (Extrinsic)**
-- **Customizable node purity measures and aggregation schemes**
+## Key capabilities
 
----
-## 📚 Table of Contents
+- Time-series and structured-data classification
+- Regression forests and numeric prediction
+- Univariate and multivariate observations
+- Equal-length and unequal-length series
+- Generalized, Breiman, and depth-weighted proximities
+- Iterative proximity-based imputation
+- Complete and imputed-only output
+- Supervised classification outlier scores
+- Unsupervised isolation scoring
+- Evaluation-time OOD scoring
+- Eager and deferred dataset readers
+- Delimited, long-form, per-file, HDF5, NPY, Parquet, and custom input sources
+- Numeric feature storage using `float32`, `float64`, or automatic source-aware selection
+- Standardization with reusable fitted statistics and per-series scopes
+- Dense CSV and sparse Matrix Market outputs
+- Bounded parallel execution through one application worker budget
+- Built-in and custom Java, Python, Maple, and meta distances
+- Custom eager and deferred readers from separate JARs
+- Saved models with retained training data and reconstructible reader specifications
 
-1. [Installation](#installation)
-2. [Repository Structure](#repository-structure)
-3. [Quickstart](#quickstart)
-4. [Usage](#usage)
-   - [Training](#training)
-   - [Prediction](#prediction)
-   - [Imputation](#imputation)
-   - [Custom Distances](#custom-distances)
-5. [Demo Notebooks](#demo-notebooks)
-6. [Data Format](#data-format)
-7. [Output Files](#output-files)
-8. [Citation](#citation)
+## Requirements
 
----
+- Java 21 or later
+- Python 3 when using `Application/PF_wrapper.py` or the top-level Python test scripts
+- NumPy for Python-helper workflows that require it
+- Optional format- or extension-specific dependencies
 
+The Java Vector API is optional. In Python helper calls, set:
 
-## 🛠 Installation
-
-### Requirements
-
-- **Java 17+**
-- Recommended: **Python 3.8+** (tested with Python 3.13)
-- Python packages (for running the demo files):
-
-```bash
-  pip install numpy pandas matplotlib scikit-learn aeon
+```python
+use_vector_api=True
 ```
-- Optional: **Maple 2016+** (for Maple-based distance functions)
 
-## 📂 Repository Structure
+`PF_wrapper.py` then adds the required `jdk.incubator.vector` module to the Java launch command automatically.
+
+For direct Java execution, add the module explicitly:
 
 ```bash
-PF-GAP/
-├── PFGAP/                  # Java source code
-├── docs/                   # Project feature and useage documentation
-│   ├── custom_distances/   # Documentation and examples for custom Java distances
-│   ├── demo/               # Demo scripts (converted from notebooks), toy data, example Maple/Python
-│   └── *.md                # Markdown files for feature documentation
+java --add-modules=jdk.incubator.vector \
+  -Xmx4g \
+  -jar Application/PFGAP.jar \
+  -use_vector_api=true \
+  ...
+```
+
+## Repository layout
+
+The principal top-level structure is:
+
+```text
+PFGAP/
 ├── Application/
-│   ├── PFGAP.jar           # Compiled Java executable
-│   └── PF_wrapper.py       # Python interface to PFGAP.jar
+│   ├── PFGAP.jar
+│   └── PF_wrapper.py
+├── PFGAP/
+│   ├── lib/
+│   └── src/
+├── docs/
+│   ├── data/
+│   ├── extensions/
+│   ├── getting-started/
+│   ├── guides/
+│   ├── reference/
+│   └── index.md
+├── tests/
+├── LICENSE
 └── README.md
 ```
 
+- `Application/` contains the distributable JAR and Python helper.
+- `PFGAP/src/` contains the Java source tree.
+- `PFGAP/lib/` contains external Java libraries.
+- `docs/` contains the authoritative user documentation, organized into getting-started, data, guides, extensions, and reference sections.
+- `tests/` contains top-level Python scripts used to exercise application workflows and integrations.
 
-## ⚡ Quickstart
+A separate top-level `website/` directory will be introduced in a later change to render the canonical content from `docs/` as a static documentation website.
 
-Simply download the PFGAP.jar file. For convenience, download the PR_wrapper.py file to call using python.
+## Interfaces
 
-# 🚀 Usage
+PFGAP supports two primary user interfaces.
 
-For more detailed descriptions, please refer to the documentation.
+### Python helper
 
-# Training
-Use PF_wrapper.train() to train a proximity forest:
+`Application/PF_wrapper.py` validates Python-facing arguments, constructs the Java command, and launches `PFGAP.jar`.
+
+Use it from:
+
+- Python scripts;
+- Jupyter or Marimo notebooks;
+- experiment pipelines; or
+- applications that coordinate work in Python.
+
+The algorithms and application runtime remain implemented in Java.
+
+### Direct Java command line
+
+`Application/PFGAP.jar` accepts application options in this form:
+
+```text
+-name=value
+```
+
+The direct interface is suitable for shell scripts, Java-oriented deployments, scheduled jobs, and environments where Python is not needed.
+
+## Quick start
+
+The examples below train a classification forest, evaluate a labeled test set, write predictions, and save the model.
+
+The paths are illustrative. Select a reader and separators that match the actual data layout.
+
+### Python
+
+Run from `Application/`, or otherwise place `PF_wrapper.py` and `PFGAP.jar` together in the working directory expected by the helper.
 
 ```python
 import PF_wrapper as PF
 
-PF.train(
-    train_file="Data/GunPoint_TRAIN.tsv",
-    model_name="Spartacus",
-    return_proximities=True,
-    output_directory="training_output",
-    entry_separator="\t"
-)
-```
-
-# Prediction
-Use PF_wrapper.predict() to evaluate a saved model on a test set:
-
-```python
-PF.predict(
-    model_name="training_output/Spartacus",
-    testfile="Data/GunPoint_TEST.tsv",
-    entry_separator="\t"
-)
-```
-
-# Imputation
-PF-GAP supports iterative imputation for both training and test sets:
-
-```python
-PF.train(
-    train_file="Data/differentlengths.txt",
-    test_file="Data/differentlengths_test.txt",
-    train_labels="Data/differentlabels.txt",
-    test_labels="Data/differentlabels_test.txt",
-    impute_training_data=True,
-    return_imputed_training=True,
-    impute_testing_data=True,
-    return_imputed_testing=True,
-    impute_iterations=5,
-    data_dimension=2,
+status = PF.train(
+    train_file="../data/train.csv",
+    test_file="../data/test.csv",
+    exists_testlabels=True,
+    reader_type="NUMERIC_DELIMITED",
+    forest_mode="classification",
+    data_dimension=1,
+    numeric_data=True,
+    numeric_storage="float64",
     entry_separator=",",
-    array_separator=":"
+    file_has_header=False,
+    target_column="first",
+    distances=["euclidean", "dtw", "erp"],
+    num_trees=101,
+    r=5,
+    seed=42,
+    num_workers=4,
+    use_vector_api=False,
+    return_predictions=True,
+    save_model=True,
+    model_name="classification_model",
+    output_directory="../output/classification",
 )
+
+if status != 0:
+    raise SystemExit(status)
 ```
 
-Custom Distances
-You can define your own distance function in:
+Set `use_vector_api=True` when the selected operations should use supported Vector API implementations. The helper will add the incubator module to the Java command.
 
-- *Java:* compile a .class or .jar file, or multiple. See **docs/custom_distances** for more information.
-- *Python:* PythonDistance.py with a function Distance(list1, list2)
-- *Maple:* MapleDistance.mpl with a function Distance(list1, list2)
+### Direct Java
 
-Specify the custom distance source using:
-
-```python
-distances=["javadistance:customdistance.class"]
-```
-or
-
-```python
-distances=["javadistance:userdistances.jar:customdistance"]
-```
-
-or
-
-```python
-distances=["python"]  # or ["maple"]
-```
-
-
-## 📊 Demo Notebooks
-
-| Demo | Description |
-|------|-------------|
-| `demo_gunpoint.py` | Classic PF classification on UCR GunPoint dataset |
-| `demo_multi_impute.py` | Imputation on multivariate time series with missing values |
-| `demo_load_japanese.py` | Large-scale multivariate classification with variable-length sequences |
-| `demo_regression.py` | Time Series Extrinsic Regression on the FloodModeling1 dataset |
-
-### Example MDS Visualization
-
-![Demo MDS GunPoint Train](docs/demo/Demo_MDS_GunPointTrain.pdf)
-
----
-
-## 📄 Data Format
-
-PF-GAP supports flexible input formats:
-
-- **UCR-style `.tsv` files** (label + data in one file)
-- **Custom delimited files** with:
-  - `entry_separator` (e.g., `","`, `"	"`)
-  - `array_separator` (e.g., `":"` for 2D arrays)
-
-For multivariate or 3D data, use `data_dimension=2`.
-
----
-
-## 📂 Output Files
-
-Depending on options, PF-GAP may generate:
-
-| File | Description |
-|------|-------------|
-| `Predictions.txt` | Predictions on test set |
-| `Predictions_saved.txt` | Predictions from a saved model |
-| `TrainingProximities.txt` | Proximity matrix for training set |
-| `TestTrainProximities.txt` | Proximities between test and train |
-| `outlier_scores.txt` | Intra-class outlier scores |
-| `imputed_train.txt` | Imputed training data (if requested) |
-| `imputed_test.txt` | Imputed test data (if requested) |
-
-Use `PF_wrapper.getArray(filename)` to load proximity or outlier arrays.
-
-🔹 **Outlier Scores**
-
-- Set return_training_outlier_scores=True to compute intra-class outlier scores for the training set.
-- These are saved to outlier_scores.txt in the output directory.
-- Use PF_wrapper.getArray(output_directory + "outlier_scores.txt") to load them as a NumPy array.
-- Note that outlier scores are not supported for regression.
-
-🔹 **Imputed Data**
-
-- If impute_training_data=True and return_imputed_training=True, the imputed training set is saved to:
+From the repository root:
 
 ```bash
-[output_directory]/[train_file].txt
+mkdir -p output/classification
+
+java -Xmx4g -jar Application/PFGAP.jar \
+  -eval=false \
+  -train=data/train.csv \
+  -test=data/test.csv \
+  -exists_testlabels=true \
+  -reader_type=NUMERIC_DELIMITED \
+  -forest_mode=classification \
+  -is2D=false \
+  -isNumeric=true \
+  -numeric_storage=float64 \
+  -entry_separator=, \
+  -csv_has_header=false \
+  -target_column=first \
+  -distances=[euclidean,dtw,erp] \
+  -trees=101 \
+  -r=5 \
+  -seed=42 \
+  -num_workers=4 \
+  -get_predictions=true \
+  -savemodel=true \
+  -modelname=classification_model \
+  -out=output/classification/
 ```
 
-- Similarly, return_imputed_testing=True saves:
+## Main workflows
 
-```bash
-[output_directory]/[test_file].txt
+### Classification
+
+Train a classification forest, evaluate labeled or unlabeled data, save models, and export ordinary or structured predictions.
+
+See [Classification](docs/guides/Classification.md).
+
+### Regression
+
+Train regression forests with numeric targets and export aggregate predictions, residuals, absolute errors, and structured tree-prediction dispersion.
+
+See [Regression](docs/guides/Regression.md).
+
+### Imputation
+
+Initialize missing values, iteratively update them through forest proximities, and write either complete imputed datasets or imputed-only Matrix Market output.
+
+See:
+
+- [Imputation](docs/guides/Imputation.md)
+- [Missing Values](docs/reference/Missing_Values.md)
+- [Imputed-Only Output](docs/reference/Imputed_Only_Output.md)
+
+### Outlier and isolation scoring
+
+PFGAP separates:
+
+- supervised classification training outlier scores; and
+- unsupervised isolation-forest scoring.
+
+See [Outlier Scoring](docs/guides/Outlier_Scoring.md).
+
+### OOD scoring
+
+A forest trained with retained split-distance summaries can score later evaluation observations relative to training split support.
+
+See [OOD Scoring](docs/guides/OOD_Scoring.md).
+
+### Proximities
+
+PFGAP supports generalized, Breiman, and depth-weighted proximity definitions. It can write training-to-training and evaluation-to-training matrices in dense CSV or sparse Matrix Market form.
+
+See [Outputs](docs/reference/Outputs.md).
+
+## Data and I/O
+
+PFGAP separates physical file layout from logical observation representation.
+
+- [Data Formats](docs/data/Data_Formats.md) describes supported external formats.
+- [Dataset Representations](docs/data/Dataset_Representations.md) defines one-dimensional and two-dimensional in-memory representations.
+- [Readers](docs/data/Readers.md) lists implemented reader types and their option requirements.
+- [Writers](docs/data/Writers.md) describes complete dataset output and mirror-writer support.
+- [Eager and Lazy Data](docs/guides/Eager_and_Lazy_Data.md) explains materialized and deferred reader implementations.
+
+## Standardization
+
+PFGAP supports:
+
+```text
+none
+z_score
+mean_center
+min_max
 ```
 
-- These files preserve the original format and delimiters.
+Available scopes are:
 
-🔹 **Proximity Matrices**
-
-- If return_proximities=True, proximity matrices are saved to:
-
-    - TrainingProximities.txt (train vs. train)
-    - TestTrainProximities.txt (test vs. train)
-
-
-- These are used internally for imputation and outlier detection, but can also be used for:
-
-    - **MDS or PHATE visualization**
-    - **Clustering**
-    - **Custom analysis**
-
-
-Load them with:
-
-```python
-p = PF_wrapper.getArray(str(output_directory) + "TrainingProximities.txt")
+```text
+global
+per_dimension
+per_series
+per_series_per_dimension
 ```
 
-or:
+Reusable statistics can be saved and restored for compatible scopes. Complete and imputed-only numeric outputs can be returned to the original feature scale.
 
-```python
-pt = PF_wrapper.getArray(str(output_directory) + "TestTrainProximities.txt")
+See [Standardization](docs/guides/Standardization.md).
+
+## Distances and extensions
+
+The built-in distance registry includes vector, elastic, multivariate independent, multivariate dependent, missing-aware, graph, interoperability, and meta distances.
+
+See [Distances](docs/reference/Distances.md) for exact case-sensitive identifiers and compatibility guidance.
+
+### Custom distances
+
+Custom distances can be implemented in:
+
+- Java;
+- Python;
+- Maple; or
+- pretrained-model and file-backed meta integrations.
+
+Java distances can be distributed in a separate standard or fat JAR.
+
+See [Custom Distances](docs/extensions/Custom_Distances.md).
+
+### Custom readers
+
+A separate JAR can implement a per-file `CustomSeriesReader` used by both eager and deferred custom reader types. A project-specific extension can also implement a direct whole-dataset reader and, when needed, a reconstructible deferred reader.
+
+See [Custom Readers](docs/extensions/Custom_Readers.md).
+
+## Parallel execution and reproducibility
+
+Configure the worker budget with:
+
+```text
+-num_workers=1
 ```
 
----
+for sequential execution, a positive value greater than one for bounded parallel execution, or:
 
-## 📖 Citation
+```text
+-num_workers=-1
+```
 
-If you use PF-GAP in your work, please cite the appropriate paper(s) from the following list:
+for all processors visible to the JVM.
 
-> Ben Shaw, Jake S. Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon.
-> **Forest Proximities for Time Series**, IntelliSys 2025  
-> [arXiv preprint](https://arxiv.org/abs/2410.03098)
+Set a seed for reproducible randomized behavior:
 
-> Ben Shaw, Adam Rustad, Sofia Pelagalli Maia, Jake S. Rhodes, and Kevin R. Moon.
-> **The Generalized Proximity Forest**, ACDSA 2026  
-> [arXiv preprint](https://arxiv.org/abs/2511.19487)
+```text
+-seed=42
+```
+
+Reproducibility also depends on data ordering, reader configuration, distances, preprocessing, external extensions, runtime versions, and worker settings.
+
+See [Parallelism and Reproducibility](docs/guides/Parallelism_and_Reproducibility.md).
+
+## Model persistence
+
+A saved model is a Java serialization stream containing:
+
+1. the fitted forest;
+2. the retained training dataset; and
+3. a snapshot of model-related application state.
+
+Custom JARs, scripts, pretrained models, source data used by deferred readers, and other external dependencies remain external artifacts and must be retained with the experiment.
+
+Load models only from trusted sources.
+
+See [Model Persistence](docs/reference/Model_Persistence.md).
+
+## Outputs
+
+Depending on the workflow and configuration, PFGAP can write:
+
+- ordinary classification or regression predictions;
+- enhanced per-instance prediction details;
+- OOD results;
+- supervised outlier scores;
+- isolation scores and diagnostics;
+- dense or sparse proximities;
+- complete imputed datasets;
+- imputed-only Matrix Market values;
+- standardization statistics;
+- saved models; and
+- `experiment_results.json` with repetition summaries and artifact paths.
+
+See [Outputs](docs/reference/Outputs.md) for filenames, schemas, indexing, CSV behavior, repetition suffixes, and availability by workflow.
+
+## Tests
+
+The top-level `tests/` directory contains Python scripts for exercising current PFGAP workflows and integrations through the application interface.
+
+These scripts complement the Java source tests and are useful for end-to-end checks involving:
+
+- `PF_wrapper.py`;
+- reader and format behavior;
+- custom extensions;
+- model training and evaluation; and
+- generated artifacts.
+
+Test scripts can depend on local data, optional runtimes, generated JARs, or environment-specific paths. Review each script before running it.
+
+## Documentation
+
+Start with [PFGAP Documentation](docs/index.md).
+
+The documentation is organized into:
+
+- `docs/getting-started/` for installation, first use, and configuration;
+- `docs/data/` for formats, representations, readers, and writers;
+- `docs/guides/` for task-oriented workflows;
+- `docs/extensions/` for custom distance and reader development; and
+- `docs/reference/` for options, registries, schemas, outputs, and persistence contracts.
+
+### Getting started
+
+- [Installation](docs/getting-started/Installation.md)
+- [Quick Start](docs/getting-started/Quick_Start.md)
+- [Configuration](docs/getting-started/Configuration.md)
+
+### Data
+
+- [Data Formats](docs/data/Data_Formats.md)
+- [Dataset Representations](docs/data/Dataset_Representations.md)
+- [Readers](docs/data/Readers.md)
+- [Writers](docs/data/Writers.md)
+
+### Guides
+
+- [Classification](docs/guides/Classification.md)
+- [Regression](docs/guides/Regression.md)
+- [Imputation](docs/guides/Imputation.md)
+- [Outlier Scoring](docs/guides/Outlier_Scoring.md)
+- [OOD Scoring](docs/guides/OOD_Scoring.md)
+- [Standardization](docs/guides/Standardization.md)
+- [Eager and Lazy Data](docs/guides/Eager_and_Lazy_Data.md)
+- [Parallelism and Reproducibility](docs/guides/Parallelism_and_Reproducibility.md)
+
+### Extensions
+
+- [Custom Distances](docs/extensions/Custom_Distances.md)
+- [Custom Readers](docs/extensions/Custom_Readers.md)
+
+### Reference
+
+- [Configuration Reference](docs/reference/Configuration_Reference.md)
+- [CLI Reference](docs/reference/CLI_Reference.md)
+- [Distances](docs/reference/Distances.md)
+- [Missing Values](docs/reference/Missing_Values.md)
+- [Outputs](docs/reference/Outputs.md)
+- [Imputed-Only Output](docs/reference/Imputed_Only_Output.md)
+- [Model Persistence](docs/reference/Model_Persistence.md)
+
+## Research citation
+
+If you use PFGAP in research, cite the publication relevant to the functionality used.
+
+- Ben Shaw, Jake S. Rhodes, Soukaina Filali Boubrahimi, and Kevin R. Moon. **Forest Proximities for Time Series.** IntelliSys 2025. [arXiv:2410.03098](https://arxiv.org/abs/2410.03098)
+- Ben Shaw, Adam Rustad, Sofia Pelagalli Maia, Jake S. Rhodes, and Kevin R. Moon. **The Generalized Proximity Forest.** ACDSA 2026. [arXiv:2511.19487](https://arxiv.org/abs/2511.19487)
+
+## License
+
+See [LICENSE](LICENSE).

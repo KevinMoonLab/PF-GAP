@@ -8,38 +8,20 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/CustomPerFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/CustomPerFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/HDF5Reader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/HDF5Reader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/LongFormatParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/LongFormatParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NpyReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NpyReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericLongFormatReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericLongFormatReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ParquetColumnSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ParquetColumnSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/TSFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/TSFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/api/CustomReaderContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/api/CustomReaderContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/api/CustomSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/api/CustomSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/interop/JavaReaderLoader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/interop/JavaReaderLoader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/interop/JavaSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/interop/JavaSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/interop/LoadedCustomReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/interop/LoadedCustomReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileDelimitedReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileNumericDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileNumericDelimitedReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileNumericParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileNumericParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/StandardizingLazySeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/StandardizingLazySeriesReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../README.md" beforeDir="false" afterPath="$PROJECT_DIR$/../README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Classification.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Data_Format.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Distances.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Imputation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Outlier_Scores.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/Regression.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/User_Distances.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/User_Distances_with_Dependencies.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/compile_distances.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/compile_distances.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/user_distances_with_dependencies.zip" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/userdistances.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/userdistances/MyEuclideanDistance.java" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
