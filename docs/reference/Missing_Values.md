@@ -98,7 +98,7 @@ PFGAP supports two principal ways to handle missing features:
 
 The selected reader, observation representation, and distance set must support the chosen strategy.
 
-# Imputation
+## Imputation
 
 ## Training-data imputation
 
@@ -221,7 +221,7 @@ Direct Java form:
 
 See [Imputation](../guides/Imputation.md) for complete workflows and examples.
 
-# Missing-aware distances
+## Missing-aware distances
 
 The distances accepted for missing-aware proximity-first initialization are:
 
@@ -269,7 +269,7 @@ Do not assume that an ordinary distance accepts `NaN` merely because it belongs 
 
 See [Distances](Distances.md) for dimensionality and representation compatibility.
 
-# Missingness and observation representations
+## Missingness and observation representations
 
 ## One-dimensional numeric observations
 
@@ -292,7 +292,7 @@ Missingness and variable length are different concepts. A shorter sequence does 
 
 Do not pad variable-length observations with missing tokens unless the intended data contract explicitly treats those padded positions as missing observations.
 
-# Complete imputed output
+## Complete imputed output
 
 Request a complete imputed training dataset with:
 
@@ -320,7 +320,7 @@ A complete imputed dataset contains both:
 
 The output layout depends on the supported writer selected by the application workflow. See [Outputs](Outputs.md) and [Writers](../data/Writers.md).
 
-# Imputed-only output
+## Imputed-only output
 
 PFGAP can write only the final values at originally missing coordinates in Matrix Market `.mtx` format.
 
@@ -354,7 +354,7 @@ The option names retain `csr`, while the supported file representation is Matrix
 
 The output includes entries for originally missing coordinates even when the final imputed value is exactly zero. See [Imputed-Only Output](Imputed_Only_Output.md) for matrix shape, coordinate conventions, and companion metadata.
 
-# Standardization and missing values
+## Standardization and missing values
 
 Standardization applies to supported observed numeric values according to the selected method and scope. Missing-value recognition and imputation are configured separately.
 
@@ -362,7 +362,7 @@ Reusable `global` and `per_dimension` statistics are fitted from training data o
 
 When training data are standardized, use the same fitted reusable statistics during later evaluation. See [Standardization](../guides/Standardization.md).
 
-# Reader compatibility
+## Reader compatibility
 
 Missing-value support depends on the selected reader and representation.
 
@@ -375,7 +375,7 @@ A compatible reader must:
 
 Some readers can return observations containing missing values but do not support iterative mutation or complete imputed-data output. Consult [Readers](../data/Readers.md) before selecting a reader for an imputation workflow.
 
-# Classification, regression, and scoring
+## Classification, regression, and scoring
 
 ## Classification
 
@@ -393,7 +393,7 @@ Isolation workflows can use supported missing-data handling without class labels
 
 Evaluation observations must be transformed and handled consistently with the saved model. If training used imputation or fitted standardization statistics, later OOD evaluation must use the corresponding data contract and preprocessing artifacts.
 
-# Unsupported cases
+## Unsupported cases
 
 The following are not supported by the missing-feature workflow:
 
@@ -405,7 +405,7 @@ The following are not supported by the missing-feature workflow:
 - iterative imputation through a reader that does not support the required materialization or mutation; and
 - treating absent variable-length positions as automatically missing.
 
-# Common problems
+## Common problems
 
 ## Missing tokens are parsed as ordinary values
 
@@ -460,7 +460,7 @@ Configure the union of tokens required by the datasets, and use each token consi
 
 Reuse the fitted training statistics for `global` or `per_dimension` standardization. Do not fit reusable statistics independently from evaluation data.
 
-# Related documentation
+## Related documentation
 
 - [Imputation](../guides/Imputation.md)
 - [Distances](Distances.md)

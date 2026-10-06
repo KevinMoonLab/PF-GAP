@@ -1,0 +1,27 @@
+{
+  "name": "pfgap-documentation-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Static documentation website for PFGAP, built from the canonical Markdown files under ../docs.",
+  "scripts": {
+    "sync:docs": "node scripts/sync-docs.mjs",
+    "dev": "npm run sync:docs && vite",
+    "build": "npm run sync:docs && vite build && node scripts/create-pages-fallback.mjs",
+    "preview": "vite preview",
+    "check": "node scripts/check-docs.mjs"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.16",
+    "highlight.js": "^11.11.0",
+    "marked": "^18.0.13",
+    "marked-highlight": "^2.2.4"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}
