@@ -1,6 +1,8 @@
 # PFGAP
 
-PFGAP is a Java-based framework and command-line application for Proximity Forest learning and proximity-based analysis on time series and structured data. It extends the Proximity Forest family with generalized proximities, classification and regression, iterative imputation, outlier and out-of-distribution scoring, multivariate and unequal-length data support, flexible dataset readers, and extensible distance functions.
+PFGAP is a Java-based framework and command-line application for Proximity Forest learning and proximity-based analysis on time series and structured data. It extends the Proximity Forest family with generalized proximities, classification and regression, iterative imputation, outlier and out-of-distribution scoring, multivariate and unequal-length data support, flexible dataset readers, and extensible distance functions. 
+
+**[Documentation](https://kevinmoonlab.github.io/PF-GAP/)** · **[Quick Start](https://kevinmoonlab.github.io/PF-GAP/getting-started/quick-start)** .
 
 > **Project status:** PFGAP is under active development toward version 1.0. Compatibility-sensitive workflows should retain the PFGAP revision, Java runtime, preprocessing artifacts, external extension artifacts, and configuration used by an experiment.
 

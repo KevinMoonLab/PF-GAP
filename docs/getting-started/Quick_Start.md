@@ -66,10 +66,10 @@ Create `quick-start-data/train.csv` with the following contents:
 Create `quick-start-data/test.csv` with the following contents:
 
 ```csv
-A,0.1,0.1,0.2,0.2,0.1
-A,0.0,0.2,0.2,0.1,0.0
-B,0.9,0.9,0.8,0.8,0.9
-B,1.0,0.8,0.8,0.9,1.0
+1,0.1,0.1,0.2,0.2,0.1
+1,0.0,0.2,0.2,0.1,0.0
+2,0.9,0.9,0.8,0.8,0.9
+2,1.0,0.8,0.8,0.9,1.0
 ```
 
 Each row has this structure:
