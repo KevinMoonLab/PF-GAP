@@ -968,7 +968,7 @@ Before launching a PFGAP workflow, verify:
 
 ## 26. Related documentation
 
-- [Documentation home](index.md)
+- [Documentation home](../index.md)
 - [Data Formats](Data_Formats.md)
 - [Readers](Readers.md)
 - `Distances.md`

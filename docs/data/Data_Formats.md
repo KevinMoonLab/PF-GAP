@@ -599,7 +599,7 @@ Numeric readers convert supported missing entries to primitive `NaN`. Generic re
 
 PFGAP also records which positions were originally missing when required for imputation and imputed-only output. Replacing a missing value does not erase its original-missing status.
 
-See [Missing Values](Missing_Values.md) for the complete missingness contract.
+See [Missing Values](../reference/Missing_Values.md) for the complete missingness contract.
 
 ## 14. IDs, names, and observation order
 
@@ -838,7 +838,7 @@ This format overview should remain conceptual. Exact support claims belong in th
 - [Dataset Representations](Dataset_Representations.md)
 - [Readers](Readers.md)
 - [Writers](Writers.md)
-- [Missing Values](Missing_Values.md)
+- [Missing Values](../reference/Missing_Values.md)
 - [Configuration](../getting-started/Configuration.md)
 - [Eager and Lazy Data](../guides/Eager_and_Lazy_Data.md)
 - [Outputs](../reference/Outputs.md)

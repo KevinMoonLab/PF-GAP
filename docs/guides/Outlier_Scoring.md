@@ -7,7 +7,7 @@ PFGAP provides two distinct outlier-scoring workflows:
 
 These workflows use different forest modes, different information, and different interpretations. Isolation scoring is the primary workflow in this guide.
 
-## Prerequisites
+### Prerequisites
 
 Before following this guide:
 
@@ -18,7 +18,7 @@ Before following this guide:
 
 Use `Application/PFGAP.jar` and `Application/PF_wrapper.py` from the same PFGAP revision.
 
-## Choose the scoring workflow
+### Choose the scoring workflow
 
 Use **isolation mode** when:
 
@@ -34,15 +34,15 @@ Use **supervised classification outlier scoring** when:
 
 Do not compare isolation scores and supervised classification outlier scores as though they were the same quantity.
 
-# Unsupervised isolation scoring
+## Unsupervised isolation scoring
 
-## Isolation data
+### Isolation data
 
 Isolation mode operates on observations without using class labels to define splits or outlier scores. The selected observation representation, reader, distances, missing-value handling, and standardization settings must still be compatible.
 
 If the physical input contains a target column because it shares a layout with another task, configure the reader consistently. The target is not used as a class label by the isolation forest.
 
-## Train an isolation forest
+### Train an isolation forest
 
 Set:
 
@@ -58,7 +58,7 @@ Direct Java form:
 
 The Python helper automatically selects the isolation purity setting when `forest_mode="isolation"` is used with its default purity argument.
 
-### Python helper
+#### Python helper
 
 Run the script from `Application/` when using the standard repository layout:
 
@@ -94,7 +94,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-### Direct Java
+#### Direct Java
 
 Create the output directory before direct execution:
 
@@ -133,9 +133,9 @@ java -Xmx4g -jar Application/PFGAP.jar \
   -verbosity=1
 ```
 
-## Isolation settings
+### Isolation settings
 
-### Number of trees
+#### Number of trees
 
 Python:
 
@@ -151,7 +151,7 @@ Direct Java:
 
 Increasing the number of trees increases training and scoring work and may increase the size of saved models and optional outputs.
 
-### Candidate split configurations
+#### Candidate split configurations
 
 Python:
 
@@ -167,7 +167,7 @@ Direct Java:
 
 This controls the number of candidate distance configurations considered at each split.
 
-### Number of branches
+#### Number of branches
 
 Python:
 
@@ -183,7 +183,7 @@ Direct Java:
 
 This controls the number of branches created by an isolation split.
 
-### Minimum leaf size
+#### Minimum leaf size
 
 Python:
 
@@ -199,7 +199,7 @@ Direct Java:
 
 This controls the minimum leaf size used by isolation trees.
 
-### Isolation purity
+#### Isolation purity
 
 Isolation mode uses:
 
@@ -215,7 +215,7 @@ Direct Java form:
 
 When the Python helper receives `forest_mode="isolation"` with its default `purity="gini"`, it replaces that default with `isolation_path_length`.
 
-### Bootstrap sampling
+#### Bootstrap sampling
 
 Python:
 
@@ -231,7 +231,7 @@ Direct Java:
 
 Bootstrap sampling controls whether individual trees are trained from bootstrap samples of the training observations.
 
-## Select distances
+### Select distances
 
 Isolation trees use the configured candidate distances when constructing splits. To supply an explicit set:
 
@@ -249,7 +249,7 @@ The selected distances must support the observation representation, dimensionali
 
 See [Distances](../reference/Distances.md) for supported measures and compatibility requirements.
 
-## One-dimensional and multivariate data
+### One-dimensional and multivariate data
 
 For tabular vectors or univariate sequences:
 
@@ -284,7 +284,7 @@ dimension_selection_strategy="SQRT"
 
 See [Dataset Representations](../data/Dataset_Representations.md) and the [Configuration Reference](../reference/Configuration_Reference.md).
 
-## Isolation outputs
+### Isolation outputs
 
 Request isolation predictions with:
 
@@ -312,7 +312,7 @@ Direct Java form:
 
 The exact output files, score fields, ordering, and numeric interpretation are documented in [Outputs](../reference/Outputs.md). Use a consistent PFGAP revision when comparing scores across runs.
 
-## Score additional data with a saved isolation model
+### Score additional data with a saved isolation model
 
 Save the model during training:
 
@@ -323,7 +323,7 @@ model_name="isolation_model"
 
 Then apply it to new observations.
 
-### Python helper
+#### Python helper
 
 ```python
 import PF_wrapper as PF
@@ -350,7 +350,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-### Direct Java
+#### Direct Java
 
 Create the output directory, then run:
 
@@ -377,7 +377,7 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 The current evaluation interface supplies the evaluation data through both `-train` and `-test`. The Python helper performs the same mapping.
 
-## Missing feature values
+### Missing feature values
 
 Isolation data may contain supported missing feature values. Handle them through:
 
@@ -386,7 +386,7 @@ Isolation data may contain supported missing feature values. Handle them through
 
 See [Imputation](Imputation.md) and [Missing Values](../reference/Missing_Values.md).
 
-## Standardization
+### Standardization
 
 Standardization can be enabled for supported numeric representations:
 
@@ -399,7 +399,7 @@ save_standardization_stats=True
 
 Training statistics are fitted from the training data and reused when the saved isolation model scores later data. See [Standardization](Standardization.md).
 
-# Supervised classification outlier scores
+## Supervised classification outlier scores
 
 PFGAP also supports Breiman-style supervised outlier scores for classification training data. This is separate from isolation mode.
 
@@ -412,9 +412,9 @@ Supervised classification outlier scoring:
 
 An observation receives its score relative to other training observations in the same class. The result therefore measures within-class unusualness rather than label-free isolation.
 
-## Request supervised training outlier scores
+### Request supervised training outlier scores
 
-### Python helper
+#### Python helper
 
 ```python
 import PF_wrapper as PF
@@ -439,7 +439,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-### Direct Java
+#### Direct Java
 
 ```bash
 java -Xmx4g -jar Application/PFGAP.jar \
@@ -461,15 +461,15 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 Create `output/classification_outliers/` before the direct Java run.
 
-## Supervised score output
+### Supervised score output
 
 The supervised score output is associated with the training observations and their integer class labels. The score file name, columns, ordering, and normalization are documented in [Outputs](../reference/Outputs.md).
 
 `return_training_outlier_scores` does not switch the forest into isolation mode. It adds supervised outlier output to a classification training run.
 
-# Isolation scores versus supervised scores
+## Isolation scores versus supervised scores
 
-## Isolation mode
+### Isolation mode
 
 - Forest mode: `isolation`
 - Labels required: no
@@ -477,7 +477,7 @@ The supervised score output is associated with the training observations and the
 - Applicable data: training data and later data scored by a saved isolation model
 - Main settings: `isolation_num_branches`, `isolation_min_leaf_size`, and `isolation_path_length`
 
-## Supervised classification scoring
+### Supervised classification scoring
 
 - Forest mode: `classification`
 - Labels required: yes
@@ -487,7 +487,7 @@ The supervised score output is associated with the training observations and the
 
 Choose one according to the meaning required by the task. Enabling supervised training outlier output is not an alternative spelling for isolation mode.
 
-## Reproducible scoring
+### Reproducible scoring
 
 Record:
 
@@ -510,9 +510,9 @@ Also preserve:
 
 See [Parallelism and Reproducibility](Parallelism_and_Reproducibility.md).
 
-## Common problems
+### Common problems
 
-### Isolation mode is not selected
+#### Isolation mode is not selected
 
 Set:
 
@@ -526,31 +526,31 @@ or:
 -forest_mode=isolation
 ```
 
-### Supervised outlier scores are requested in isolation mode
+#### Supervised outlier scores are requested in isolation mode
 
 Use `return_training_outlier_scores=True` with `forest_mode="classification"`. Isolation mode produces its own unsupervised scores.
 
-### Supervised scoring has no class labels
+#### Supervised scoring has no class labels
 
 Provide one integer class label for every training observation. See [Classification](Classification.md).
 
-### A selected distance is incompatible
+#### A selected distance is incompatible
 
 Check support for the observation dimensionality, representation, numeric or generic type, variable length, and missing values. See [Distances](../reference/Distances.md).
 
-### New data are parsed differently from isolation training data
+#### New data are parsed differently from isolation training data
 
 Use compatible reader, dimensionality, numeric storage, separators, feature ordering, standardization, and missing-value settings.
 
-### The saved isolation model cannot be found
+#### The saved isolation model cannot be found
 
 Use the model path produced by the training run. Relative paths are resolved from the current working directory.
 
-### Python and direct Java runs differ
+#### Python and direct Java runs differ
 
 Compare the effective option values, working directory, resolved paths, input order, seed, worker count, and PFGAP revision.
 
-## Next steps
+### Next steps
 
 - Read [OOD Scoring](OOD_Scoring.md) for evaluation-time distribution-shift scoring from split-distance support.
 - Read [Classification](Classification.md) for supervised classification workflows.

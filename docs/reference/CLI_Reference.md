@@ -117,12 +117,12 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 The current saved-model evaluation path receives the evaluation data through both `-train` and `-test`.
 
-# Execution and paths
+## Execution and paths
 
 ## `-eval`
 
-**Type:** Boolean  
-**Default:** Set by the invoking workflow  
+**Type:** Boolean
+**Default:** Set by the invoking workflow
 **Values:** `false` for training; `true` for saved-model evaluation
 
 ```text
@@ -131,196 +131,196 @@ The current saved-model evaluation path receives the evaluation data through bot
 
 ## `-train`
 
-**Type:** Path  
+**Type:** Path
 **AppContext default:** `Data/GunPoint_TRAIN.tsv` under the working directory
 
 Training input during training. During saved-model evaluation, identify the evaluation input here and through `-test`.
 
 ## `-test`
 
-**Type:** Path or `None`  
+**Type:** Path or `None`
 **AppContext default:** `Data/GunPoint_TEST.tsv` under the working directory
 
 Optional test or validation input. `None` disables the test input.
 
 ## `-train_labels`
 
-**Type:** Path or `None`  
+**Type:** Path or `None`
 **Default:** `None`
 
 Separate training labels or targets.
 
 ## `-test_labels`
 
-**Type:** Path or `None`  
+**Type:** Path or `None`
 **Default:** `None`
 
 Separate test or evaluation labels or targets. Supplying a non-`None` path also sets `exists_testlabels` to true.
 
 ## `-exists_testlabels`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Indicates whether known test or evaluation labels or targets are available. A supplied `-test_labels` path takes precedence and keeps this setting true.
 
 ## `-out`
 
-**Type:** Directory path  
+**Type:** Directory path
 **Default:** `output/`
 
 Destination directory for generated artifacts. Create the directory before direct Java execution where required.
 
 ## `-modelname`
 
-**Type:** Model name or saved-model path  
+**Type:** Model name or saved-model path
 **Default:** `Thor`
 
 Names a model during training and identifies the saved model during evaluation.
 
 ## `-savemodel`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Saves the trained model.
 
 ## `-repeats`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Number of experiment repetitions.
 
 ## `-export`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Artifact export level. Current application levels are `0`, `1`, and `2`.
 
 ## `-verbosity`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `0`
 
 Console-reporting level. Current application levels are `0`, `1`, and `2`.
 
-# Task selection
+## Task selection
 
 ## `-forest_mode`
 
-**Type:** Enumerated string  
-**Default:** `classification`  
+**Type:** Enumerated string
+**Default:** `classification`
 **Values:** `classification`, `regression`, `isolation`
 
 Selects the forest task and synchronizes the legacy regression flag.
 
 ## `-isRegression`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Legacy regression selector. Prefer `-forest_mode=regression` for new commands.
 
 ## `-purity_measure`
 
-**Type:** String  
+**Type:** String
 **Default:** `gini`
 
 Selects the purity or split objective. Task guides use `gini` for classification, `variance` for regression, and `isolation_path_length` for isolation.
 
 ## `-purity_threshold`
 
-**Type:** Floating-point value  
+**Type:** Floating-point value
 **Default:** `1e-6`
 
 Purity stopping threshold.
 
 ## `-voting`
 
-**Type:** String  
+**Type:** String
 **Default:** `mean`
 
 Tree-prediction aggregation used by regression.
 
 ## `-regression_num_branches`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `2`
 
 Number of branches used by regression splits.
 
 ## `-isolation_num_branches`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `2`
 
 Number of branches used by isolation splits.
 
 ## `-isolation_min_leaf_size`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Minimum isolation-tree leaf size.
 
-# Forest structure and randomness
+## Forest structure and randomness
 
 ## `-trees`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `11`
 
 Number of trees.
 
 ## `-r`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Number of candidate distance configurations considered at each split.
 
 ## `-on_tree`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `true`
 
 Controls random distance-measure selection per node through the existing application setting.
 
 ## `-max_depth`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `0`
 
 Maximum tree-depth setting.
 
 ## `-bootstrap_trees`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `true`
 
 Enables bootstrap sampling for individual trees.
 
 ## `-shuffle`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Shuffles the dataset for the invocation.
 
 ## `-seed`
 
-**Type:** Long integer  
+**Type:** Long integer
 **Default:** No explicit seed
 
 Initializes the application random-number generator.
 
-# Parallel execution
+## Parallel execution
 
 ## `-num_workers`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Accepted values:
@@ -333,7 +333,7 @@ Zero and values below `-1` are invalid.
 
 ## `-use_vector_api`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Enables supported Vector API execution. When true, launch Java with the incubator vector module:
@@ -344,106 +344,106 @@ java --add-modules=jdk.incubator.vector -Xmx4g -jar Application/PFGAP.jar ...
 
 See [Parallelism and Reproducibility](../guides/Parallelism_and_Reproducibility.md).
 
-# Reader selection
+## Reader selection
 
 ## `-reader_type`
 
-**Type:** `ReaderType` name  
+**Type:** `ReaderType` name
 **Default:** `DELIMITED`
 
 Common reader type for training and test data. Reader names are case-insensitive because input is normalized to uppercase.
 
 ## `-train_reader_type`
 
-**Type:** `ReaderType` name or blank  
+**Type:** `ReaderType` name or blank
 **Default:** No override
 
 Overrides `-reader_type` for training data.
 
 ## `-test_reader_type`
 
-**Type:** `ReaderType` name or blank  
+**Type:** `ReaderType` name or blank
 **Default:** No override
 
 Overrides `-reader_type` for test data.
 
 ## `-file_pattern`
 
-**Type:** String or `None`  
+**Type:** String or `None`
 **Default:** `None`
 
 Common file-discovery pattern for compatible multi-file readers.
 
 ## `-train_file_pattern`
 
-**Type:** String or `None`  
+**Type:** String or `None`
 **Default:** `None`
 
 Training-specific file pattern.
 
 ## `-test_file_pattern`
 
-**Type:** String or `None`  
+**Type:** String or `None`
 **Default:** `None`
 
 Test-specific file pattern.
 
 ## `-id_column`
 
-**Type:** Column name or `None`  
+**Type:** Column name or `None`
 **Default:** `None`
 
 Instance identifier column for compatible long-form readers.
 
 ## `-time_column`
 
-**Type:** Column name or `None`  
+**Type:** Column name or `None`
 **Default:** `None`
 
 Time or order column for compatible long-form readers.
 
 ## `-feature_columns`
 
-**Type:** Comma-separated string list  
+**Type:** Comma-separated string list
 **Default:** Empty list
 
 Feature columns for compatible readers.
 
 ## `-label_columns`
 
-**Type:** Comma-separated string list  
+**Type:** Comma-separated string list
 **Default:** Empty list
 
 Label or target columns for compatible readers.
 
 ## `-hdf5_dataset_path`
 
-**Type:** HDF5 dataset path  
+**Type:** HDF5 dataset path
 **Default:** `/X`
 
 Feature dataset location for HDF5 readers.
 
 ## `-hdf5_label_dataset_path`
 
-**Type:** HDF5 dataset path  
+**Type:** HDF5 dataset path
 **Default:** `/y`
 
 Label dataset location for HDF5 readers.
 
 Reader names, layouts, eager or lazy behavior, and required companion options are documented in [Readers](../data/Readers.md).
 
-# Custom readers
+## Custom readers
 
 ## `-custom_reader_descriptor`
 
-**Type:** Descriptor string or `None`  
+**Type:** Descriptor string or `None`
 **Default:** `None`
 
 Identifies a custom reader implementation.
 
 ## `-custom_reader_parameters`
 
-**Type:** Semicolon-separated assignments  
+**Type:** Semicolon-separated assignments
 **Default:** Empty map
 
 Format:
@@ -456,32 +456,32 @@ Blank names and duplicate names are rejected. Each entry must contain an equals 
 
 ## `-custom_reader_thread_safe`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Declares whether the custom reader supports concurrent calls.
 
 See [Custom Readers](../extensions/Custom_Readers.md).
 
-# Observation representation
+## Observation representation
 
 ## `-is2D`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 `false` selects one-dimensional observations. `true` selects two-dimensional observations.
 
 ## `-isNumeric`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `true`
 
 Selects numeric or supported generic observations.
 
 ## `-numeric_storage`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** `auto`
 
 Canonical values:
@@ -506,45 +506,45 @@ fp64
 
 ## `-entry_separator`
 
-**Type:** String  
+**Type:** String
 **Default:** Tab
 
 Entry delimiter for compatible text readers. To pass an escaped tab through a shell, use the form required by that shell and reader.
 
 ## `-array_separator`
 
-**Type:** String  
+**Type:** String
 **Default:** `:`
 
 Nested-array delimiter for compatible two-dimensional delimited layouts.
 
 ## `-csv_has_header`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Indicates that compatible delimited input contains a header row.
 
 ## `-target_column`
 
-**Type:** Enumerated string  
-**Default:** `first`  
+**Type:** Enumerated string
+**Default:** `first`
 **Values:** `first`, `last`
 
 Position of an embedded target in supported delimited input.
 
-# Dimension selection
+## Dimension selection
 
 ## `-subsample_dimensions`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Enables node-level dimension subsampling.
 
 ## `-dimension_selection_strategy`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** `ALL`
 
 Values:
@@ -561,25 +561,25 @@ Input is normalized to uppercase.
 
 ## `-dimension_selection_count`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `1`
 
 Positive count required by `FIXED_COUNT` when dimension subsampling is active.
 
 ## `-dimension_selection_proportion`
 
-**Type:** Floating-point value  
+**Type:** Floating-point value
 **Default:** `1.0`
 
 Finite proportion in `(0, 1]` required by `PROPORTION` when dimension subsampling is active.
 
 Strategy-specific numeric settings are ignored when subsampling is disabled or the strategy is `ALL`.
 
-# Distances
+## Distances
 
 ## `-distances`
 
-**Type:** Bracketed distance list  
+**Type:** Bracketed distance list
 **Default:** No user distance list
 
 ```text
@@ -625,7 +625,7 @@ The referenced file must exist when the arguments are parsed. See [Custom Distan
 
 ## `-knn_distances`
 
-**Type:** Bracketed distance list  
+**Type:** Bracketed distance list
 **Default:** No KNN distance list
 
 Distances used by the KNN initial imputer:
@@ -638,7 +638,7 @@ KNN initialization requires at least one entry.
 
 ## `-missing_proximity_distances`
 
-**Type:** Bracketed distance list  
+**Type:** Bracketed distance list
 **Default:** No missing-aware list
 
 Allowed values:
@@ -653,18 +653,18 @@ dtwarow_d
 
 Used by proximity-first imputation initialization.
 
-# Proximities
+## Proximities
 
 ## `-getprox`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests supported proximity output.
 
 ## `-proximity_type`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** `PFGAP`
 
 Values:
@@ -677,18 +677,18 @@ DEPTH_WEIGHTED
 
 Input is normalized to uppercase.
 
-# Missing values
+## Missing values
 
 ## `-hasMissingValues`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Declares that the workflow contains or handles missing feature values.
 
 ## `-MissingStrings`
 
-**Type:** Bracketed string list  
+**Type:** Bracketed string list
 **Default:** Set by the caller
 
 Example:
@@ -701,32 +701,32 @@ The leading empty entry represents an empty field.
 
 See [Missing Values](Missing_Values.md).
 
-# Imputation
+## Imputation
 
 ## `-perform_train_imputation`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Performs training-data imputation.
 
 ## `-perform_test_imputation`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Performs test or evaluation-data imputation.
 
 ## `-numImputes`
 
-**Type:** Integer  
+**Type:** Integer
 **Default:** `0`
 
 Number of iterative proximity-imputation updates.
 
 ## `-imputation_initialization`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** `impute_first`
 
 Values:
@@ -740,7 +740,7 @@ proximity_first
 
 ## `-initial_imputer`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** Mean imputer
 
 Values:
@@ -760,7 +760,7 @@ knn
 
 ## `-gap_update`
 
-**Type:** Enumerated string  
+**Type:** Enumerated string
 **Default:** Derived when omitted
 
 Values:
@@ -774,60 +774,60 @@ This option synchronizes the older `DTWImpute` flag.
 
 ## `-DTWImpute`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Compatibility flag for DTW-aligned updates. Prefer `-gap_update=dtw_alignment` in new commands.
 
 ## `-impute_train`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests complete imputed training-data output.
 
 ## `-impute_test`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests complete imputed test-data output.
 
 ## `-output_train_imputed_csr`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests imputed-only training values in Matrix Market `.mtx` form. This also enables training imputation and missing-value handling.
 
 ## `-output_test_imputed_csr`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests imputed-only test values in Matrix Market `.mtx` form. This also enables test imputation and missing-value handling.
 
 ## `-train_imputed_csr_file`
 
-**Type:** Path or `None`  
+**Type:** Path or `None`
 **Default:** `training_imputed_values.mtx`
 
 Output path for imputed-only training values.
 
 ## `-test_imputed_csr_file`
 
-**Type:** Path or `None`  
+**Type:** Path or `None`
 **Default:** `testing_imputed_values.mtx`
 
 Output path for imputed-only test values.
 
 See [Imputation](../guides/Imputation.md) and [Imputed-Only Output](Imputed_Only_Output.md).
 
-# Standardization
+## Standardization
 
 ## `-standardization`
 
-**Type:** Standardization method  
+**Type:** Standardization method
 **Default:** `none`
 
 Implemented methods:
@@ -843,7 +843,7 @@ Accepted aliases are documented in [Standardization](../guides/Standardization.m
 
 ## `-standardization_scope`
 
-**Type:** Standardization scope  
+**Type:** Standardization scope
 **Default:** `per_dimension`
 
 Values:
@@ -857,7 +857,7 @@ per_series_per_dimension
 
 ## `-standardization_variance`
 
-**Type:** Variance convention  
+**Type:** Variance convention
 **Default:** `population`
 
 Values:
@@ -869,60 +869,60 @@ sample
 
 ## `-standardization_stats`
 
-**Type:** JSON path or `None`  
+**Type:** JSON path or `None`
 **Default:** `None`
 
 Loads reusable statistics for `global` or `per_dimension` standardization.
 
 ## `-save_standardization_stats`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Saves newly fitted reusable statistics.
 
 ## `-standardization_stats_output`
 
-**Type:** JSON path or `None`  
+**Type:** JSON path or `None`
 **Default:** `None`
 
 Optional path for saved fitted statistics.
 
 The complete standardization constraints are documented in [Standardization](../guides/Standardization.md).
 
-# Prediction, scoring, and enhanced output
+## Prediction, scoring, and enhanced output
 
 ## `-get_predictions`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests ordinary aggregate prediction artifacts.
 
 ## `-return_enhanced_outputs`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests structured per-instance prediction details.
 
 ## `-get_training_outlier_scores`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests Breiman-style supervised training outlier scores from a classification run. This does not select isolation mode.
 
 ## `-return_ood_scores`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Requests evaluation-time OOD output. OOD output is independent of ordinary predictions and enhanced prediction details.
 
 ## `-ood_score_type`
 
-**Type:** OOD scorer name  
+**Type:** OOD scorer name
 **Default:** `relative_support_exceedance`
 
 Current value:
@@ -933,14 +933,14 @@ relative_support_exceedance
 
 ## `-collect_split_distance_summaries`
 
-**Type:** Boolean  
+**Type:** Boolean
 **Default:** `false`
 
 Retains branch-local distance summaries during training so the saved model can support distance-based OOD scoring.
 
 See [Outlier Scoring](../guides/Outlier_Scoring.md), [OOD Scoring](../guides/OOD_Scoring.md), and [Outputs](Outputs.md).
 
-# Option relationships
+## Option relationships
 
 ## Training and evaluation
 
@@ -992,7 +992,7 @@ Training reader selection uses `-train_reader_type` when present, otherwise `-re
 
 Training and test file patterns follow the same override rule.
 
-# Rejected and unavailable options
+## Rejected and unavailable options
 
 ## `-jvmwarmup`
 
@@ -1016,7 +1016,7 @@ Use `-num_workers` for the shared worker budget.
 
 Any option not matched by the parser aborts with an invalid-command-line error.
 
-# Exit behavior and errors
+## Exit behavior and errors
 
 The application catches configuration and runtime exceptions at its main entry point and reports them through the application abort utility.
 
@@ -1038,7 +1038,7 @@ Common command-line errors include:
 - incompatible standardization settings; and
 - an invalid OOD score type.
 
-# Related documentation
+## Related documentation
 
 - [Configuration Reference](Configuration_Reference.md)
 - [Configuration](../getting-started/Configuration.md)

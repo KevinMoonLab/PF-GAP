@@ -57,7 +57,7 @@ model_repeat_2
 
 The internal repetition index is zero-based, but artifact suffixes and result-record repetition numbers are one-based.
 
-# Ordinary predictions
+## Ordinary predictions
 
 Request ordinary predictions with:
 
@@ -136,7 +136,7 @@ absolute_error = abs(residual)
 
 If a particular actual target is null while actual-target columns are present, `actual`, `residual`, and `absolute_error` are blank for that row.
 
-# Structured evaluation output
+## Structured evaluation output
 
 Structured output is written when enhanced prediction details, OOD output, or both are requested.
 
@@ -239,7 +239,7 @@ rows = PF.read_enhanced_output(
 
 Each row is returned as a dictionary using the CSV column names.
 
-# Outlier and isolation scores
+## Outlier and isolation scores
 
 PFGAP writes supervised classification outlier scores and unsupervised isolation scores through the score-writer layer, but they remain different computations.
 
@@ -317,7 +317,7 @@ Isolation-mode scores are produced by `forest_mode="isolation"`. Isolation outpu
 
 See [Outlier Scoring](../guides/Outlier_Scoring.md).
 
-# Proximity matrices
+## Proximity matrices
 
 Request proximity output with:
 
@@ -399,7 +399,7 @@ General storage is the default because a proximity matrix may be rectangular or 
 
 Sparse proximity storage rejects retained exact-zero entries. Unstored positions represent zero.
 
-# Complete imputed datasets
+## Complete imputed datasets
 
 Request complete imputed output with:
 
@@ -419,7 +419,7 @@ Complete imputed datasets contain both originally observed and final imputed val
 
 Exact filenames and layouts therefore depend on the selected reader/writer pair. See [Writers](../data/Writers.md).
 
-# Imputed-only Matrix Market output
+## Imputed-only Matrix Market output
 
 Request only final values at originally missing coordinates with:
 
@@ -446,7 +446,7 @@ The file uses Matrix Market coordinate format. Unlike sparse proximity storage, 
 
 See [Imputed-Only Output](Imputed_Only_Output.md).
 
-# Matrix Market formats
+## Matrix Market formats
 
 ## Coordinate general
 
@@ -472,7 +472,7 @@ Optional descriptions are emitted as `%` comment lines. All coordinates in Matri
 
 Matrix Market writers reject non-finite numeric values. Dense writers also reject ragged matrices and null rows.
 
-# Saved models
+## Saved models
 
 Request model persistence with:
 
@@ -492,7 +492,7 @@ The artifact path is recorded in the repetition result's `artifacts` map when av
 
 See [Model Persistence](Model_Persistence.md) for saved-state contents and compatibility.
 
-# Standardization statistics
+## Standardization statistics
 
 Request saved reusable statistics with:
 
@@ -514,7 +514,7 @@ Statistics output applies to reusable `global` and `per_dimension` scopes. Per-s
 
 The artifact path is included in experiment-result metadata when available. See [Standardization](../guides/Standardization.md).
 
-# Experiment results JSON
+## Experiment results JSON
 
 When `export_level >= 1`, PFGAP writes:
 
@@ -669,7 +669,7 @@ Only finite values contribute to aggregate metric, timing, and forest-statistic 
 
 Count maps are aggregated by converting the available count values to numeric summaries.
 
-# CSV format
+## CSV format
 
 PFGAP row-oriented CSV artifacts use:
 
@@ -729,7 +729,7 @@ Infinity
 
 A boxed null numeric value is written as an empty field.
 
-# File creation and replacement
+## File creation and replacement
 
 Current CSV, JSON, and Matrix Market writers:
 
@@ -740,13 +740,13 @@ Current CSV, JSON, and Matrix Market writers:
 
 Experiment results are pretty-printed JSON and include null fields and special floating-point values where present.
 
-# Legacy forest-result export
+## Legacy forest-result export
 
 `ProximityForestResult` retains a legacy `exportJSON(...)` method that writes a timestamped JSON serialization using a filename composed from the forest ID and a timestamp.
 
 The current coordinated experiment output is `experiment_results.json`, which stores compact repetition records and references large artifacts separately. New automation should use the coordinated output contract rather than rely on the legacy timestamped serialization.
 
-# Output availability by workflow
+## Output availability by workflow
 
 ## Training
 
@@ -790,7 +790,7 @@ export_level >= 1
 
 Individual artifact requests are controlled by their corresponding output options.
 
-# Common problems
+## Common problems
 
 ## An expected file is absent
 
@@ -832,7 +832,7 @@ Only finite values contribute to aggregate summaries. Inspect the corresponding 
 
 Use paths resolved beneath the configured output directory and inspect the artifact paths recorded in `experiment_results.json`.
 
-# Related documentation
+## Related documentation
 
 - [Configuration Reference](Configuration_Reference.md)
 - [CLI Reference](CLI_Reference.md)

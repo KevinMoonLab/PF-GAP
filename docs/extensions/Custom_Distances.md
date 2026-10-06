@@ -6,7 +6,7 @@ This guide covers the extension contracts, descriptor syntax, packaging, runtime
 
 For built-in distance identifiers and compatibility guidance, see [Distances](../reference/Distances.md).
 
-## Choose an extension type
+### Choose an extension type
 
 Use a custom Java distance when:
 
@@ -24,9 +24,9 @@ Use a Python or Maple distance when:
 
 Use a meta distance when observations should be compared through predictions from a pretrained classifier or regressor rather than directly in the original feature space.
 
-# Java distances
+## Java distances
 
-## Basic interface
+### Basic interface
 
 A basic custom Java distance implements:
 
@@ -42,7 +42,7 @@ The method receives the logical observation objects produced by the configured r
 
 The implementation is responsible for validating and casting the input representation it supports.
 
-## Minimal numeric-vector example
+### Minimal numeric-vector example
 
 ```java
 package example.distance;
@@ -87,7 +87,7 @@ public final class EuclideanDistance
 
 The class uses a public no-argument constructor so PFGAP can instantiate it reflectively.
 
-## Supporting float and double vectors
+### Supporting float and double vectors
 
 A custom distance can accept multiple primitive representations explicitly:
 
@@ -170,7 +170,7 @@ public final class NumericEuclideanDistance
 
 Do not assume that `numeric_storage=auto` always produces `double[]`. Source formats such as NPY can preserve `float32` data as `float[]` or `float[][]`.
 
-## Multivariate example
+### Multivariate example
 
 A multivariate distance receives a two-dimensional observation when the reader produces one:
 
@@ -228,7 +228,7 @@ public final class IndependentManhattanDistance
 
 Select a representation contract and document it with the custom implementation. A custom distance is not automatically compatible with every reader or array type.
 
-# Dimension-selectable Java distances
+## Dimension-selectable Java distances
 
 When node-level dimension subsampling is enabled, a custom Java distance must implement the dimension-selection-aware interface.
 
@@ -327,7 +327,7 @@ If dimension subsampling is enabled and a custom Java distance does not implemen
 
 For a one-dimensional tabular vector, selected dimensions correspond to feature positions. Do not use dimension subsampling to select time positions in an ordinary univariate series unless that is the intended data contract.
 
-# Java distances and deferred observations
+## Java distances and deferred observations
 
 PFGAP normally resolves deferred observation references before invoking a basic custom Java distance. The `DistanceFunction` implementation then receives the materialized observations.
 
@@ -349,7 +349,7 @@ Use the exact interface in the matching PFGAP JAR when implementing this extensi
 
 A selection-aware deferred custom-distance interface is not currently part of the public contract. When dimension subsampling is required, use materialized observations and implement `DimensionSelectableDistanceFunction`.
 
-# Missing values
+## Missing values
 
 A custom distance must define its own missing-value behavior.
 
@@ -367,7 +367,7 @@ Positive infinity is permitted when it is an intentional algorithm result, inclu
 
 A custom distance is not automatically accepted by `missing_proximity_distances`. Proximity-first initialization currently accepts only the registered built-in missing-compatible identifiers documented in [Distances](../reference/Distances.md).
 
-# Compile a Java distance
+## Compile a Java distance
 
 Assume this layout:
 
@@ -398,7 +398,7 @@ out/example/distance/EuclideanDistance.class
 
 A compiled class can be used directly when its loading arrangement is supported, but a JAR is normally easier to distribute and archive.
 
-# Build a standard JAR
+## Build a standard JAR
 
 Package the compiled class:
 
@@ -422,7 +422,7 @@ javadistance:/absolute/path/to/user-distances.jar:example.distance.EuclideanDist
 
 One JAR can contain multiple distance classes. Add one descriptor per class to the configured distance list.
 
-# Build with Maven
+## Build with Maven
 
 A minimal Maven project is:
 
@@ -482,7 +482,7 @@ The ordinary JAR is created under `target/`.
 
 `systemPath` is convenient for a local example but is not Maven's preferred dependency-management model. A reusable development setup can install or publish the PFGAP API artifact to a Maven repository instead.
 
-# Build a fat JAR
+## Build a fat JAR
 
 A fat JAR is useful when a custom distance depends on third-party libraries that should be distributed with it.
 
@@ -565,9 +565,9 @@ Do not shade PFGAP's own API classes into the extension JAR. The runtime should 
 
 If another dependency is not available from a configured repository, install it into a local Maven repository or use an appropriate organizational repository. Keep the complete dependency and version record with the experiment.
 
-# Configure Java distances
+## Configure Java distances
 
-## Python training example
+### Python training example
 
 ```python
 import PF_wrapper as PF
@@ -598,7 +598,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-## Direct Java example
+### Direct Java example
 
 ```bash
 java -Xmx4g -jar Application/PFGAP.jar \
@@ -614,7 +614,7 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 Quote the list argument when required by the shell.
 
-## Use built-in and custom distances together
+### Use built-in and custom distances together
 
 ```python
 distances=[
@@ -630,7 +630,7 @@ distances=[
 
 PFGAP selects among the configured candidates according to the ordinary splitter configuration.
 
-# Python distances
+## Python distances
 
 The descriptor form is:
 
@@ -674,7 +674,7 @@ distances=[
 
 The script path must exist when the command-line distance descriptors are parsed. Preserve the Python runtime, packages, script, and function name with the experiment.
 
-# Maple distances
+## Maple distances
 
 The descriptor form is:
 
@@ -698,7 +698,7 @@ distances=[
 
 The Maple source file, selected function, compatible Maple installation, and required packages are external model dependencies.
 
-# Meta distances
+## Meta distances
 
 Meta distances compare observations through outputs from a pretrained model or prediction source.
 
@@ -711,7 +711,7 @@ meta_regression
 meta_file_regression
 ```
 
-## Classification match
+### Classification match
 
 ```text
 meta_classmatch:/path/to/model_or_function[:method]
@@ -719,7 +719,7 @@ meta_classmatch:/path/to/model_or_function[:method]
 
 This family compares observations according to predicted classes or class-oriented pretrained-model behavior.
 
-## File-backed classification match
+### File-backed classification match
 
 ```text
 meta_file_classmatch:/path/to/predictions[:method]
@@ -727,7 +727,7 @@ meta_file_classmatch:/path/to/predictions[:method]
 
 This family uses a file-backed prediction source.
 
-## Regression
+### Regression
 
 ```text
 meta_regression:/path/to/model_or_function[:method]
@@ -735,7 +735,7 @@ meta_regression:/path/to/model_or_function[:method]
 
 This family compares numeric predictions from a pretrained regressor or regression function.
 
-## File-backed regression
+### File-backed regression
 
 ```text
 meta_file_regression:/path/to/predictions[:method]
@@ -745,7 +745,7 @@ This family uses file-backed numeric predictions.
 
 The referenced file must exist when descriptors are parsed. Retain prediction ordering and observation identity so values remain aligned with PFGAP instances.
 
-# Parameters and state
+## Parameters and state
 
 PFGAP's built-in elastic distances randomize candidate parameters through `DistanceMeasure`. A basic custom Java, Python, or Maple distance does not automatically participate in that built-in parameter-randomization machinery.
 
@@ -759,7 +759,7 @@ A custom implementation can:
 
 Avoid hidden nondeterministic parameter selection unless the implementation provides its own reproducibility contract.
 
-# KNN imputation
+## KNN imputation
 
 A custom distance descriptor can be supplied through `knn_distances` when the custom implementation supports the data representation used by the KNN initial imputer.
 
@@ -780,27 +780,27 @@ The current KNN initializer uses five neighbors.
 
 Custom distances are not accepted automatically as missing-aware proximity-first distances. Use the registered missing-compatible identifiers for `missing_proximity_distances`.
 
-# Model persistence
+## Model persistence
 
 A saved PFGAP model retains the selected forest state and custom-distance descriptors, but external implementations remain external dependencies.
 
-## Java JARs
+### Java JARs
 
 Before deserializing a model, PFGAP examines active `javadistance` descriptors and adds existing JAR paths to a custom class loader. Configure the descriptors and keep the required JARs available when loading the model.
 
 If the custom class is unavailable, deserialization can fail with a class-resolution error.
 
-## Python and Maple
+### Python and Maple
 
 The model does not embed a Python or Maple runtime, package environment, or source file. Preserve the interpreter installation, packages, scripts, and selected function names.
 
-## Meta distances
+### Meta distances
 
 Preserve the pretrained implementation, prediction files, method selection, observation ordering, and any external model artifacts.
 
 See [Model Persistence](../reference/Model_Persistence.md).
 
-# Reproducibility
+## Reproducibility
 
 Retain:
 
@@ -817,7 +817,7 @@ Retain:
 
 A custom implementation can have its own parallelism or random-number behavior. Document and preserve those settings as part of the extension.
 
-# Performance
+## Performance
 
 Java distances run in the PFGAP process and normally have the lowest interoperation overhead.
 
@@ -827,15 +827,15 @@ Custom Java distances should avoid allocating large temporary arrays for every c
 
 A custom distance used by multiple PFGAP workers must be safe under the runtime's evaluator-copy and invocation behavior. Do not depend on unsynchronized global mutable state.
 
-# Security
+## Security
 
 Custom JARs, Python scripts, Maple code, and meta-model integrations execute code or consume external artifacts under the PFGAP process's permissions.
 
 Use only trusted extensions and dependencies. Review the implementation before loading it, particularly when a saved model references external custom code.
 
-# Common problems
+## Common problems
 
-## The Java class cannot be found
+### The Java class cannot be found
 
 Check:
 
@@ -845,47 +845,47 @@ Check:
 - package spelling and capitalization; and
 - compatibility with the active PFGAP API.
 
-## The implementation does not implement `DistanceFunction`
+### The implementation does not implement `DistanceFunction`
 
 Compile against `distance.api.DistanceFunction` from the matching PFGAP JAR and implement its exact method signature.
 
-## A dependency class cannot be found
+### A dependency class cannot be found
 
 Use a fat JAR or otherwise provide the dependency to the extension class loader. Do not package duplicate PFGAP API classes into the extension JAR.
 
-## The distance receives an unexpected array type
+### The distance receives an unexpected array type
 
 Match the reader, dimensionality, numeric storage, and custom implementation. Support both `float` and `double` forms explicitly when needed.
 
-## Dimension subsampling fails
+### Dimension subsampling fails
 
 Implement `DimensionSelectableDistanceFunction`, or disable dimension subsampling for that custom distance.
 
-## A deferred dataset passes references unexpectedly
+### A deferred dataset passes references unexpectedly
 
 A basic custom distance normally receives materialized observations. If the implementation intentionally needs stored values and resolver control, implement the matching `LazyDistanceFunction` interface from the active PFGAP JAR.
 
-## The distance returns `NaN`
+### The distance returns `NaN`
 
 Correct the algorithm, inputs, missing-value policy, or numerical edge case. `NaN` is not an accepted distance result.
 
-## Proximity-first imputation rejects the custom distance
+### Proximity-first imputation rejects the custom distance
 
 Use one of the registered built-in missing-compatible distances for `missing_proximity_distances`.
 
-## A Python or Maple source file is not found
+### A Python or Maple source file is not found
 
 Use a path that resolves from the process working directory, or prefer an absolute path.
 
-## A saved model no longer loads
+### A saved model no longer loads
 
 Restore the original custom JARs, classes, scripts, dependencies, and descriptor paths. Use the PFGAP revision that created the model.
 
-## Results differ between machines
+### Results differ between machines
 
 Compare runtime versions, dependency versions, numeric storage, extension source, random behavior, worker count, preprocessing, and external model artifacts.
 
-## Related documentation
+### Related documentation
 
 - [Distances](../reference/Distances.md)
 - [Configuration Reference](../reference/Configuration_Reference.md)

@@ -9,9 +9,9 @@ A custom reader can be packaged in a separate JAR. Use a per-file plugin when on
 
 For built-in formats and representation rules, see [Readers](../data/Readers.md). For eager and deferred access behavior, see [Eager and Lazy Data](../guides/Eager_and_Lazy_Data.md).
 
-## Choose the extension level
+### Choose the extension level
 
-### Use `CustomSeriesReader` when
+#### Use `CustomSeriesReader` when
 
 - one source file represents one observation;
 - PFGAP can discover files from a directory and pattern;
@@ -19,7 +19,7 @@ For built-in formats and representation rules, see [Readers](../data/Readers.md)
 - the plugin only needs to parse one file into one observation; and
 - the same parser should support both eager and deferred materialization.
 
-### Implement `DatasetReader` directly when
+#### Implement `DatasetReader` directly when
 
 - one observation spans multiple files;
 - multiple observations share one proprietary container;
@@ -29,7 +29,7 @@ For built-in formats and representation rules, see [Readers](../data/Readers.md)
 - a one-dimensional custom representation is required; or
 - per-file coordination does not match the data source.
 
-# Custom per-file series plugins
+## Custom per-file series plugins
 
 A custom per-file plugin implements:
 
@@ -55,7 +55,7 @@ LAZY_PER_FILE_CUSTOM
 
 `PER_FILE_CUSTOM` invokes the plugin while the dataset is being built. `LAZY_PER_FILE_CUSTOM` stores references and invokes the plugin when an observation is requested.
 
-## Separate-JAR descriptor
+### Separate-JAR descriptor
 
 Package the implementation and its dependencies in a JAR, then identify the class with:
 
@@ -72,7 +72,7 @@ The implementation class must:
 
 Use an absolute JAR path when the working directory may vary. A relative path is resolved from the PFGAP process working directory.
 
-## Per-file observation contract
+### Per-file observation contract
 
 A custom per-file plugin must return a two-dimensional, dimension-major observation.
 
@@ -102,7 +102,7 @@ Object[]
 
 General and whole-dataset custom readers can return supported one-dimensional observations. The two-dimensional restriction is specific to the built-in per-file coordinators.
 
-## Raw-value contract
+### Raw-value contract
 
 Return raw source values from the plugin.
 
@@ -119,7 +119,7 @@ For generic output:
 - return a valid `Object[][]` or a supported proprietary two-dimensional representation; and
 - represent generic missing values according to the plugin and downstream distance contract, normally with `null`.
 
-## `CustomReaderContext`
+### `CustomReaderContext`
 
 The custom context supplies the configured information needed to parse one observation, including:
 
@@ -149,7 +149,7 @@ NumericStorageType storage =
         context.getNumericStorageType();
 ```
 
-## Minimal per-file plugin
+### Minimal per-file plugin
 
 ```java
 package example.reader;
@@ -270,7 +270,7 @@ public final class SeriesReader
 
 The example intentionally leaves source-specific parsing unimplemented. The returned arrays show the required per-file shape and numeric-storage behavior.
 
-## Build the plugin JAR
+### Build the plugin JAR
 
 A minimal source layout is:
 
@@ -309,11 +309,11 @@ javareader:/path/to/custom-reader/readers.jar:example.reader.SeriesReader
 
 If the plugin uses third-party classes, package them into the JAR or otherwise make them available to the plugin class loader according to the deployment arrangement.
 
-# Eager custom per-file reading
+## Eager custom per-file reading
 
 Use `PER_FILE_CUSTOM` to invoke the plugin while building the dataset.
 
-## Python configuration
+### Python configuration
 
 ```python
 import PF_wrapper as PF
@@ -344,7 +344,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-## Direct Java configuration
+### Direct Java configuration
 
 ```bash
 java -Xmx4g -jar Application/PFGAP.jar \
@@ -366,7 +366,7 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 Quote the complete descriptor, pattern, and parameter arguments when required by the shell.
 
-## Eager coordinator behavior
+### Eager coordinator behavior
 
 The eager custom coordinator:
 
@@ -381,11 +381,11 @@ The eager custom coordinator:
 
 The returned dataset stores materialized observations rather than lazy references.
 
-# Deferred custom per-file reading
+## Deferred custom per-file reading
 
 Use `LAZY_PER_FILE_CUSTOM` with the same plugin to defer parsing until an observation is needed.
 
-## Python configuration
+### Python configuration
 
 ```python
 import PF_wrapper as PF
@@ -416,7 +416,7 @@ if status != 0:
     raise SystemExit(status)
 ```
 
-## Direct Java configuration
+### Direct Java configuration
 
 ```bash
 java -Xmx4g -jar Application/PFGAP.jar \
@@ -436,7 +436,7 @@ java -Xmx4g -jar Application/PFGAP.jar \
   -out=output/custom_lazy/
 ```
 
-## Deferred coordinator behavior
+### Deferred coordinator behavior
 
 The deferred custom coordinator:
 
@@ -460,7 +460,7 @@ Validation occurs before standardization.
 
 Closing or replacing the registered outer reader closes the decorators, plugin instance, and plugin class loader.
 
-# Thread safety
+## Thread safety
 
 Configure:
 
@@ -480,7 +480,7 @@ A thread-safe plugin should keep per-observation mutable state local to the `rea
 
 When thread safety is false, the runtime adapter serializes plugin invocation. This protects a non-thread-safe plugin but limits concurrent materialization through that plugin instance.
 
-# Custom parameters
+## Custom parameters
 
 Python accepts a dictionary:
 
@@ -506,7 +506,7 @@ Parameter rules are:
 
 The plugin retrieves values through `CustomReaderContext`.
 
-# File discovery and ordering
+## File discovery and ordering
 
 Per-file custom readers use the same discovery contract as built-in per-file readers.
 
@@ -522,7 +522,7 @@ Literal pattern fragments can contain supported wildcard characters. A directory
 
 Separate labels must follow the discovered observation order.
 
-# Missing values
+## Missing values
 
 For numeric results, use primitive `NaN` values:
 
@@ -537,7 +537,7 @@ The custom plugin is responsible for parsing its source missing-value representa
 
 Do not perform iterative imputation inside the plugin. Return the parsed missing values and let PFGAP's imputation workflow handle them.
 
-# Standardization
+## Standardization
 
 Custom plugins return raw values.
 
@@ -549,7 +549,7 @@ Applying standardization inside the plugin causes double transformation when PFG
 
 See [Standardization](../guides/Standardization.md).
 
-# Saved-model reconstruction
+## Saved-model reconstruction
 
 A deferred custom per-file dataset stores references and a serializable reader specification. The specification retains the information required to rebuild the plugin reader, including:
 
@@ -567,11 +567,11 @@ When the model is loaded, PFGAP reconstructs the reader from the saved specifica
 
 See [Model Persistence](../reference/Model_Persistence.md).
 
-# Whole-dataset eager readers
+## Whole-dataset eager readers
 
 The built-in custom reader types are per-file coordinators. For a proprietary shared source, implement `DatasetReader` directly.
 
-## Minimal whole-dataset reader
+### Minimal whole-dataset reader
 
 ```java
 package example.reader;
@@ -631,7 +631,7 @@ Object[][]
 
 It can also return a proprietary representation when built-in standardization is disabled and the configured distance or downstream consumer understands the representation.
 
-## Factory integration
+### Factory integration
 
 A whole-dataset reader can be constructed directly in a Java integration:
 
@@ -648,11 +648,11 @@ To select it through ordinary application configuration, add a project-specific 
 
 That project integration must define how the reader receives paths, labels, options, and reconstruction state.
 
-# Whole-dataset deferred readers
+## Whole-dataset deferred readers
 
 A proprietary shared container can support deferred materialization through a custom `LazySeriesReader` plus a coordinating `DatasetReader`.
 
-## Minimal materializer
+### Minimal materializer
 
 ```java
 package example.reader;
@@ -688,7 +688,7 @@ public final class ContainerSeriesReader
 
 Unlike a per-file plugin, a direct whole-dataset materializer can return a supported one-dimensional observation.
 
-## Minimal deferred coordinator
+### Minimal deferred coordinator
 
 ```java
 package example.reader;
@@ -746,7 +746,7 @@ public final class LazyContainerReader
 
 The coordinator must also register the matching runtime materializer through `AppContext`.
 
-# Reconstructible whole-dataset deferred readers
+## Reconstructible whole-dataset deferred readers
 
 Saved-model reconstruction requires a serializable `LazySeriesReaderSpec` containing the settings needed to recreate the materializer.
 
@@ -762,7 +762,7 @@ Do not place live file handles, mappings, sockets, class loaders, decoder instan
 
 A runtime-only registration can support the current process but cannot reconstruct itself in a later process.
 
-# Resource lifecycle
+## Resource lifecycle
 
 A resource-owning materializer should implement `AutoCloseable`.
 
@@ -778,7 +778,7 @@ For a decorated deferred reader, the outer reader owns its delegate. Close only 
 
 Do not close a reader while its references are still in use.
 
-# Packaging recommendations
+## Packaging recommendations
 
 A separate reader JAR should contain:
 
@@ -802,63 +802,63 @@ For reproducibility, retain:
 - numeric storage; and
 - source-data version or checksum.
 
-# Security
+## Security
 
 A custom reader JAR contains executable Java code. Load reader JARs only from trusted sources.
 
 The plugin can read files available to the PFGAP process and execute with that process's permissions. Review custom code and dependencies before use.
 
-# Common problems
+## Common problems
 
-## The plugin class cannot be loaded
+### The plugin class cannot be loaded
 
 Check the JAR path, fully qualified class name, no-argument constructor, and PFGAP API compatibility.
 
-## A dependency class cannot be found
+### A dependency class cannot be found
 
 Package the dependency with the reader JAR or make it available through the supported deployment class path. Do not package duplicate PFGAP API classes into the plugin.
 
-## The plugin returns `double[]`
+### The plugin returns `double[]`
 
 A custom per-file plugin must return a two-dimensional result. Wrap a univariate series as `double[1][time]`, or implement a whole-dataset reader when a one-dimensional representation is required.
 
-## Numeric storage is ignored
+### Numeric storage is ignored
 
 Read `NumericStorageType` from `CustomReaderContext` and return `float[][]` for `FLOAT32` or `double[][]` for `FLOAT64`. Define a consistent policy for `AUTO`.
 
-## Missing values fail later in the workflow
+### Missing values fail later in the workflow
 
 Convert source missing values to primitive `NaN` for numeric output or the supported generic missing representation. Configure compatible distances or imputation.
 
-## Values are standardized twice
+### Values are standardized twice
 
 Remove standardization from the plugin. Return raw values and let PFGAP apply its configured standardization layer.
 
-## Deferred reads fail under multiple workers
+### Deferred reads fail under multiple workers
 
 Set `custom_reader_thread_safe=false` unless one plugin instance is safe for concurrent calls. If true, keep mutable per-read state local or safely concurrent.
 
-## Eager and deferred results differ
+### Eager and deferred results differ
 
 Use the same plugin, context parameters, feature ordering, numeric storage, missing-value conversion, and source files. Both coordinators should receive the same raw observation from the plugin.
 
-## Labels do not align with observations
+### Labels do not align with observations
 
 Ensure the separate label order matches deterministic file-discovery order.
 
-## A saved model cannot recreate the plugin reader
+### A saved model cannot recreate the plugin reader
 
 Keep the JAR and source data available at the saved locations. Ensure the model contains a serializable reader specification rather than only a runtime registration.
 
-## The plugin JAR remains locked or source files cannot be changed
+### The plugin JAR remains locked or source files cannot be changed
 
 Close the application workflow or clear the reader registry so the plugin instance and class loader are released.
 
-## A whole-dataset deferred reader works only in the current process
+### A whole-dataset deferred reader works only in the current process
 
 Add a serializable reader specification and factory reconstruction branch. Runtime-only readers are not portable through model persistence.
 
-## Related documentation
+### Related documentation
 
 - [Readers](../data/Readers.md)
 - [Dataset Representations](../data/Dataset_Representations.md)

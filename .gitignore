@@ -159,3 +159,12 @@ credentials/
 *.bak
 *.tmp
 *.cache
+
+# =========================
+# Website-related content
+# =========================
+website/node_modules/
+website/dist/
+website/public/docs/
+website/public/docs-manifest.json
+website/.env.local

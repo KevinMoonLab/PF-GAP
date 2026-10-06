@@ -71,6 +71,7 @@ PFGAP/
 │   ├── reference/
 │   └── index.md
 ├── tests/
+├── website/
 ├── LICENSE
 └── README.md
 ```
@@ -80,8 +81,7 @@ PFGAP/
 - `PFGAP/lib/` contains external Java libraries.
 - `docs/` contains the authoritative user documentation, organized into getting-started, data, guides, extensions, and reference sections.
 - `tests/` contains top-level Python scripts used to exercise application workflows and integrations.
-
-A separate top-level `website/` directory will be introduced in a later change to render the canonical content from `docs/` as a static documentation website.
+- `website/` contains files which render the canonical content from `docs/` as a static documentation website.
 
 ## Interfaces
 

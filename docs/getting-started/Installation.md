@@ -292,13 +292,13 @@ git pull
 
 After updating:
 
-1. Review the [Release Notes](../project/Release_Notes.md).
+1. Review the Git history, pull request, or tagged release information for the revision being installed.
 2. Keep `PFGAP.jar` and `PF_wrapper.py` on the same revision.
 3. Rebuild custom Java extensions when public APIs or dependencies change.
 4. Re-run a representative workflow before replacing an established environment.
 5. Preserve old models and outputs until compatibility has been verified.
 
-Because the project is pre-v1, serialized models, configuration names, and extension interfaces may change between revisions. See [Model Persistence](../reference/Model_Persistence.md) and [Limitations](../project/Limitations.md) for documented compatibility boundaries.
+Because the project is pre-v1, serialized models, configuration names, and extension interfaces may change between revisions. See [Model Persistence](../reference/Model_Persistence.md) for saved-model contents, external dependencies, and compatibility boundaries.
 
 ## Troubleshooting
 

@@ -6,23 +6,7 @@
     </artifacts-to-build>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../README.md" beforeDir="false" afterPath="$PROJECT_DIR$/../README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Classification.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Data_Format.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Distances.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Imputation.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Outlier_Scores.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/Regression.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/User_Distances.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/User_Distances_with_Dependencies.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/compile_distances.bat" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/compile_distances.sh" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/user_distances_with_dependencies.zip" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/userdistances.jar" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/custom_distances/userdistances/MyEuclideanDistance.java" beforeDir="false" />
-    </list>
+    <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

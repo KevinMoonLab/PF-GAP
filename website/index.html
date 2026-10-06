@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="PFGAP documentation for classification, regression, imputation, proximity analysis, outlier scoring, OOD scoring, data readers, writers, and extensions."
+    />
+    <meta name="theme-color" content="#0b1220" />
+    <meta name="color-scheme" content="light dark" />
+
+    <title>PFGAP Documentation</title>
+
+    <link rel="icon" href="%BASE_URL%favicon.svg" type="image/svg+xml" />
+
+    <script>
+      (() => {
+        const storedTheme = localStorage.getItem("pfgap-docs-theme");
+        const systemPrefersDark = window.matchMedia(
+          "(prefers-color-scheme: dark)"
+        ).matches;
+        const theme = storedTheme ?? (systemPrefersDark ? "dark" : "light");
+
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+
+  <body>
+    <noscript>
+      <div class="noscript-message">
+        <h1>PFGAP Documentation</h1>
+        <p>
+          This documentation site requires JavaScript for navigation and
+          Markdown rendering. The source documentation remains available in
+          the repository's <code>docs/</code> directory.
+        </p>
+      </div>
+    </noscript>
+
+    <div id="app" class="site-shell" aria-busy="true">
+      <header class="site-header">
+        <a class="brand" href="%BASE_URL%" aria-label="PFGAP documentation home">
+          <span class="brand-mark" aria-hidden="true">PF</span>
+          <span class="brand-copy">
+            <strong>PFGAP</strong>
+            <span>Documentation</span>
+          </span>
+        </a>
+
+        <div class="header-placeholder" aria-hidden="true">
+          <span></span>
+          <span></span>
+        </div>
+      </header>
+
+      <div class="site-layout">
+        <aside class="sidebar-placeholder" aria-hidden="true">
+          <div class="placeholder-line placeholder-heading"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line placeholder-short"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line placeholder-short"></div>
+        </aside>
+
+        <main id="main-content" class="document-placeholder" tabindex="-1">
+          <div class="placeholder-line placeholder-kicker"></div>
+          <div class="placeholder-line placeholder-title"></div>
+          <div class="placeholder-line placeholder-title-short"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line placeholder-medium"></div>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
