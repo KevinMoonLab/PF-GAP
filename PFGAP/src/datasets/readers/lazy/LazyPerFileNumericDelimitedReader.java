@@ -4,6 +4,7 @@ import core.AppContext;
 import datasets.ListObjectDataset;
 import datasets.NumericStorageType;
 import datasets.readers.DatasetReader;
+import datasets.readers.LabelSidecarReader;
 import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
@@ -96,8 +97,9 @@ import java.util.stream.Stream;
  * Glob wildcards {@code *} and {@code ?} may occur outside the numeric
  * placeholder.</p>
  *
- * <p>Labels are currently assigned as {@code null}, matching the existing
- * lazy per-file reader behavior.</p>
+ * <p>Feature series remain lazy. When supervised labels are expected, the
+ * positional label sidecar is read eagerly once and aligned with the
+ * deterministically ordered instance files.</p>
  */
 public class LazyPerFileNumericDelimitedReader
         implements DatasetReader {
@@ -115,6 +117,9 @@ public class LazyPerFileNumericDelimitedReader
     private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
     private final NumericStorageType numericStorageType;
+    private String labelPath;
+    private LabelSidecarReader.LabelMode labelMode;
+    private boolean labelsExpected;
 
     /**
      * Constructs the reader from ordinary PFGAP reader options.
@@ -144,6 +149,11 @@ public class LazyPerFileNumericDelimitedReader
                 options.getStandardizationStats(),
                 DEFAULT_INITIAL_TIME_CAPACITY,
                 options.getNumericStorageType()
+        );
+
+        configureLabels(
+                options.getLabelPath(),
+                options.isTest()
         );
 
         if (!options.isNumeric()) {
@@ -313,6 +323,9 @@ public class LazyPerFileNumericDelimitedReader
         List<Path> files =
                 discoverFiles();
 
+        List<Object> labels =
+                readLabels(files.size());
+
         /*
          * Register both:
          *
@@ -356,11 +369,9 @@ public class LazyPerFileNumericDelimitedReader
             Path file =
                     files.get(instanceIndex);
 
-            Object label =
-                    inferLabel(
-                            file,
-                            instanceIndex
-                    );
+            Object label = labels.isEmpty()
+                    ? null
+                    : labels.get(instanceIndex);
 
             LazySeriesRef reference =
                     new LazySeriesRef(
@@ -577,18 +588,56 @@ public class LazyPerFileNumericDelimitedReader
         return files;
     }
 
-    /**
-     * Placeholder for future per-file label conventions.
-     *
-     * <p>Potential label sources include an external label file, a
-     * filename-to-label mapping, a label encoded in the filename, or an
-     * external metadata table.</p>
-     */
-    private Object inferLabel(
-            Path file,
-            int instanceIndex
+    private void configureLabels(
+            String configuredLabelPath,
+            boolean isTest
     ) {
-        return null;
+        this.labelsExpected =
+                !AppContext.isIsolationMode()
+                        && (!isTest || AppContext.exists_testlabels);
+        this.labelPath = normalizeNullableString(configuredLabelPath);
+
+        if (!labelsExpected) {
+            if (labelPath != null && AppContext.isIsolationMode()) {
+                throw new IllegalArgumentException(
+                        "Isolation mode does not use a label sidecar."
+                );
+            }
+            this.labelMode = null;
+            return;
+        }
+
+        if (labelPath == null) {
+            throw new IllegalArgumentException(
+                    "LazyPerFileNumericDelimitedReader requires labelPath "
+                            + "when supervised labels are expected."
+            );
+        }
+        this.labelMode = AppContext.isRegressionMode()
+                ? LabelSidecarReader.LabelMode.REGRESSION
+                : LabelSidecarReader.LabelMode.CLASSIFICATION;
+    }
+
+    private List<Object> readLabels(
+            int instanceFileCount
+    ) throws IOException {
+        if (!labelsExpected) {
+            return List.of();
+        }
+
+        Path path = Path.of(labelPath);
+        List<Object> labels = LabelSidecarReader.read(
+                path,
+                hasHeader,
+                entrySeparator.charAt(0),
+                labelMode
+        );
+        LabelSidecarReader.validateCount(
+                labels,
+                instanceFileCount,
+                path
+        );
+        return labels;
     }
 
     private static ReaderOptions requireOptions(

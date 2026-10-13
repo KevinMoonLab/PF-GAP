@@ -45,6 +45,10 @@ public interface ObjectDataset {
 
     public int get_num_classes();
 
+    public int get_num_label_outputs();
+
+    public int get_num_classes(int outputIndex);
+
     public void set_indices(ArrayList<Integer> indices);
 
     public int get_class_size(Object class_label);
@@ -55,7 +59,11 @@ public interface ObjectDataset {
 
     public Set<Object> get_unique_classes_as_set();
 
+    public Set<Object> get_unique_classes_as_set(int outputIndex);
+
     public Map<Object, ListObjectDataset> split_classes();
+
+    public Map<Object, ListObjectDataset> split_classes(int outputIndex);
 
     //public double gini(); // we may need to define how gini works with mixed types
 

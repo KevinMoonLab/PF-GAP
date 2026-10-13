@@ -19,6 +19,8 @@ The principal reader classes are:
 - `DatasetReaderFactory`: constructs the appropriate `DatasetReader`.
 - `ListObjectDataset`: stores labels and eager observations or lazy references.
 
+Labels may be scalar or ordered multi-output values. Classification components are integers or strings; regression components are finite doubles. A single output remains scalar.
+
 Typical eager loading follows this pattern:
 
 ```java
@@ -231,7 +233,7 @@ A wide row can represent either:
 - A fixed-width tabular observation, such as `double[dimension]` or `Object[dimension]`.
 - An equal-length univariate sequence, such as `double[time]` or `Object[time]`.
 
-The file schema and configured workflow determine the interpretation.
+The file schema and configured workflow determine the interpretation. With a header, supported tabular paths may select ordered feature and label columns explicitly. One label column produces a scalar; multiple label columns produce an ordered multi-output target. Separate delimited label files may also contain one or multiple columns.
 
 ### 5.2 `NUMERIC_DELIMITED`
 
@@ -246,6 +248,8 @@ ReaderOptions options = new ReaderOptions()
         .setTargetColumnIsFirst(true)
         .setNumericStorageType(NumericStorageType.FLOAT64);
 ```
+
+`NUMERIC_DELIMITED` also supports named feature and label columns for tabular input and scalar or multi-output separate label files. Its numeric feature path remains primitive and optimized.
 
 ## 6. TS files
 
@@ -269,7 +273,7 @@ ReaderOptions options = new ReaderOptions()
 
 ## 7. Long-format data
 
-Long-format readers group multiple source rows into one observation. A typical source contains an instance identifier, optional time column, feature columns, and optional label columns.
+Long-format readers group multiple source rows into one observation. A typical source contains an instance identifier, optional time column, feature columns, and optional label columns. Multiple configured label columns produce an ordered multi-output target. Repeated labels must be consistent within each observation group.
 
 ```text
 id,time,x,y,label
@@ -329,6 +333,8 @@ ReaderOptions options = new ReaderOptions()
         .setLabelColumns(List.of("label"));
 ```
 
+`LONG_FORMAT_PARQUET` uses embedded label columns. Missing label components and inconsistent repeated labels are rejected.
+
 ### 7.4 `NUMERIC_LONG_FORMAT_PARQUET`
 
 Use `NUMERIC_LONG_FORMAT_PARQUET` for the optimized primitive numeric Parquet path.
@@ -343,6 +349,8 @@ ReaderOptions options = new ReaderOptions()
         .setLabelColumns(List.of("label"))
         .setNumericStorageType(NumericStorageType.FLOAT32);
 ```
+
+`NUMERIC_LONG_FORMAT_PARQUET` provides the same embedded scalar and multi-output label contract through the batch-oriented primitive numeric path. Long-format Parquet sidecar labels are not currently supported.
 
 ## 8. Per-file datasets
 
@@ -389,10 +397,13 @@ ReaderOptions options = new ReaderOptions()
         .setEntrySeparator(",")
         .setHasHeader(true)
         .setFeatureColumns(List.of("x", "y"))
+        .setLabelPath("data/train-labels.csv")
         .setNumericStorageType(NumericStorageType.FLOAT32);
 ```
 
 Change the type to `LAZY_PER_FILE_NUMERIC_DELIMITED` to discover files immediately but defer parsing each file until its observation is requested.
+
+The built-in per-file delimited readers treat the label file as a positional sidecar: label record `i` belongs to discovered instance file `i`. One sidecar column produces a scalar target; multiple columns produce an ordered multi-output target. The sidecar uses the same delimiter and header setting as the instance files. Lazy variants load and validate labels during dataset construction while deferring feature parsing. Isolation mode and unlabeled prediction data do not require a sidecar.
 
 ### 8.2 Parquet per-file readers
 
@@ -413,7 +424,7 @@ ReaderOptions options = new ReaderOptions()
         .setNumericStorageType(NumericStorageType.FLOAT32);
 ```
 
-Per-file readers produce two-dimensional observations even when only one feature is selected.
+Per-file readers produce two-dimensional observations even when only one feature is selected. A shared sidecar-label convention for per-file Parquet readers is deferred.
 
 ## 9. NPY readers
 
@@ -470,7 +481,7 @@ A `LazySeriesReader` converts one reference into one observation. `LazySeriesRea
 
 A saved model stores specifications and references, not live readers, open files, class loaders, mappings, or caches. When the model is loaded in another JVM, PFGAP reconstructs the registered lazy readers from their specifications.
 
-Lazy dataset construction normally sets dataset length to zero because observation lengths are not known until materialization and may differ.
+Lazy dataset construction normally sets dataset length to zero because observation lengths are not known until materialization and may differ. Labels are not lazy: supported coordinators load and validate labels while constructing the dataset, while only observation values are represented by `LazySeriesRef` objects.
 
 ### 11.1 Registration and reconstruction
 
@@ -646,7 +657,27 @@ A univariate result must be `[1][time]`.
 - Custom plugin parameters
 - Requested numeric storage
 
-### 13.3 Eager custom per-file loading
+### 13.3 Reusing the delimited sidecar reader
+
+A project-specific `DatasetReader` or custom coordinator may reuse `datasets.readers.LabelSidecarReader` when its labels follow the same positional delimited contract as the built-in per-file readers. The helper reads scalar or multi-column targets, validates a consistent output width, and can validate the label count against discovered observations.
+
+```java
+List<Object> labels = LabelSidecarReader.read(
+        labelPath,
+        hasHeader,
+        separator,
+        LabelSidecarReader.LabelMode.CLASSIFICATION
+);
+LabelSidecarReader.validateCount(
+        labels,
+        observationFiles.size(),
+        labelPath
+);
+```
+
+This helper is optional. It does not discover files, join labels by ID, or become part of `CustomSeriesReader`; the dataset coordinator remains responsible for stable observation ordering and for adding labels to `ListObjectDataset`. Lazy custom feature readers should still load labels eagerly at coordination time.
+
+### 13.4 Eager custom per-file loading
 
 Use `PER_FILE_CUSTOM` to invoke the plugin during dataset construction:
 
@@ -681,7 +712,7 @@ The eager custom coordinator:
 8. Adds the materialized observation to the dataset.
 9. Closes the plugin and plugin class loader.
 
-### 13.4 Lazy custom per-file loading
+### 13.5 Lazy custom per-file loading
 
 Use `LAZY_PER_FILE_CUSTOM` with the same plugin and options:
 
@@ -718,7 +749,7 @@ Validation occurs before standardization. Closing or replacing the registered ou
 
 Set `customReaderThreadSafe` to `true` only if one plugin instance can safely serve concurrent calls. If it is `false`, the runtime adapter synchronizes plugin invocation.
 
-### 13.5 Dummy non-per-file eager reader
+### 13.6 Dummy non-per-file eager reader
 
 The built-in custom factory types are per-file coordinators. For a database, socket, archive, service, or proprietary shared container, implement `DatasetReader` directly.
 
@@ -778,7 +809,7 @@ ListObjectDataset dataset = reader.read();
 
 A non-per-file reader may return a supported one-dimensional tabular observation, one-dimensional sequence, two-dimensional observation, or a supported proprietary representation.
 
-### 13.6 Dummy non-per-file lazy materializer
+### 13.7 Dummy non-per-file lazy materializer
 
 A non-per-file lazy source needs a `LazySeriesReader` that interprets each logical reference.
 
@@ -813,7 +844,7 @@ public final class DummyContainerSeriesReader
 }
 ```
 
-### 13.7 Dummy non-per-file lazy coordinator
+### 13.8 Dummy non-per-file lazy coordinator
 
 The corresponding `DatasetReader` discovers logical observations, registers or owns the materializer, and creates stable references.
 
@@ -910,7 +941,8 @@ The following work is intentionally deferred and is not part of the current read
 
 - Lazy long-format readers
 - Segmented or windowed NPY mapping for arrays too large for the current shared mapping strategy
-- Additional custom per-file label extraction or label-file coordination
+- Keyed or filename-derived custom per-file label coordination
+- Sidecar-label conventions for per-file Parquet readers
 - Per-file writer support and eager/lazy output coordination
 
 These items should be documented as future extensions rather than implied current functionality.

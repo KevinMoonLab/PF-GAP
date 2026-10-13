@@ -162,7 +162,7 @@ public class LongFormatParquetReader implements DatasetReader {
                 }
 
                 Object[] features = readFeatureValues(reader, rowNumber);
-                Object label = readLabelValues(reader);
+                Object label = readLabelValues(reader, rowNumber);
                 groupedRows.computeIfAbsent(id, ignored -> new ArrayList<>())
                         .add(new LongParquetRow(
                                 id, time, features, label, rowNumber));
@@ -202,7 +202,7 @@ public class LongFormatParquetReader implements DatasetReader {
             while (reader.hasNext()) {
                 reader.next();
                 Object[] features = readFeatureValues(reader, rowIndex);
-                Object label = readLabelValues(reader);
+                Object label = readLabelValues(reader, rowIndex);
                 Object data = materializeRow(features);
                 dataset.add(label, data, rowIndex);
 
@@ -264,61 +264,91 @@ public class LongFormatParquetReader implements DatasetReader {
                 : toDouble(value, column, recordIndex);
     }
 
-    private Object readLabelValues(RowReader reader) {
+    private Object readLabelValues(
+            RowReader reader,
+            int recordIndex
+    ) {
         if (labelColumns.isEmpty()) {
             return null;
         }
         if (labelColumns.size() == 1) {
-            return parseLabelValue(normalizeValue(
-                    getValue(reader, labelColumns.get(0))));
+            String column = labelColumns.get(0);
+            return parseLabelValue(
+                    normalizeValue(getValue(reader, column)),
+                    column,
+                    recordIndex
+            );
         }
         List<Object> labels = new ArrayList<>(labelColumns.size());
         for (String column : labelColumns) {
-            labels.add(parseLabelValue(normalizeValue(
-                    getValue(reader, column))));
+            labels.add(parseLabelValue(
+                    normalizeValue(getValue(reader, column)),
+                    column,
+                    recordIndex
+            ));
         }
-        return Collections.unmodifiableList(labels);
+        return List.copyOf(labels);
     }
 
-    private Object parseLabelValue(Object value) {
+    private Object parseLabelValue(
+            Object value,
+            String column,
+            int recordIndex
+    ) {
         if (isMissingValue(value)) {
-            return null;
+            throw new IllegalArgumentException(
+                    "Missing label value in Parquet column '" + column
+                            + "' at record " + recordIndex + "."
+            );
         }
         if (isRegression) {
-            return toDouble(value, "label", -1);
+            double target = toDouble(value, column, recordIndex);
+            if (!Double.isFinite(target)) {
+                throw new IllegalArgumentException(
+                        "Regression label in Parquet column '" + column
+                                + "' at record " + recordIndex
+                                + " must be finite, but was " + target + "."
+                );
+            }
+            return target;
         }
-        if (value instanceof Byte || value instanceof Short
+        return normalizeClassificationLabel(value);
+    }
+
+    /**
+     * Normalizes classification labels to PFGAP's supported scalar contract:
+     * Integer when the source value is an in-range integral value, otherwise
+     * String. This prevents Long, floating-point, Boolean, and other Parquet
+     * physical values from leaking into the classification pipeline.
+     */
+    private static Object normalizeClassificationLabel(Object value) {
+        if (value instanceof Byte
+                || value instanceof Short
                 || value instanceof Integer) {
             return ((Number) value).intValue();
         }
-        if (value instanceof Long integral) {
-            return integral >= Integer.MIN_VALUE && integral <= Integer.MAX_VALUE
-                    ? integral.intValue()
-                    : integral;
+        if (value instanceof Long integral
+                && integral >= Integer.MIN_VALUE
+                && integral <= Integer.MAX_VALUE) {
+            return integral.intValue();
         }
-        if (value instanceof Number number) {
-            return normalizeNumericLabel(number.doubleValue());
+        if (value instanceof Float || value instanceof Double) {
+            double numeric = ((Number) value).doubleValue();
+            if (Double.isFinite(numeric)
+                    && numeric == Math.rint(numeric)
+                    && numeric >= Integer.MIN_VALUE
+                    && numeric <= Integer.MAX_VALUE) {
+                return (int) numeric;
+            }
+            return value.toString();
         }
+
         String token = value.toString().trim();
         try {
-            return Integer.parseInt(token);
+            return Integer.valueOf(token);
         } catch (NumberFormatException ignored) {
-            try {
-                return normalizeNumericLabel(
-                        JavaDoubleParser.parseDouble(token));
-            } catch (NumberFormatException ignoredAgain) {
-                return token;
-            }
+            return token;
         }
-    }
-
-    private static Object normalizeNumericLabel(double value) {
-        if (value == Math.rint(value)
-                && value >= Integer.MIN_VALUE
-                && value <= Integer.MAX_VALUE) {
-            return (int) value;
-        }
-        return value;
     }
 
     private ListObjectDataset buildGroupedDataset(

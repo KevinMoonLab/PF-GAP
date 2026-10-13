@@ -78,7 +78,7 @@ Each row has this structure:
 label,value_1,value_2,value_3,value_4,value_5
 ```
 
-The files have no header. The target is the first column, entries are comma-separated, and all feature values are numeric. With `data_dimension=1`, PFGAP treats each row as a one-dimensional numeric observation. Depending on the task and selected distance, this representation can describe either a fixed-width tabular feature vector or a univariate sequence. See [Dataset Representations](../data/Dataset_Representations.md) for the representation contract.
+The files have no header. The target is the first column, entries are comma-separated, and all feature values are numeric. With `data_dimension=1`, PFGAP treats each row as a one-dimensional numeric observation. Depending on the task and selected distance, this representation can describe either a fixed-width tabular feature vector or a univariate sequence. See [Dataset Representations](../data/Dataset_Representations.md) for the representation contract. This quick start intentionally uses one scalar target; readers that support named label columns or positional sidecars can also supply ordered multi-output targets, as described in [Configuration](Configuration.md) and [Readers](../data/Readers.md).
 
 ## Option 1: Run through Python
 
@@ -412,8 +412,8 @@ See [Data Formats](../data/Data_Formats.md), [Dataset Representations](../data/D
 ## Where to go next
 
 - Read [Configuration](Configuration.md) to understand the Python, command-line, and application configuration layers.
-- Follow [Classification](../guides/Classification.md) for training, validation, evaluation, probability-style outputs, and classification-specific choices.
-- Follow [Regression](../guides/Regression.md) for continuous targets.
+- Follow [Classification](../guides/Classification.md) for training, validation, evaluation, scalar or multi-output targets, probability-style outputs, and classification-specific choices.
+- Follow [Regression](../guides/Regression.md) for scalar or multi-target continuous outcomes.
 - Follow [Imputation](../guides/Imputation.md) to replace supported missing values before or during a workflow.
 - Read [Eager and Lazy Data](../guides/Eager_and_Lazy_Data.md) before working with large per-file datasets.
 - Consult the [Configuration Reference](../reference/Configuration_Reference.md) and [CLI Reference](../reference/CLI_Reference.md) for complete option definitions.

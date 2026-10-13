@@ -338,7 +338,7 @@ public class NumericLongFormatParquetReader implements DatasetReader {
             labels.add(parseLabelAt(
                     batch, state, labelHasNulls, label, row));
         }
-        return Collections.unmodifiableList(labels);
+        return List.copyOf(labels);
     }
 
     private Object parseLabelAt(
@@ -348,21 +348,88 @@ public class NumericLongFormatParquetReader implements DatasetReader {
             int label,
             int row
     ) {
+        String column = labelColumns.get(label);
+        int recordIndex = state.totalRecordCount + row;
+        Path path = Path.of(dataFileName);
+
         if (labelHasNulls[label]
                 && batch.labelValidities[label].isNull(row)) {
-            return null;
+            throw dataError(
+                    "Missing label in column '" + column + "'",
+                    recordIndex,
+                    path
+            );
         }
+
         Object value = valueAt(
-                batch.labelValues[label], state.labelKinds[label], row);
-        if (value == null || !isRegression) {
-            return value;
+                batch.labelValues[label],
+                state.labelKinds[label],
+                row
+        );
+        if (value == null) {
+            throw dataError(
+                    "Missing label in column '" + column + "'",
+                    recordIndex,
+                    path
+            );
         }
-        if (!(value instanceof Number number)) {
-            throw new IllegalArgumentException(
-                    "Regression label column '" + labelColumns.get(label)
-                            + "' is not numeric.");
+
+        if (isRegression) {
+            if (!(value instanceof Number number)) {
+                throw dataError(
+                        "Regression label column '" + column
+                                + "' is not numeric",
+                        recordIndex,
+                        path
+                );
+            }
+            double target = number.doubleValue();
+            if (!Double.isFinite(target)) {
+                throw dataError(
+                        "Regression label column '" + column
+                                + "' must be finite, but was " + target,
+                        recordIndex,
+                        path
+                );
+            }
+            return target;
         }
-        return number.doubleValue();
+
+        return normalizeClassificationLabel(value);
+    }
+
+    /**
+     * Normalizes classification labels to Integer or String while preserving
+     * the batch-oriented column-decoding path.
+     */
+    private static Object normalizeClassificationLabel(Object value) {
+        if (value instanceof Byte
+                || value instanceof Short
+                || value instanceof Integer) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof Long integral
+                && integral >= Integer.MIN_VALUE
+                && integral <= Integer.MAX_VALUE) {
+            return integral.intValue();
+        }
+        if (value instanceof Float || value instanceof Double) {
+            double numeric = ((Number) value).doubleValue();
+            if (Double.isFinite(numeric)
+                    && numeric == Math.rint(numeric)
+                    && numeric >= Integer.MIN_VALUE
+                    && numeric <= Integer.MAX_VALUE) {
+                return (int) numeric;
+            }
+            return value.toString();
+        }
+
+        String token = value.toString().trim();
+        try {
+            return Integer.valueOf(token);
+        } catch (NumberFormatException ignored) {
+            return token;
+        }
     }
 
     private ListObjectDataset buildDataset(ReadState state) {

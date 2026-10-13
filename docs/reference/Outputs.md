@@ -89,56 +89,34 @@ A multi-repetition run adds `_repeat_N` before `.csv`.
 
 ## Classification predictions
 
-Without actual labels:
+Scalar classification without actual labels:instance\_index,prediction  
+Scalar classification with actual labels:instance\_index,prediction,actual,correct
+- instance\_index is zero-based.
+- prediction and actual preserve the integer or string class labels used by the dataset.
+- correct records whether the prediction equals the actual label.
 
-```text
-instance_index,prediction
-```
+Multi-output classification expands the prediction and actual columns by output index. Without actual labels:instance\_index,prediction\_0,prediction\_1  
+With actual labels:instance\_index,prediction\_0,actual\_0,prediction\_1,actual\_1,correct  
+Additional outputs continue the same numbered pattern. Output indices are zero-based and follow the configured label-column or sidecar-column order. The final correct value uses exact-match semantics: it is true only when every predicted component equals the corresponding actual component.
 
-With actual labels:
-
-```text
-instance_index,prediction,actual,correct
-```
-
-- `instance_index` is zero-based.
-- `prediction` is the aggregate predicted integer class label.
-- `actual` is the known integer class label.
-- `correct` records whether the prediction equals the actual label.
-
-The actual-label columns are omitted when no actual-label collection is supplied, the collection is empty, or every value is null. If a particular actual label is null while the columns are present, `actual` and `correct` are blank for that row.
+The actual-label columns are omitted when no actual-label collection is supplied, the collection is empty, or every value is null. If a particular actual label is null while the columns are present, its actual fields and correct are blank for that row.
 
 ## Regression predictions
 
-Without actual targets:
+Scalar regression without actual targets:instance\_index,prediction  
+Scalar regression with actual targets:instance\_index,prediction,actual,residual,absolute\_error  
+Regression residuals use:residual = prediction - actual  
+Absolute error is:absolute\_error = abs(residual)
 
-```text
-instance_index,prediction
-```
+Multi-target regression expands these fields by target index. Without actual targets:instance\_index,prediction\_0,prediction\_1  
+With actual targets:instance\_index,prediction\_0,actual\_0,residual\_0,absolute\_error\_0,prediction\_1,actual\_1,residual\_1,absolute\_error\_1  
+Additional targets continue the same numbered pattern. Target indices are zero-based and follow the configured target-column or sidecar-column order. Residual and absolute-error calculations are performed independently for each target.
 
-With actual targets:
-
-```text
-instance_index,prediction,actual,residual,absolute_error
-```
-
-Regression residuals use:
-
-```text
-residual = prediction - actual
-```
-
-Absolute error is:
-
-```text
-absolute_error = abs(residual)
-```
-
-If a particular actual target is null while actual-target columns are present, `actual`, `residual`, and `absolute_error` are blank for that row.
+If a particular actual target is null while actual-target columns are present, the corresponding actual, residual, and absolute-error fields are blank for that row.
 
 ## Structured evaluation output
 
-Structured output is written when enhanced prediction details, OOD output, or both are requested.
+Structured output is written when enhanced prediction details, OOD output, or both are requested. Ordinary prediction CSVs support scalar and multi-output tasks. Enhanced prediction details remain scalar-only in v1; OOD-only structured output remains valid independently.
 
 Request enhanced prediction details with:
 
@@ -279,7 +257,7 @@ instance_index,outlier_score
 instance_index,outlier_score,label
 ```
 
-The label column is included only when the supplied label collection contains at least one non-null value.
+The label column is included only when the supplied label collection contains at least one non-null value. This score-file schema is a single label field; it is separate from the numbered multi-output prediction schema described above.
 
 ## Score schema with diagnostics
 
@@ -311,7 +289,7 @@ Direct Java form:
 -get_training_outlier_scores=true
 ```
 
-This output describes within-class unusualness among classification training observations and can include the integer class label.
+This output describes within-class unusualness among classification training observations and can include the scalar class label.
 
 ## Isolation output
 
@@ -589,6 +567,7 @@ standardDeviationOODScore
 meanPredictionStandardDeviation
 ```
 
+For multi-output classification, accuracy uses exact full-vector matching. For multi-target regression, target-wise metrics are combined into the existing scalar summary where supported, including the averaged target-wise R2 summary.  
 Non-finite metric values may remain present in individual repetition records.
 
 ## Representative counts
@@ -757,8 +736,8 @@ The current coordinated experiment output is `experiment_results.json`, which st
 A training repetition can produce:
 
 - a saved model;
-- training or validation predictions;
-- enhanced validation output;
+- scalar or multi-output training or validation predictions;
+- enhanced scalar validation output;
 - validation OOD output;
 - supervised training outlier scores;
 - isolation scores;
@@ -775,8 +754,8 @@ Availability depends on forest mode, supplied data, selected reader, and request
 
 An evaluation repetition can produce:
 
-- ordinary test predictions;
-- enhanced test prediction details;
+- scalar or multi-output ordinary test predictions;
+- enhanced scalar test prediction details;
 - test OOD output when the model retains required summaries;
 - isolation scores from an isolation model;
 - test-to-training proximities;
@@ -803,6 +782,10 @@ Verify that the corresponding output option is enabled and that the task, data, 
 ## A structured CSV has empty columns
 
 Structured output uses one stable combined schema. Fields that do not apply to the requested prediction or OOD result are intentionally empty.
+
+## Enhanced output is requested for a multi-output task
+
+Use ordinary prediction output for multi-output classification or multi-target regression. Enhanced prediction details are scalar-only in v1. OOD-only structured output remains independent of ordinary or enhanced prediction output.
 
 ## Actual-value columns are absent
 

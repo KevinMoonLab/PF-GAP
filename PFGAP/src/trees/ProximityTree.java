@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
-import java.util.Set;
+import util.LabelUtils;
 
 /**
  * One tree in a proximity forest.
@@ -1135,107 +1135,79 @@ public class ProximityTree
 			);
 		}
 
-		private static Object computeRegressionLeafValue(
-				List<Object> labels
-		) {
-			double[] numericValues =
-					new double[labels.size()];
+		private static Object computeRegressionLeafValue(List<Object> labels) {
+			Object firstLabel = firstNonNullLabel(labels);
+			if (firstLabel == null) return 0.0;
+			if (!LabelUtils.isMultiOutput(firstLabel)) {
+				return computeScalarRegressionLeafValue(labels);
+			}
+			int outputCount = LabelUtils.validateRegressionLabels(labels);
+			List<Double> predictions = new ArrayList<>(outputCount);
+			for (int outputIndex = 0; outputIndex < outputCount; outputIndex++) {
+				List<Object> outputValues = new ArrayList<>(labels.size());
+				for (Object label : labels) outputValues.add(LabelUtils.valueAt(label, outputIndex));
+				predictions.add(computeScalarRegressionLeafValue(outputValues));
+			}
+			return List.copyOf(predictions);
+		}
 
-			int numericCount =
-					0;
-
-			double sum =
-					0.0;
-
+		private static Double computeScalarRegressionLeafValue(List<Object> labels) {
+			double[] numericValues = new double[labels.size()];
+			int numericCount = 0;
+			double sum = 0.0;
 			for (Object value : labels) {
 				if (value instanceof Number number) {
-					double numericValue =
-							number.doubleValue();
-
-					numericValues[numericCount++] =
-							numericValue;
-
-					sum +=
-							numericValue;
+					double numericValue = number.doubleValue();
+					numericValues[numericCount++] = numericValue;
+					sum += numericValue;
 				}
 			}
-
-			if (numericCount == 0) {
-				return 0.0;
+			if (numericCount == 0) return 0.0;
+			if (AppContext.voting.equalsIgnoreCase("mean")) return sum / numericCount;
+			if (AppContext.voting.equalsIgnoreCase("median")) {
+				Arrays.sort(numericValues, 0, numericCount);
+				if ((numericCount & 1) == 1) return numericValues[numericCount / 2];
+				return (numericValues[numericCount / 2 - 1] + numericValues[numericCount / 2]) / 2.0;
 			}
-
-			if (AppContext.voting.equalsIgnoreCase(
-					"mean"
-			)) {
-				return sum / numericCount;
-			}
-
-			if (AppContext.voting.equalsIgnoreCase(
-					"median"
-			)) {
-				Arrays.sort(
-						numericValues,
-						0,
-						numericCount
-				);
-
-				if ((numericCount & 1) == 1) {
-					return numericValues[
-							numericCount / 2
-							];
-				}
-
-				return (
-						numericValues[
-								numericCount / 2 - 1
-								]
-								+ numericValues[
-								numericCount / 2
-								]
-				) / 2.0;
-			}
-
-			throw new IllegalArgumentException(
-					"Unknown voting method: "
-							+ AppContext.voting
-			);
+			throw new IllegalArgumentException("Unknown voting method: " + AppContext.voting);
 		}
 
-		private static Object computeClassificationLeafValue(
-				List<Object> labels
-		) {
-			Map<Object, Integer> frequencies =
-					new LinkedHashMap<>();
+		private static Object computeClassificationLeafValue(List<Object> labels) {
+			Object firstLabel = firstNonNullLabel(labels);
+			if (firstLabel == null) return null;
+			if (!LabelUtils.isMultiOutput(firstLabel)) {
+				return computeScalarClassificationLeafValue(labels);
+			}
+			int outputCount = LabelUtils.validateClassificationLabels(labels);
+			List<Object> predictions = new ArrayList<>(outputCount);
+			for (int outputIndex = 0; outputIndex < outputCount; outputIndex++) {
+				List<Object> outputValues = new ArrayList<>(labels.size());
+				for (Object label : labels) outputValues.add(LabelUtils.valueAt(label, outputIndex));
+				predictions.add(computeScalarClassificationLeafValue(outputValues));
+			}
+			return List.copyOf(predictions);
+		}
 
-			Object mostFrequentLabel =
-					null;
-
-			int maximumFrequency =
-					0;
-
+		private static Object computeScalarClassificationLeafValue(List<Object> labels) {
+			Map<Object, Integer> frequencies = new LinkedHashMap<>();
+			Object mostFrequentLabel = null;
+			int maximumFrequency = 0;
 			for (Object currentLabel : labels) {
-				int frequency =
-						frequencies.getOrDefault(
-								currentLabel,
-								0
-						) + 1;
-
-				frequencies.put(
-						currentLabel,
-						frequency
-				);
-
+				int frequency = frequencies.getOrDefault(currentLabel, 0) + 1;
+				frequencies.put(currentLabel, frequency);
 				if (frequency > maximumFrequency) {
-					maximumFrequency =
-							frequency;
-
-					mostFrequentLabel =
-							currentLabel;
+					maximumFrequency = frequency;
+					mostFrequentLabel = currentLabel;
 				}
 			}
-
 			return mostFrequentLabel;
 		}
+
+		private static Object firstNonNullLabel(List<Object> labels) {
+			for (Object label : labels) if (label != null) return label;
+			return null;
+		}
+
 
 		/**
 		 * Recursively trains this node.
@@ -1269,11 +1241,7 @@ public class ProximityTree
 			if (shouldStopForPureClassification(
 					data
 			)) {
-				makeLeaf(
-						onlyClassLabel(
-								data
-						)
-				);
+				makeLeaf(computeLeafLabel(data._internal_class_list()));
 
 				return;
 			}
@@ -1448,28 +1416,10 @@ public class ProximityTree
 		 * Avoids a full Gini or entropy scan for an already pure
 		 * classification node.
 		 */
-		private boolean shouldStopForPureClassification(
-				ObjectDataset data
-		) {
+		private boolean shouldStopForPureClassification(ObjectDataset data) {
 			return !AppContext.isIsolationMode()
 					&& !AppContext.isRegressionMode()
-					&& data.get_num_classes() <= 1;
-		}
-
-		private Object onlyClassLabel(
-				ObjectDataset data
-		) {
-			Set<Object> classes =
-					data.get_unique_classes_as_set();
-
-			if (classes == null || classes.isEmpty()) {
-				return computeLeafLabel(
-						data._internal_class_list()
-				);
-			}
-
-			return classes.iterator()
-					.next();
+					&& LabelUtils.isClassificationPure(data._internal_class_list());
 		}
 
 		private boolean shouldStopForPurity(
@@ -1612,9 +1562,9 @@ public class ProximityTree
 					splitter.findClosestBranches(
 							oobData,
 							tree.deriveNodeSeed(
-								pathIdentity,
-								OOB_ROUTING_PURPOSE
-						)
+									pathIdentity,
+									OOB_ROUTING_PURPOSE
+							)
 					);
 
 			if (branches.length != oobData.size()) {

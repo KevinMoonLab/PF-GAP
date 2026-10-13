@@ -12,6 +12,7 @@ import ood.OODScoreType;
 import ood.PathOODScorer;
 import ood.RelativeSupportExceedanceOODScorer;
 import util.PrintUtilities;
+import util.LabelUtils;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -128,6 +129,18 @@ public class ProximityForest implements Serializable {
             throw new IllegalArgumentException(
                     "Training data cannot be empty."
             );
+        }
+
+        if (!AppContext.isIsolationMode()) {
+            if (AppContext.isRegressionMode()) {
+                LabelUtils.validateRegressionLabels(
+                        trainData._internal_class_list()
+                );
+            } else {
+                LabelUtils.validateClassificationLabels(
+                        trainData._internal_class_list()
+                );
+            }
         }
 
         trainLock.lockInterruptibly();
@@ -971,6 +984,16 @@ public class ProximityForest implements Serializable {
         }
 
         Object prediction = combineTreePredictions(treePredictions);
+
+        if (LabelUtils.isMultiOutput(prediction)) {
+            throw new UnsupportedOperationException(
+                    "Enhanced prediction output is not supported for "
+                    + "multi-output classification or multi-target "
+                    + "regression. Use ordinary prediction "
+                    + "output instead."
+            );
+        }
+
         if (AppContext.isRegressionMode()) {
             NumericPredictionSummary summary =
                     summarizeNumericPredictions(treePredictions);
@@ -1168,73 +1191,159 @@ public class ProximityForest implements Serializable {
     private Object combineRegressionPredictions(
             Object[] treePredictions
     ) {
-        double[] numericPredictions =
-                new double[treePredictions.length];
-        int count =
-                0;
-        double sum =
-                0.0;
+        Object firstPrediction = firstNonNullPrediction(treePredictions);
+        if (firstPrediction == null) {
+            return 0.0;
+        }
+        if (!LabelUtils.isMultiOutput(firstPrediction)) {
+            return combineScalarRegressionPredictions(treePredictions);
+        }
 
-        for (Object prediction : treePredictions) {
+        int outputCount = LabelUtils.outputCount(firstPrediction);
+        List<Double> combined = new ArrayList<>(outputCount);
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            Object[] outputPredictions = new Object[treePredictions.length];
+            for (int treeIndex = 0;
+                 treeIndex < treePredictions.length;
+                 treeIndex++) {
+                Object prediction = treePredictions[treeIndex];
+                if (prediction == null) {
+                    continue;
+                }
+                if (LabelUtils.outputCount(prediction) != outputCount) {
+                    throw new IllegalStateException(
+                            "Regression tree predictions have inconsistent output counts."
+                    );
+                }
+                outputPredictions[treeIndex] =
+                        LabelUtils.valueAt(prediction, outputIndex);
+            }
+            combined.add(
+                    combineScalarRegressionPredictions(outputPredictions)
+            );
+        }
+        return List.copyOf(combined);
+    }
+
+    private Double combineScalarRegressionPredictions(
+            Object[] predictions
+    ) {
+        double[] numericPredictions = new double[predictions.length];
+        int count = 0;
+        double sum = 0.0;
+
+        for (Object prediction : predictions) {
             if (prediction instanceof Number number) {
-                double value =
-                        number.doubleValue();
-                numericPredictions[count++] =
-                        value;
-                sum +=
-                        value;
+                double value = number.doubleValue();
+                if (!Double.isFinite(value)) {
+                    throw new IllegalStateException(
+                            "Regression tree prediction must be finite, but was "
+                                    + value + "."
+                    );
+                }
+                numericPredictions[count++] = value;
+                sum += value;
+            } else if (prediction != null) {
+                throw new IllegalStateException(
+                        "Regression tree prediction is not numeric: "
+                                + prediction
+                );
             }
         }
 
         if (count == 0) {
             return 0.0;
         }
-
         if (AppContext.voting.equalsIgnoreCase("mean")) {
             return sum / count;
         }
-
         if (AppContext.voting.equalsIgnoreCase("median")) {
             Arrays.sort(numericPredictions, 0, count);
             if ((count & 1) == 1) {
                 return numericPredictions[count / 2];
             }
-            return (
-                    numericPredictions[count / 2 - 1]
-                            + numericPredictions[count / 2]
-            ) / 2.0;
+            return (numericPredictions[count / 2 - 1]
+                    + numericPredictions[count / 2]) / 2.0;
         }
-
         throw new IllegalArgumentException(
                 "Unknown voting method: " + AppContext.voting
         );
     }
 
+
     private Object combineClassificationPredictions(
             Object[] treePredictions
     ) {
-        Map<Object, Integer> voteCounts =
-                new HashMap<>();
-        Object majority =
-                null;
-        int maximumCount =
-                0;
-
-        for (Object prediction : treePredictions) {
-            int count =
-                    voteCounts.getOrDefault(prediction, 0) + 1;
-            voteCounts.put(prediction, count);
-
-            if (count > maximumCount) {
-                maximumCount =
-                        count;
-                majority =
-                        prediction;
-            }
+        Object firstPrediction = firstNonNullPrediction(treePredictions);
+        if (firstPrediction == null) {
+            return null;
+        }
+        if (!LabelUtils.isMultiOutput(firstPrediction)) {
+            return combineScalarClassificationPredictions(treePredictions);
         }
 
+        int outputCount = LabelUtils.outputCount(firstPrediction);
+        List<Object> combined = new ArrayList<>(outputCount);
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            Object[] outputPredictions = new Object[treePredictions.length];
+            for (int treeIndex = 0;
+                 treeIndex < treePredictions.length;
+                 treeIndex++) {
+                Object prediction = treePredictions[treeIndex];
+                if (prediction == null) {
+                    continue;
+                }
+                if (LabelUtils.outputCount(prediction) != outputCount) {
+                    throw new IllegalStateException(
+                            "Classification tree predictions have inconsistent output counts."
+                    );
+                }
+                outputPredictions[treeIndex] =
+                        LabelUtils.valueAt(prediction, outputIndex);
+            }
+            combined.add(
+                    combineScalarClassificationPredictions(outputPredictions)
+            );
+        }
+        return List.copyOf(combined);
+    }
+
+    private Object combineScalarClassificationPredictions(
+            Object[] predictions
+    ) {
+        Map<Object, Integer> voteCounts = new LinkedHashMap<>();
+        Object majority = null;
+        int maximumCount = 0;
+
+        for (Object prediction : predictions) {
+            if (prediction == null) {
+                continue;
+            }
+            int count = voteCounts.getOrDefault(prediction, 0) + 1;
+            voteCounts.put(prediction, count);
+            if (count > maximumCount) {
+                maximumCount = count;
+                majority = prediction;
+            }
+        }
         return majority;
     }
+
+    private static Object firstNonNullPrediction(
+            Object[] predictions
+    ) {
+        for (Object prediction : predictions) {
+            if (prediction != null) {
+                return prediction;
+            }
+        }
+        return null;
+    }
+
 
     private void recordReachedLeaves(
             ProximityTree.Node[][] reachedLeaves
@@ -1330,75 +1439,110 @@ public class ProximityForest implements Serializable {
             Object[] actualLabels,
             Object[] predictedLabels
     ) {
-        int count =
-                0;
-        double sum =
-                0.0;
+        Object firstActual = firstNonNullPrediction(actualLabels);
+        if (firstActual == null) {
+            return Double.NaN;
+        }
+        if (!LabelUtils.isMultiOutput(firstActual)) {
+            return calculateScalarRegressionScore(
+                    actualLabels,
+                    predictedLabels
+            );
+        }
 
+        int outputCount = LabelUtils.outputCount(firstActual);
+        double scoreSum = 0.0;
+        int scoreCount = 0;
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            Object[] actualOutput = new Object[actualLabels.length];
+            Object[] predictedOutput = new Object[predictedLabels.length];
+            for (int index = 0; index < actualLabels.length; index++) {
+                Object actual = actualLabels[index];
+                if (actual == null) {
+                    continue;
+                }
+                Object predicted = predictedLabels[index];
+                if (predicted == null) {
+                    throw new IllegalStateException(
+                            "Regression prediction missing at index "
+                                    + index + "."
+                    );
+                }
+                if (LabelUtils.outputCount(actual) != outputCount
+                        || LabelUtils.outputCount(predicted) != outputCount) {
+                    throw new IllegalStateException(
+                            "Regression labels and predictions have inconsistent output counts."
+                    );
+                }
+                actualOutput[index] = LabelUtils.valueAt(
+                        actual,
+                        outputIndex
+                );
+                predictedOutput[index] = LabelUtils.valueAt(
+                        predicted,
+                        outputIndex
+                );
+            }
+            double outputScore = calculateScalarRegressionScore(
+                    actualOutput,
+                    predictedOutput
+            );
+            if (!Double.isNaN(outputScore)) {
+                scoreSum += outputScore;
+                scoreCount++;
+            }
+        }
+        return scoreCount == 0
+                ? Double.NaN
+                : scoreSum / scoreCount;
+    }
+
+    private double calculateScalarRegressionScore(
+            Object[] actualLabels,
+            Object[] predictedLabels
+    ) {
+        int count = 0;
+        double sum = 0.0;
         for (Object actual : actualLabels) {
             if (actual instanceof Number number) {
                 sum += number.doubleValue();
                 count++;
             }
         }
-
         if (count == 0) {
             return Double.NaN;
         }
 
-        double mean =
-                sum / count;
-        double totalSumOfSquares =
-                0.0;
-        double residualSumOfSquares =
-                0.0;
-
-        for (int index = 0;
-             index < actualLabels.length;
-             index++) {
-            Object actual =
-                    actualLabels[index];
-
+        double mean = sum / count;
+        double totalSumOfSquares = 0.0;
+        double residualSumOfSquares = 0.0;
+        for (int index = 0; index < actualLabels.length; index++) {
+            Object actual = actualLabels[index];
             if (!(actual instanceof Number actualNumber)) {
                 continue;
             }
-
-            Object predicted =
-                    predictedLabels[index];
-
+            Object predicted = predictedLabels[index];
             if (!(predicted instanceof Number predictedNumber)) {
                 throw new IllegalStateException(
-                        "Regression prediction at index "
-                                + index
-                                + " is not numeric: "
-                                + predicted
+                        "Regression prediction at index " + index
+                                + " is not numeric: " + predicted
                 );
             }
-
-            double actualValue =
-                    actualNumber.doubleValue();
-            double predictedValue =
-                    predictedNumber.doubleValue();
-            double centered =
-                    actualValue - mean;
-            double residual =
-                    actualValue - predictedValue;
-
-            totalSumOfSquares +=
-                    centered * centered;
-            residualSumOfSquares +=
-                    residual * residual;
+            double actualValue = actualNumber.doubleValue();
+            double predictedValue = predictedNumber.doubleValue();
+            double centered = actualValue - mean;
+            double residual = actualValue - predictedValue;
+            totalSumOfSquares += centered * centered;
+            residualSumOfSquares += residual * residual;
         }
-
         if (totalSumOfSquares == 0.0) {
-            return residualSumOfSquares == 0.0
-                    ? 1.0
-                    : Double.NEGATIVE_INFINITY;
+            return residualSumOfSquares == 0.0 ? 1.0 : 0.0;
         }
-
-        return 1.0
-                - residualSumOfSquares / totalSumOfSquares;
+        return 1.0 - residualSumOfSquares / totalSumOfSquares;
     }
+
 
     private void reportTestProgress(int testIndex) {
         if (AppContext.verbosity <= 0) {

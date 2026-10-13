@@ -8,6 +8,7 @@ import purity.classification.Entropy;
 import purity.classification.Gini;
 import purity.regression.MAD;
 import purity.regression.Variance;
+import util.LabelUtils;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -157,6 +158,21 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
+    public int get_num_label_outputs() {
+        for (Object label : labels) {
+            if (label != null) {
+                return LabelUtils.outputCount(label);
+            }
+        }
+        return 0;
+    }
+
+    @Override
+    public int get_num_classes(int outputIndex) {
+        return get_unique_classes_as_set(outputIndex).size();
+    }
+
+    @Override
     public int get_class_size(Object label) {
         return classMap.getOrDefault(label, 0);
     }
@@ -196,6 +212,18 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
+    public Set<Object> get_unique_classes_as_set(int outputIndex) {
+        Set<Object> uniqueClasses = new java.util.LinkedHashSet<>();
+        for (Object label : labels) {
+            if (label == null) {
+                continue;
+            }
+            uniqueClasses.add(LabelUtils.valueAt(label, outputIndex));
+        }
+        return uniqueClasses;
+    }
+
+    @Override
     public Map<Object, ListObjectDataset> split_classes() {
         Map<Object, ListObjectDataset> split = new LinkedHashMap<>();
         for (int i = 0; i < size(); i++) {
@@ -220,12 +248,83 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
     }
 
     @Override
+    public Map<Object, ListObjectDataset> split_classes(int outputIndex) {
+        Map<Object, ListObjectDataset> split = new LinkedHashMap<>();
+        for (int i = 0; i < size(); i++) {
+            Object fullLabel = labels.get(i);
+            if (fullLabel == null) {
+                throw new IllegalStateException(
+                        "Classification labels cannot be null when splitting classes."
+                );
+            }
+            Object selectedClass = LabelUtils.valueAt(
+                    fullLabel,
+                    outputIndex
+            );
+            ListObjectDataset classDataset = split.computeIfAbsent(
+                    selectedClass,
+                    ignored -> new ListObjectDataset()
+            );
+            classDataset.add(fullLabel, data.get(i), indices.get(i));
+        }
+        for (ListObjectDataset classDataset : split.values()) {
+            copyStructuralMetadataTo(classDataset);
+            if (missingIndices != null && !classDataset.data.isEmpty()) {
+                classDataset.missingIndices =
+                        MissingIndicesBuilder.buildFromDataset(
+                                classDataset.data
+                        );
+            }
+        }
+        return split;
+    }
+
+    @Override
     public double purity(String method) {
+        Objects.requireNonNull(method, "method cannot be null.");
+
+        Object firstLabel = null;
+        for (Object label : labels) {
+            if (label != null) {
+                firstLabel = label;
+                break;
+            }
+        }
+
+        if (firstLabel == null || !LabelUtils.isMultiOutput(firstLabel)) {
+            return scalarPurity(labels, method);
+        }
+
+        int outputCount = LabelUtils.validateConsistentShape(labels);
+        double totalPurity = 0.0;
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            List<Object> outputLabels = new ArrayList<>(labels.size());
+            for (Object label : labels) {
+                if (label == null) {
+                    throw new IllegalStateException(
+                            "Supervised labels cannot be null when computing purity."
+                    );
+                }
+                outputLabels.add(
+                        LabelUtils.valueAt(label, outputIndex)
+                );
+            }
+            totalPurity += scalarPurity(outputLabels, method);
+        }
+        return totalPurity / outputCount;
+    }
+
+    private static double scalarPurity(
+            List<Object> scalarLabels,
+            String method
+    ) {
         return switch (method.toLowerCase()) {
-            case "gini" -> Gini.compute(labels);
-            case "variance" -> Variance.compute(labels);
-            case "entropy" -> Entropy.compute(labels);
-            case "mad" -> MAD.compute(labels);
+            case "gini" -> Gini.compute(scalarLabels);
+            case "variance" -> Variance.compute(scalarLabels);
+            case "entropy" -> Entropy.compute(scalarLabels);
+            case "mad" -> MAD.compute(scalarLabels);
             default -> throw new IllegalArgumentException(
                     "Unknown purity method: " + method
             );

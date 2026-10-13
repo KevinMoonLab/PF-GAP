@@ -34,7 +34,7 @@ Eager access is appropriate when:
 
 ### Lazy access
 
-A lazy reader discovers logical observations and stores `LazySeriesRef` objects in the dataset. The corresponding `LazySeriesReader` materializes an observation when PFGAP requests it.
+A lazy reader discovers logical observations and stores `LazySeriesRef` objects in the dataset. The corresponding `LazySeriesReader` materializes an observation when PFGAP requests it. For built-in per-file delimited readers, separate labels are loaded and validated while the dataset is constructed; only feature observations remain lazy.
 
 Lazy access is appropriate when:
 
@@ -79,7 +79,7 @@ PER_FILE_CUSTOM
 LAZY_PER_FILE_CUSTOM
 ```
 
-The available pairings depend on the format. [Readers](../data/Readers.md) lists every implemented reader and its required companion options.
+The available pairings depend on the format. [Readers](../data/Readers.md) lists every implemented reader and its required companion options. Lazy long-format readers are currently deferred.
 
 ## Eager delimited example
 
@@ -125,7 +125,7 @@ java -Xmx4g -jar Application/PFGAP.jar \
 
 ## Lazy per-file delimited example
 
-A lazy per-file reader discovers files immediately and defers parsing each file until its observation is requested:
+A lazy per-file reader discovers files immediately, reads the positional label sidecar once, and defers parsing each feature file until its observation is requested:
 
 ```python
 import PF_wrapper as PF
@@ -188,7 +188,7 @@ A matching pattern is:
 series_{instance:05d}.csv
 ```
 
-Per-file discovery extracts the numeric placeholder and sorts observations deterministically by that number. Separate labels must use the same observation order.
+Per-file discovery extracts the numeric placeholder and sorts observations deterministically by that number. For built-in per-file delimited readers, sidecar record `i` labels discovered instance file `i`. A one-column sidecar supplies scalar labels or targets; multiple columns supply ordered multi-output or multi-target values. The sidecar uses the same entry separator and header setting as the instance files.
 
 The file set must remain stable while PFGAP is using the dataset. Do not add, remove, rename, or rewrite observation files during a run.
 
@@ -245,7 +245,6 @@ Example:
 ```python
 status = PF.train(
     train_file="../data/train-series",
-    train_labels="../data/train_labels.csv",
     reader_type="LAZY_PER_FILE_NUMERIC_PARQUET",
     file_pattern="series_{instance:05d}.parquet",
     feature_columns=["x", "y", "z"],
@@ -258,7 +257,7 @@ status = PF.train(
 )
 ```
 
-Each materialized observation is dimension-major. Feature projection and numeric storage are retained in the reader's reconstruction specification.
+Each materialized observation is dimension-major. Feature projection and numeric storage are retained in the reader's reconstruction specification. A shared sidecar-label convention for per-file Parquet readers is currently deferred; use only the label behavior documented for the selected Parquet reader.
 
 ## Lazy observation references
 
@@ -268,7 +267,7 @@ A `LazySeriesRef` identifies one logical observation. It contains:
 - the observation index; and
 - the file or other source locator used by the materializer.
 
-The dataset stores these references in observation order. When a distance, standardizer, predictor, or other consumer requests a value, PFGAP resolves the reference through the registered reader.
+The dataset stores these references in observation order. Labels are stored directly in the dataset rather than inside `LazySeriesRef` or `LazySeriesReaderSpec`. When a distance, standardizer, predictor, or other consumer requests an observation value, PFGAP resolves the reference through the registered reader.
 
 Consumers use the dataset interface rather than opening source files directly.
 
@@ -276,7 +275,7 @@ Consumers use the dataset interface rather than opening source files directly.
 
 A `LazySeriesReaderSpec` stores the serializable settings required to reconstruct a runtime lazy reader. `LazySeriesReaderFactory` creates that runtime reader, and `AppContext` maintains the active registry.
 
-A saved model stores reader specifications and observation references rather than live readers, open files, class loaders, mappings, or caches. Loading the model reconstructs the required readers from their saved specifications.
+A saved model stores reader specifications and observation references rather than live readers, open files, class loaders, mappings, or caches. Eagerly loaded labels do not need a lazy-reader reconstruction path. Loading the model reconstructs the required readers from their saved specifications.
 
 The source paths represented by those specifications must remain available when the model is used.
 
@@ -329,7 +328,7 @@ A lazy reader may cache decoded observations or reusable source structures. The 
 - distance workspaces; and
 - worker count.
 
-Lazy access avoids mandatory full-dataset materialization. It does not guarantee constant memory use.
+Lazy access avoids mandatory full-dataset feature materialization. It does not guarantee constant memory use. Eager label loading is intentional because labels are comparatively small, are accessed throughout supervised training, and can be shape-validated before materialization begins.
 
 When the complete dataset fits comfortably in memory and observations are revisited frequently, an eager reader can be faster because it avoids repeated resolution and parsing.
 
@@ -411,6 +410,7 @@ Compatibility includes:
 - numeric or generic value type;
 - primitive numeric storage where required;
 - feature and dimension order;
+- scalar or multi-output label shape and ordering;
 - time order;
 - variable-length behavior supported by the selected distances;
 - standardization contract; and
@@ -454,7 +454,7 @@ The plugin must have an accessible no-argument constructor and return a valid tw
 
 ### Custom whole-dataset reader
 
-When discovery or grouping is proprietary, implement `DatasetReader` directly. A direct custom reader can return supported one-dimensional or two-dimensional observations according to its own source contract.
+When discovery or grouping is proprietary, implement `DatasetReader` directly. A direct custom reader can return supported one-dimensional or two-dimensional observations according to its own source contract. A custom coordinator may reuse `LabelSidecarReader` for the built-in positional delimited sidecar contract, but it remains responsible for deterministic observation ordering and for adding labels to the dataset. Custom lazy feature readers should load labels eagerly unless they define and validate a different application-specific contract.
 
 A custom whole-dataset lazy source also provides a `LazySeriesReader` and stable references. Saved-model reconstruction requires a serializable specification and a corresponding factory branch.
 
@@ -492,13 +492,17 @@ Use the corresponding `LAZY_...` reader type listed in [Readers](../data/Readers
 
 Choose an implemented lazy reader for the format or use its eager reader.
 
+### A lazy reader still reads the label file during construction
+
+This is expected for built-in per-file delimited readers. Labels are eager and feature observations are lazy. Label loading validates label shape and count before training begins.
+
 ### No files match the pattern
 
 Check the data directory, numeric placeholder, wildcard fragments, working directory, and shell quoting.
 
 ### Labels do not align with files
 
-Ensure that label order matches deterministic file-discovery order.
+Ensure that label order matches deterministic file-discovery order. For per-file delimited sidecars, also verify that the record count matches the discovered file count and that every multi-output row has the same width.
 
 ### A per-file reader returns a one-dimensional array
 

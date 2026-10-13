@@ -15,38 +15,13 @@ Use `Application/PFGAP.jar` and `Application/PF_wrapper.py` from the same PFGAP 
 
 ## Classification data
 
-A labeled classification dataset contains:
+A labeled classification dataset contains one observation and one classification target per instance.
 
-- one observation per instance; and
-- one integer class label per instance.
+A scalar target may be an integer or string label. PFGAP does not require integer classes to be contiguous or zero-based.
 
-PFGAP currently supports single-label classification with integer class labels. Examples of valid labels include:
+Multi-output classification uses an ordered label vector with one integer or string component per output. Every labeled instance must use the same output count and ordering. A single output remains scalar rather than being wrapped in a one-element list.
 
-```text
-0
-1
-2
-```
-
-or:
-
-```text
-1
-2
-3
-```
-
-String labels and multi-label targets are not currently supported. If the original dataset uses text labels, encode them as integers before running PFGAP and retain the mapping so predictions can be converted back to the original class names.
-
-For example:
-
-```text
-setosa     -> 1
-versicolor -> 2
-virginica  -> 3
-```
-
-Apply the same mapping to the training, validation, test, and later prediction data.
+Use the same label representation and output ordering for training, validation, test, and later prediction data.
 
 ## Label placement
 
@@ -79,6 +54,17 @@ Direct Java configuration:
 -target_column=first
 ```
 
+### Named label columns
+
+Readers that support named columns can select multiple embedded labels:
+
+```python
+feature_columns=["feature_0", "feature_1", "feature_2"]
+label_columns=["label_0", "label_1"]
+```
+
+The configured column order defines the output order. See [Readers](../data/Readers.md) for reader-specific support.
+
 ### Separate label files
 
 When labels are stored separately, use `train_labels` and, when available, `test_labels`:
@@ -90,7 +76,7 @@ test_file="../data/test.csv"
 test_labels="../data/test_labels.csv"
 ```
 
-The labels must appear in the same order as the corresponding observations.
+The labels must appear in the same order as the corresponding observations. A one-column label file supplies scalar labels; multiple columns supply an ordered multi-output target. Per-file sidecars use the same delimiter and header setting as the instance files.
 
 ## Train a classification forest
 
@@ -291,7 +277,7 @@ Direct Java form:
 -purity_threshold=1e-6
 ```
 
-See the [Configuration Reference](../reference/Configuration_Reference.md) for supported purity settings and defaults.
+For multi-output classification, the selected impurity is computed per output and aggregated internally; use the ordinary `gini` or `entropy` setting. See the [Configuration Reference](../reference/Configuration_Reference.md) for supported purity settings and defaults.
 
 ## Select distances
 
@@ -476,7 +462,7 @@ Direct Java:
 -get_predictions=true
 ```
 
-Predictions use the integer class labels supplied during training. If the original classes were encoded from strings, convert predictions using the same saved mapping.
+Scalar predictions use the integer or string labels supplied during training. Multi-output predictions preserve the configured output order. Prediction-file schemas are documented in [Outputs](../reference/Outputs.md).
 
 ### Enhanced outputs
 
@@ -492,7 +478,7 @@ Direct Java:
 -return_enhanced_outputs=true
 ```
 
-Enhanced output availability and schemas are documented in [Outputs](../reference/Outputs.md).
+Enhanced output availability and schemas are documented in [Outputs](../reference/Outputs.md). Enhanced prediction details are scalar-only in v1; ordinary prediction output supports multi-output classification.
 
 ### Proximities
 
@@ -585,13 +571,13 @@ See [Parallelism and Reproducibility](Parallelism_and_Reproducibility.md).
 
 ## Common problems
 
-### String labels are present
+### Label shape or type is invalid
 
-Encode every class as an integer before running PFGAP. Apply the same mapping to all datasets and retain it with the model outputs.
+Classification components must be integers or strings. For multi-output data, every labeled instance must use the same output count and ordering. Missing label components are not supported.
 
 ### Labels and observations are misaligned
 
-When labels are stored separately, ensure that the label count and ordering match the observations exactly.
+When labels are stored separately, ensure that the label count and ordering match the observations exactly. Multi-output sidecar rows must also have a consistent number of columns.
 
 ### Classification is not selected
 

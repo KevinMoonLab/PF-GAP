@@ -272,6 +272,25 @@ target_column="first"
 
 Targets can be embedded in supported input files or supplied separately where the selected reader and workflow permit it. `exists_testlabels` describes whether evaluation targets are available; it does not identify the target location by itself.
 
+For readers with named-column selection, configure embedded features and targets explicitly:
+
+```python
+feature_columns=["feature_0", "feature_1", "feature_2"]
+label_columns=["label_0", "label_1"]
+```
+
+One label column produces a scalar target. Multiple columns produce an ordered multi-output classification target or multi-target regression value. The configured column order defines the output order.
+
+For built-in per-file delimited readers, `train_labels` and `test_labels` are positional sidecars:
+
+```python
+train_labels="data/train_labels.csv"
+test_labels="data/test_labels.csv"
+exists_testlabels=True
+```
+
+Sidecar record `i` corresponds to discovered instance file `i`. The sidecar uses the same entry separator and header setting as the instance files. Labels are loaded eagerly even when feature observations are lazy. Isolation mode and unlabeled prediction data do not require sidecars.
+
 ### Task and forest
 
 ```python
@@ -310,7 +329,7 @@ target_column="first"
 - `1` selects a one-dimensional observation such as a tabular feature vector or univariate sequence.
 - `2` selects a two-dimensional observation such as a multivariate series.
 
-`numeric_storage` accepts canonical values `auto`, `float32`, and `float64`; the Java interface also recognizes documented aliases. Reader-specific options such as `file_pattern`, `id_column`, `time_column`, `feature_columns`, HDF5 paths, and custom-reader descriptors should be supplied only when required by the selected reader.
+`numeric_storage` accepts canonical values `auto`, `float32`, and `float64`; the Java interface also recognizes documented aliases. Reader-specific options such as `file_pattern`, `id_column`, `time_column`, `feature_columns`, `label_columns`, HDF5 paths, and custom-reader descriptors should be supplied only when required by the selected reader. Use `label_columns` for targets embedded in a shared source; use `train_labels` and `test_labels` for supported separate sidecars. Long-format Parquet readers currently use embedded labels, while shared Parquet sidecar conventions are deferred.
 
 See [Dataset Representations](../data/Dataset_Representations.md), [Data Formats](../data/Data_Formats.md), and [Readers](../data/Readers.md).
 
@@ -343,7 +362,7 @@ export=1
 verbosity=1
 ```
 
-Request only the artifacts needed by the workflow. Some outputs require compatible task state or additional collection during training. `export` controls the application's export level, while individual booleans request specific artifacts. `verbosity` controls runtime reporting rather than which scientific results are computed.
+Request only the artifacts needed by the workflow. Ordinary prediction output supports scalar and multi-output classification and regression. Enhanced prediction details remain scalar-only in v1. Some outputs require compatible task state or additional collection during training. `export` controls the application's export level, while individual booleans request specific artifacts. `verbosity` controls runtime reporting rather than which scientific results are computed.
 
 See [Outputs](../reference/Outputs.md) and [Model Persistence](../reference/Model_Persistence.md).
 
@@ -480,7 +499,7 @@ Some options affect other settings or require companion options.
 
 In the Python helper, omitting `forest_mode` selects regression when `regressor=True`; otherwise it selects classification. When explicit mode is `regression` or `isolation`, the helper adjusts the legacy regression flag accordingly. It also replaces the default `gini` purity with a mode-appropriate default for regression or isolation.
 
-For clarity, set `forest_mode` explicitly and choose task-specific purity only when departing from the documented defaults.
+For clarity, set `forest_mode` explicitly and choose task-specific purity only when departing from the documented defaults. The ordinary `gini` and `entropy` settings apply to multi-output classification, and `variance` and `mad` apply to multi-target regression; no separate multi-output purity names are required.
 
 ### Missing values and imputation
 
@@ -543,6 +562,9 @@ Reader options form a compatibility contract rather than an independent collecti
 - `PER_FILE_PARQUET` requires `file_pattern` in the current Python helper.
 - Lazy `PER_FILE_PARQUET` does not currently support imputation or imputed-data output through the helper.
 - Long-form readers may require `id_column`, `time_column`, and feature or label column selections.
+- Built-in per-file delimited readers require a supervised label sidecar unless the workflow is isolation or unlabeled prediction.
+- Per-file delimited sidecars must match deterministic observation order, record count, and output width.
+- Lazy per-file delimited readers defer feature observations but load labels eagerly.
 - HDF5 readers use `hdf5_dataset_path` and, where applicable, `hdf5_label_dataset_path`.
 - Custom readers require an appropriate descriptor and may accept custom parameters.
 
@@ -630,7 +652,7 @@ A saved model does not remove the need to describe evaluation input correctly. K
 - numeric storage where relevant;
 - reader and dataset layout;
 - separators and header handling;
-- target placement or separate-label arrangement;
+- target placement, output count and ordering, or separate-label arrangement;
 - feature ordering and column selection;
 - standardization statistics; and
 - missing-value handling.
@@ -679,7 +701,9 @@ Options may be individually valid but incompatible together. Common causes inclu
 - KNN initialization without `knn_distances`;
 - an invalid dimension-selection count or proportion;
 - OOD output without required training summaries;
-- standardization statistics incompatible with the evaluation data; or
+- standardization statistics incompatible with the evaluation data;
+- a missing supervised sidecar, sidecar count mismatch, inconsistent output width, missing label component, or non-finite regression target;
+- a label sidecar supplied in isolation mode; or
 - outputs requested for a task that cannot produce them.
 
 ### Python and Java runs differ
@@ -704,9 +728,11 @@ Before launching a substantive run, verify:
 - [ ] `PFGAP.jar`, `PF_wrapper.py`, documentation, and custom extensions are revision-compatible.
 - [ ] `forest_mode` matches the task.
 - [ ] Input and label paths resolve from the actual working directory.
+- [ ] Embedded label columns or positional sidecars match the intended scalar or multi-output target contract.
 - [ ] The selected reader matches the physical data layout.
 - [ ] `data_dimension`, `numeric_data`, and `numeric_storage` match the observation representation.
-- [ ] Separators, header handling, target placement, and column selections match the files.
+- [ ] Separators, header handling, target placement, output ordering, and column selections match the files.
+- [ ] Per-file sidecar count and order match deterministic instance-file discovery.
 - [ ] Distance names and custom descriptors are valid.
 - [ ] Missing-data and imputation settings are compatible with the reader and distances.
 - [ ] Standardization settings and statistics are appropriate for training or evaluation.

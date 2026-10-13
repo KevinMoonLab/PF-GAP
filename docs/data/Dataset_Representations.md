@@ -588,19 +588,45 @@ A reader's documentation must state whether explicit time coordinates are preser
 
 ## 13. Labels and targets
 
-Labels and targets are stored separately from observation values in the dataset abstraction, even when they originate from a column embedded in the same input file.
+Labels and targets are stored separately from observation values in the dataset abstraction, even when they originate from columns embedded in the same input file. Label shape is independent of observation shape: a one- or two-dimensional observation may have either a scalar or multi-output label.
 
 ### 13.1 Classification targets
 
-Classification labels may use supported object values, including integer-like or string labels. Algorithms must not assume class labels are contiguous zero-based integers.
+A scalar classification label is represented as an `Integer` or `String`. Algorithms must not assume that class labels are contiguous zero-based integers.
+
+Multi-output classification uses an ordered `List<?>` with one component per output. Each component must be an `Integer` or `String`, and every labeled observation in a dataset must use the same output count. A single classification output remains scalar rather than being wrapped in a one-element list.
+
+```java
+Object scalarLabel = "positive";
+List<Object> multiOutputLabel = List.of("positive", 1);
+```
+
+The list order is part of the target schema and follows the configured label-column or sidecar-column order.
 
 ### 13.2 Regression targets
 
-Regression uses numeric target values. Reader and configuration rules determine how a target is parsed and stored.
+A scalar regression target is represented as a finite `Double`.
 
-### 13.3 Missing targets
+Multi-target regression uses an ordered `List<Double>`. Every labeled observation in a dataset must use the same target count, and each component must be finite. A single regression target remains scalar rather than being wrapped in a one-element list.
 
-Missing observation values and missing labels or targets are different problems. A reader may support missing feature values without supporting missing training targets.
+```java
+double scalarTarget = 3.5;
+List<Double> multiTarget = List.of(191.0, 36.0, 50.0);
+```
+
+### 13.3 Label sources
+
+Readers may obtain labels or targets from:
+
+- Columns embedded in the data source
+- A separate positional label sidecar
+- A custom reader or application integration
+
+Reader documentation defines which sources are supported. For positional per-file sidecars, label record `i` corresponds to instance file `i` after deterministic file ordering. Labels are loaded eagerly even when feature observations are lazy.
+
+### 13.4 Missing targets
+
+Missing observation values and missing labels or targets are different problems. A reader may support missing feature values without supporting missing training targets. Built-in supervised readers reject missing label components and non-finite regression targets.
 
 Task documentation should state whether labels or targets are required for:
 
@@ -959,6 +985,7 @@ Before launching a PFGAP workflow, verify:
 - How are missing values represented?
 - Are original missing coordinates recorded if imputation output is required?
 - Are labels or targets embedded, separate, or absent?
+- Are labels scalar or multi-output, with a consistent output count and ordering?
 - Does the selected task require evaluation labels?
 - Does the selected distance support the representation, semantics, and shape?
 - Does standardization support the representation?

@@ -99,6 +99,18 @@ java -Xmx4g -jar Application/PFGAP.jar \
   -out=output/run/
 ```
 
+## Named multi-output columns
+
+For a shared source whose reader supports named columns:
+
+```text
+-feature_columns=feature_0,feature_1,feature_2
+-label_columns=label_0,label_1
+-forest_mode=classification
+```
+
+For multi-target regression, use `-forest_mode=regression` with a regression purity measure such as `-purity_measure=variance`.
+
 ## Minimal saved-model evaluation command
 
 ```bash
@@ -148,21 +160,21 @@ Optional test or validation input. `None` disables the test input.
 **Type:** Path or `None`
 **Default:** `None`
 
-Separate training labels or targets.
+Separate training labels or targets. Built-in per-file delimited readers interpret this as a positional sidecar aligned with deterministic instance-file order. One column supplies a scalar target; multiple columns supply an ordered multi-output target.
 
 ## `-test_labels`
 
 **Type:** Path or `None`
 **Default:** `None`
 
-Separate test or evaluation labels or targets. Supplying a non-`None` path also sets `exists_testlabels` to true.
+Separate test or evaluation labels or targets. Built-in per-file delimited readers interpret this as a positional sidecar aligned with deterministic instance-file order. Supplying a non-`None` path also sets `exists_testlabels` to true.
 
 ## `-exists_testlabels`
 
 **Type:** Boolean
 **Default:** `false`
 
-Indicates whether known test or evaluation labels or targets are available. A supplied `-test_labels` path takes precedence and keeps this setting true.
+Indicates whether known test or evaluation labels or targets are available. A supplied `-test_labels` path takes precedence and keeps this setting true. When false, supported readers may construct unlabeled prediction data without a sidecar.
 
 ## `-out`
 
@@ -228,7 +240,7 @@ Legacy regression selector. Prefer `-forest_mode=regression` for new commands.
 **Type:** String
 **Default:** `gini`
 
-Selects the purity or split objective. Task guides use `gini` for classification, `variance` for regression, and `isolation_path_length` for isolation.
+Selects the purity or split objective. Task guides use `gini` or `entropy` for classification, `variance` or `mad` for regression, and `isolation_path_length` for isolation. The ordinary objectives also apply to multi-output targets.
 
 ## `-purity_threshold`
 
@@ -242,7 +254,7 @@ Purity stopping threshold.
 **Type:** String
 **Default:** `mean`
 
-Tree-prediction aggregation used by regression.
+Tree-prediction aggregation used by regression. Multi-target predictions are aggregated independently in configured target order.
 
 ## `-regression_num_branches`
 
@@ -407,14 +419,14 @@ Time or order column for compatible long-form readers.
 **Type:** Comma-separated string list
 **Default:** Empty list
 
-Feature columns for compatible readers.
+Ordered feature columns for compatible readers. Columns omitted from both feature and label selection may be ignored where supported.
 
 ## `-label_columns`
 
 **Type:** Comma-separated string list
 **Default:** Empty list
 
-Label or target columns for compatible readers.
+Ordered embedded label or target columns for compatible readers. One column produces a scalar target; multiple columns produce an ordered multi-output target. This is distinct from `-train_labels` and `-test_labels` sidecar paths.
 
 ## `-hdf5_dataset_path`
 
@@ -431,6 +443,10 @@ Feature dataset location for HDF5 readers.
 Label dataset location for HDF5 readers.
 
 Reader names, layouts, eager or lazy behavior, and required companion options are documented in [Readers](../data/Readers.md).
+
+## Label source selection
+
+Use `-label_columns` for labels embedded in a shared tabular or long-format source. Use `-train_labels` and `-test_labels` for separate positional sidecars supported by per-file delimited readers. Sidecars use the configured entry separator and header setting and are loaded eagerly even when feature observations are lazy. Isolation mode does not require labels. Long-format Parquet readers currently use embedded label columns; Parquet sidecar conventions are deferred.
 
 ## Custom readers
 
@@ -509,7 +525,7 @@ fp64
 **Type:** String
 **Default:** Tab
 
-Entry delimiter for compatible text readers. To pass an escaped tab through a shell, use the form required by that shell and reader.
+Entry delimiter for compatible text readers. To pass an escaped tab through a shell, use the form required by that shell and reader. Per-file delimited label sidecars use the same delimiter.
 
 ## `-array_separator`
 
@@ -523,7 +539,7 @@ Nested-array delimiter for compatible two-dimensional delimited layouts.
 **Type:** Boolean
 **Default:** `false`
 
-Indicates that compatible delimited input contains a header row.
+Indicates that compatible delimited input contains a header row. Per-file delimited label sidecars use the same header setting.
 
 ## `-target_column`
 
@@ -906,14 +922,14 @@ The complete standardization constraints are documented in [Standardization](../
 **Type:** Boolean
 **Default:** `false`
 
-Requests ordinary aggregate prediction artifacts.
+Requests ordinary aggregate prediction artifacts, including supported multi-output classification and multi-target regression layouts.
 
 ## `-return_enhanced_outputs`
 
 **Type:** Boolean
 **Default:** `false`
 
-Requests structured per-instance prediction details.
+Requests structured per-instance prediction details. Enhanced prediction details remain scalar-only in v1.
 
 ## `-get_training_outlier_scores`
 
@@ -977,7 +993,7 @@ During current saved-model evaluation, supply the evaluation input through both 
 
 ## Test labels
 
-A non-`None` `-test_labels` path marks test labels as present. A later `-exists_testlabels=false` argument does not clear that state.
+A non-`None` `-test_labels` path marks test labels as present. A later `-exists_testlabels=false` argument does not clear that state. For unlabeled prediction data, omit `-test_labels` and leave `-exists_testlabels=false`.
 
 ## Imputed-only output
 
@@ -1001,7 +1017,11 @@ Requesting OOD output does not require `-return_enhanced_outputs=true`.
 
 Training reader selection uses `-train_reader_type` when present, otherwise `-reader_type`. Test reader selection uses `-test_reader_type` when present, otherwise `-reader_type`.
 
-Training and test file patterns follow the same override rule.
+Training and test file patterns follow the same override rule.  
+
+### Per-file delimited sidecars
+
+For built-in per-file delimited readers, sidecar record `i` corresponds to discovered instance file `i`. The sidecar record count must match the instance-file count, and every multi-output row must have the same width. Missing label components and non-finite regression targets are rejected.
 
 ## Rejected and unavailable options
 
@@ -1046,7 +1066,11 @@ Common command-line errors include:
 - malformed custom-reader parameters;
 - invalid dimension-selection settings;
 - KNN imputation without KNN distances;
-- incompatible standardization settings; and
+- incompatible standardization settings;
+- a missing supervised sidecar path for a built-in per-file delimited reader;
+- a positional sidecar count mismatch;
+- inconsistent sidecar output widths, missing label components, or non-finite regression targets;
+- a label sidecar supplied in isolation mode; and
 - an invalid OOD score type.
 
 ## Related documentation

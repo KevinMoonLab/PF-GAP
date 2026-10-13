@@ -1,4 +1,4 @@
-## Imputed-Only Output
+# Imputed-Only Output
 
 This reference defines PFGAP's imputed-only output: a sparse coordinate artifact containing final numeric values only at positions that were missing in the original input. It describes the output request, file selection, coordinate mapping, data types, exact-zero handling, standardization reversal, unequal-length behavior, and validation rules.
 
