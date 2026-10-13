@@ -78,7 +78,6 @@ public class Splitter
 	protected Object[] exemplars;
 
 
-	protected ListObjectDataset[] best_split;
 
 	/** Winning-candidate distance summaries, or null when collection is disabled. */
 	private SplitDistanceSummary splitDistanceSummary;
@@ -831,9 +830,6 @@ public class Splitter
 		return assignments;
 	}
 
-	public ObjectDataset[] getBestSplits() {
-		return best_split;
-	}
 
 	/**
 	 * Searches candidate splits and retains the lowest-purity valid split.
@@ -848,7 +844,6 @@ public class Splitter
 			ObjectDataset data, ParallelRuntime runtime
 	) throws Exception {
 		Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
-		best_split = null;
 		distance_measure = null;
 		exemplars = null;
 		selectedDimensions = null;
@@ -909,12 +904,12 @@ public class Splitter
 		if (winner == null) {
 			return null;
 		}
-		best_split = winner.splits();
+		ListObjectDataset[] winningSplits = winner.splits();
 		distance_measure = winner.distanceMeasure();
 		exemplars = winner.exemplars().clone();
 		splitDistanceSummary = winner.distanceSummary();
-		num_children = best_split.length;
-		return best_split;
+		num_children = winningSplits.length;
+		return winningSplits;
 	}
 
 	/**

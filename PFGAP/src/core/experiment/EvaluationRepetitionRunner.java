@@ -98,10 +98,8 @@ public final class EvaluationRepetitionRunner {
                         context.getParallelRuntime()
                 );
 
-        ListObjectDataset trainingData = Objects.requireNonNull(
-                datasets.trainingData(),
-                "Evaluation mode requires loaded training data."
-        );
+        ListObjectDataset trainingData = datasets.trainingData();
+        int trainingSize = datasets.trainingSize();
 
         ListObjectDataset testingData = Objects.requireNonNull(
                 datasets.testingData(),
@@ -115,6 +113,7 @@ public final class EvaluationRepetitionRunner {
 
         int repetition = context.getRepetition();
         AppContext.validateEvaluationOutputConfiguration();
+        validateTrainingDataRequirements(trainingData);
 
         performTestingImputationWhenRequested(
                 testingData,
@@ -148,7 +147,7 @@ public final class EvaluationRepetitionRunner {
         if (AppContext.isIsolationMode()) {
             result = runIsolationEvaluation(
                     forest,
-                    trainingData,
+                    trainingSize,
                     testingData,
                     repetition,
                     context,
@@ -157,7 +156,7 @@ public final class EvaluationRepetitionRunner {
         } else {
             result = runPredictiveEvaluation(
                     forest,
-                    trainingData,
+                    trainingSize,
                     testingData,
                     effectiveDatasetName,
                     repetition,
@@ -169,7 +168,7 @@ public final class EvaluationRepetitionRunner {
         ExperimentResultRecord record = resultAssembler.assemble(
                 result,
                 effectiveDatasetName,
-                trainingData,
+                trainingSize,
                 testingData,
                 context
         );
@@ -179,7 +178,7 @@ public final class EvaluationRepetitionRunner {
 
     private ProximityForestResult runIsolationEvaluation(
             ProximityForest forest,
-            ListObjectDataset trainingData,
+            int trainingSize,
             ListObjectDataset testingData,
             int repetition,
             ExperimentRepetitionContext context,
@@ -189,7 +188,7 @@ public final class EvaluationRepetitionRunner {
          * independent and may both be requested. */
         ExperimentScoringCoordinator.ScoreArtifact scoreArtifact =
                 scoringCoordinator.computeTestIsolationScores(
-                        forest, testingData, trainingData.size(), repetition
+                        forest, testingData, trainingSize, repetition
                 );
         scoringCoordinator.recordArtifact(
                 "testOutlierScores", scoreArtifact,
@@ -212,7 +211,7 @@ public final class EvaluationRepetitionRunner {
 
     private ProximityForestResult runPredictiveEvaluation(
             ProximityForest forest,
-            ListObjectDataset trainingData,
+            int trainingSize,
             ListObjectDataset testingData,
             String datasetName,
             int repetition,
@@ -251,7 +250,7 @@ public final class EvaluationRepetitionRunner {
             );
         }
         writeTestTrainProximitiesWhenRequested(
-                forest, testingData, trainingData, repetition,
+                forest, testingData, trainingSize, repetition,
                 context, proximityCoordinator
         );
         return result;
@@ -317,6 +316,25 @@ public final class EvaluationRepetitionRunner {
         );
     }
 
+    private static void validateTrainingDataRequirements(
+            ListObjectDataset trainingData
+    ) {
+        if (trainingData != null) {
+            return;
+        }
+
+        if (AppContext.perform_test_imputation
+                || AppContext.impute_test
+                || AppContext.output_test_imputed_csr) {
+            throw new UnsupportedOperationException(
+                    "Testing-data imputation is unavailable for a " +
+                    "PREDICTION_ONLY model because the saved model does not " +
+                    "contain the complete training observations. Save the " +
+                    "model in EMBEDDED mode to retain imputation support."
+            );
+        }
+    }
+
     private void performTestingImputationWhenRequested(
             ListObjectDataset testingData,
             ListObjectDataset trainingData,
@@ -342,7 +360,7 @@ public final class EvaluationRepetitionRunner {
     private void writeTestTrainProximitiesWhenRequested(
             ProximityForest forest,
             ListObjectDataset testingData,
-            ListObjectDataset trainingData,
+            int trainingSize,
             int repetition,
             ExperimentRepetitionContext context,
             ExperimentProximityCoordinator proximityCoordinator
@@ -355,7 +373,7 @@ public final class EvaluationRepetitionRunner {
                 proximityCoordinator.computeAndWriteTestTrainProximities(
                         forest,
                         testingData,
-                        trainingData,
+                        trainingSize,
                         repetition
                 );
 

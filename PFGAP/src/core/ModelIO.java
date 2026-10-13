@@ -1,6 +1,7 @@
 package core;
 
 import datasets.ListObjectDataset;
+import datasets.readers.lazy.LazySeriesRef;
 import preprocessing.standardization.StandardizationConfig;
 import trees.ProximityForest;
 
@@ -13,22 +14,100 @@ import java.util.Set;
 
 public class ModelIO {
 
-    public static void saveModel(String path, ProximityForest forest, ListObjectDataset trainData, AppContextSnapshot snapshot) throws IOException {
-        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(path))) {
-            out.writeObject(forest);
-            out.writeObject(trainData);
-            out.writeObject(snapshot);
+    /**
+     * Saves a model using the existing embedded-training-data behavior.
+     */
+    public static void saveModel(
+            String path,
+            ProximityForest forest,
+            ListObjectDataset trainData,
+            AppContextSnapshot snapshot
+    ) throws IOException {
+        saveModel(
+                path,
+                forest,
+                trainData,
+                snapshot,
+                ModelPersistenceMode.EMBEDDED
+        );
+    }
+
+    /**
+     * Saves a model using the requested persistence mode.
+     *
+     * <p>PREDICTION_ONLY persistence is intentionally limited in v1 to models
+     * trained from eagerly loaded data. The trained forest is retained, but
+     * the complete training dataset is omitted from the serialized artifact.</p>
+     */
+    public static void saveModel(
+            String path,
+            ProximityForest forest,
+            ListObjectDataset trainData,
+            AppContextSnapshot snapshot,
+            ModelPersistenceMode persistenceMode
+    ) throws IOException {
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException("path cannot be null or blank.");
+        }
+        if (forest == null) {
+            throw new IllegalArgumentException("forest cannot be null.");
+        }
+        if (trainData == null) {
+            throw new IllegalArgumentException("trainData cannot be null.");
+        }
+        if (snapshot == null) {
+            throw new IllegalArgumentException("snapshot cannot be null.");
+        }
+        if (persistenceMode == null) {
+            throw new IllegalArgumentException(
+                    "persistenceMode cannot be null."
+            );
+        }
+
+        PersistedModel persistedModel;
+        switch (persistenceMode) {
+            case EMBEDDED:
+                persistedModel = PersistedModel.embedded(
+                        forest,
+                        trainData,
+                        snapshot
+                );
+                break;
+
+            case PREDICTION_ONLY:
+                requireEagerTrainingData(trainData);
+                persistedModel = PersistedModel.predictionOnly(
+                        forest,
+                        trainData.size(),
+                        snapshot
+                );
+                break;
+
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported persistence mode: " + persistenceMode
+                );
+        }
+
+        try (ObjectOutputStream out = new ObjectOutputStream(
+                new FileOutputStream(path)
+        )) {
+            out.writeObject(persistedModel);
         }
     }
 
-    /*public static LoadedModel loadModel(String path) throws IOException, ClassNotFoundException {
-        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(path))) {
-            ProximityForest forest = (ProximityForest) in.readObject();
-            ListObjectDataset trainData = (ListObjectDataset) in.readObject();
-            AppContextSnapshot snapshot = (AppContextSnapshot) in.readObject();
-            return new LoadedModel(forest, trainData, snapshot);
+    private static void requireEagerTrainingData(
+            ListObjectDataset trainData
+    ) {
+        for (Object series : trainData.getData()) {
+            if (series instanceof LazySeriesRef) {
+                throw new IllegalArgumentException(
+                        "PREDICTION_ONLY persistence currently supports only " +
+                        "models trained from eagerly loaded data."
+                );
+            }
         }
-    }*/
+    }
 
     public static LoadedModel loadModel(String path) throws IOException, ClassNotFoundException {
         // Collect JARs from descriptors
@@ -70,10 +149,44 @@ public class ModelIO {
                 }
             }
         }) {
-            ProximityForest forest = (ProximityForest) in.readObject();
-            ListObjectDataset trainData = (ListObjectDataset) in.readObject();
-            AppContextSnapshot snapshot = (AppContextSnapshot) in.readObject();
-            return new LoadedModel(forest, trainData, snapshot);
+            Object first = in.readObject();
+
+            if (first instanceof PersistedModel persistedModel) {
+                if (persistedModel.getFormatVersion()
+                        != PersistedModel.CURRENT_FORMAT_VERSION) {
+                    throw new InvalidObjectException(
+                            "Unsupported model format version: " +
+                            persistedModel.getFormatVersion()
+                    );
+                }
+
+                return new LoadedModel(
+                        persistedModel.getForest(),
+                        persistedModel.getTrainingData(),
+                        persistedModel.getSnapshot(),
+                        persistedModel.getPersistenceMode(),
+                        persistedModel.getTrainingSize()
+                );
+            }
+
+            if (first instanceof ProximityForest forest) {
+                ListObjectDataset trainData =
+                        (ListObjectDataset) in.readObject();
+                AppContextSnapshot snapshot =
+                        (AppContextSnapshot) in.readObject();
+                return new LoadedModel(
+                        forest,
+                        trainData,
+                        snapshot,
+                        ModelPersistenceMode.EMBEDDED,
+                        trainData.size()
+                );
+            }
+
+            throw new InvalidObjectException(
+                    "Unrecognized saved-model format: " +
+                    (first == null ? "null" : first.getClass().getName())
+            );
         }
     }
 
@@ -192,11 +305,39 @@ public class ModelIO {
         public final ProximityForest forest;
         public final ListObjectDataset trainData;
         public final AppContextSnapshot snapshot;
+        public final ModelPersistenceMode persistenceMode;
+        public final int trainingSize;
 
-        public LoadedModel(ProximityForest forest, ListObjectDataset trainData, AppContextSnapshot snapshot) {
+        public LoadedModel(
+                ProximityForest forest,
+                ListObjectDataset trainData,
+                AppContextSnapshot snapshot
+        ) {
+            this(
+                    forest,
+                    trainData,
+                    snapshot,
+                    ModelPersistenceMode.EMBEDDED,
+                    trainData == null ? 0 : trainData.size()
+            );
+        }
+
+        public LoadedModel(
+                ProximityForest forest,
+                ListObjectDataset trainData,
+                AppContextSnapshot snapshot,
+                ModelPersistenceMode persistenceMode,
+                int trainingSize
+        ) {
             this.forest = forest;
             this.trainData = trainData;
             this.snapshot = snapshot;
+            this.persistenceMode = persistenceMode;
+            this.trainingSize = trainingSize;
+        }
+
+        public boolean hasTrainingData() {
+            return trainData != null;
         }
     }
 }

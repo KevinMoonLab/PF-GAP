@@ -93,10 +93,32 @@ public final class PFGAP {
             ListObjectDataset trainingData,
             ParallelRuntime runtime
     ) throws Exception {
-        validateForestAndDataset(
-                forest,
+        validateDataset(
                 trainingData,
                 "trainingData"
+        );
+
+        return computeTrainProximities(
+                forest,
+                trainingData.size(),
+                runtime
+        );
+    }
+
+    /**
+     * Computes the configured train/train proximity matrix from the retained
+     * forest state and the original training-set size.
+     *
+     * @return typed dense or compressed-sparse result
+     */
+    public static ProximityMatrixResult computeTrainProximities(
+            ProximityForest forest,
+            int trainingSize,
+            ParallelRuntime runtime
+    ) throws Exception {
+        validateForestAndTrainingSize(
+                forest,
+                trainingSize
         );
 
         Objects.requireNonNull(
@@ -111,7 +133,7 @@ public final class PFGAP {
             CompressedSparseProximityMatrix sparse =
                     ProximityMatrixComputer.computeTrainSparse(
                             forest,
-                            trainingData.size(),
+                            trainingSize,
                             measure,
                             DEFAULT_SPARSE_RETENTION_THRESHOLD,
                             runtime
@@ -125,7 +147,7 @@ public final class PFGAP {
         double[][] dense =
                 ProximityMatrixComputer.computeTrainDense(
                         forest,
-                        trainingData.size(),
+                        trainingSize,
                         measure,
                         runtime
                 );
@@ -146,10 +168,34 @@ public final class PFGAP {
             ListObjectDataset trainingData,
             ParallelRuntime runtime
     ) throws Exception {
-        validateForestAndDataset(
-                forest,
+        validateDataset(
                 trainingData,
                 "trainingData"
+        );
+
+        return computeTestTrainProximities(
+                forest,
+                testingData,
+                trainingData.size(),
+                runtime
+        );
+    }
+
+    /**
+     * Computes the configured test/train proximity matrix from the test data,
+     * retained forest state, and the original training-set size.
+     *
+     * @return typed dense or compressed-sparse result
+     */
+    public static ProximityMatrixResult computeTestTrainProximities(
+            ProximityForest forest,
+            ListObjectDataset testingData,
+            int trainingSize,
+            ParallelRuntime runtime
+    ) throws Exception {
+        validateForestAndTrainingSize(
+                forest,
+                trainingSize
         );
 
         validateDataset(
@@ -170,7 +216,7 @@ public final class PFGAP {
                     ProximityMatrixComputer.computeTestTrainSparse(
                             forest,
                             testingData.size(),
-                            trainingData.size(),
+                            trainingSize,
                             measure,
                             DEFAULT_SPARSE_RETENTION_THRESHOLD,
                             runtime
@@ -185,7 +231,7 @@ public final class PFGAP {
                 ProximityMatrixComputer.computeTestTrainDense(
                         forest,
                         testingData.size(),
-                        trainingData.size(),
+                        trainingSize,
                         measure,
                         runtime
                 );
@@ -195,10 +241,9 @@ public final class PFGAP {
         );
     }
 
-    private static void validateForestAndDataset(
+    private static void validateForestAndTrainingSize(
             ProximityForest forest,
-            ListObjectDataset dataset,
-            String datasetName
+            int trainingSize
     ) {
         Objects.requireNonNull(
                 forest,
@@ -211,10 +256,11 @@ public final class PFGAP {
             );
         }
 
-        validateDataset(
-                dataset,
-                datasetName
-        );
+        if (trainingSize < 0) {
+            throw new IllegalArgumentException(
+                    "trainingSize cannot be negative."
+            );
+        }
     }
 
     private static void validateDataset(

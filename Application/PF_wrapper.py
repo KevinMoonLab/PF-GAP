@@ -93,6 +93,22 @@ def _ood_score_type_arg(value):
         )
     return normalized
 
+def _model_persistence_mode_arg(value):
+    if value is None:
+        return "EMBEDDED"
+
+    normalized = str(value).strip().replace("-", "_").upper()
+    valid_modes = {"EMBEDDED", "PREDICTION_ONLY"}
+
+    if normalized not in valid_modes:
+        raise ValueError(
+            "model_persistence_mode must be one of: "
+            "'embedded', 'prediction_only'."
+        )
+
+    return normalized
+
+
 def _dimension_selection_strategy_arg(value):
     if value is None:
         return "ALL"
@@ -240,6 +256,7 @@ def train(
     return_proximities=False,
     proximity_type="PFGAP",
     save_model=True,
+    model_persistence_mode="embedded",
     model_name="PF",
     output_directory="",
     repeats=1,
@@ -387,6 +404,9 @@ def train(
     entry_separator = _separator_arg(entry_separator)
     array_separator = _separator_arg(array_separator)
     output_directory = _ensure_output_directory(output_directory)
+    normalized_model_persistence_mode = _model_persistence_mode_arg(
+        model_persistence_mode
+    )
     
     if return_imputed_training and not impute_training_data:
         impute_training_data = True
@@ -461,6 +481,7 @@ def train(
         "-collect_split_distance_summaries="
         + _bool(collect_split_distance_summaries),
         "-savemodel=" + _bool(save_model),
+        "-model_persistence_mode=" + normalized_model_persistence_mode,
         "-modelname=" + model_name,
 
         #"-parallelTrees=" + _bool(parallel_trees),

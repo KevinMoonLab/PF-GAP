@@ -152,6 +152,7 @@ public class AppContext {
 
 	public static Runtime runtime = Runtime.getRuntime();
 	public static boolean savemodel;
+	public static ModelPersistenceMode modelPersistenceMode = ModelPersistenceMode.EMBEDDED;
 	public static boolean getprox;
 	public static boolean get_training_outlier_scores;
 	public static boolean get_predictions = false; // write aggregate prediction artifacts

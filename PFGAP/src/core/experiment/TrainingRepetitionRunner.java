@@ -159,15 +159,15 @@ public final class TrainingRepetitionRunner {
         ProximityForestResult result = testingData == null
                 ? null
                 : runValidation(
-                        forest,
-                        trainingData,
-                        testingData,
-                        effectiveDatasetName,
-                        context,
-                        scoringCoordinator,
-                        proximityCoordinator,
-                        datasets.testingStandardizationStates()
-                );
+                forest,
+                trainingData,
+                testingData,
+                effectiveDatasetName,
+                context,
+                scoringCoordinator,
+                proximityCoordinator,
+                datasets.testingStandardizationStates()
+        );
 
         handleTrainingScores(
                 forest,
@@ -197,7 +197,7 @@ public final class TrainingRepetitionRunner {
         ExperimentResultRecord record = resultAssembler.assemble(
                 result,
                 effectiveDatasetName,
-                trainingData,
+                datasets.trainingSize(),
                 testingData,
                 context
         );
@@ -489,7 +489,8 @@ public final class TrainingRepetitionRunner {
                 modelPath.toString(),
                 forest,
                 trainingData,
-                snapshot
+                snapshot,
+                AppContext.modelPersistenceMode
         );
 
         context.addArtifact(

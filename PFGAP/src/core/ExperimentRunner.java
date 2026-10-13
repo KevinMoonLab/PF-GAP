@@ -106,7 +106,9 @@ public final class ExperimentRunner {
 
         DatasetPreparationCoordinator.PreparedDatasets datasets =
                 services.datasetPreparation().prepareEvaluationMode(
-                        loaded.trainData
+                        loaded.trainData,
+                        loaded.trainingSize,
+                        loaded.snapshot.initialClassLabels
                 );
 
         System.gc();
