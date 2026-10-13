@@ -93,6 +93,22 @@ def _ood_score_type_arg(value):
         )
     return normalized
 
+def _model_persistence_mode_arg(value):
+    if value is None:
+        return "EMBEDDED"
+
+    normalized = str(value).strip().replace("-", "_").upper()
+    valid_modes = {"EMBEDDED", "PREDICTION_ONLY"}
+
+    if normalized not in valid_modes:
+        raise ValueError(
+            "model_persistence_mode must be one of: "
+            "'embedded', 'prediction_only'."
+        )
+
+    return normalized
+
+
 def _dimension_selection_strategy_arg(value):
     if value is None:
         return "ALL"
@@ -240,6 +256,7 @@ def train(
     return_proximities=False,
     proximity_type="PFGAP",
     save_model=True,
+    model_persistence_mode="embedded",
     model_name="PF",
     output_directory="",
     repeats=1,
@@ -266,6 +283,7 @@ def train(
     file_has_header=False,
     target_column="first",
     distances=None,
+    early_abandon_distances=True,
     memory="1g",
     #parallel_trees=False,
     #parallel_predict=False,
@@ -372,6 +390,8 @@ def train(
         has_missing_values = (
             impute_training_data
             or impute_testing_data
+            or return_imputed_training
+            or return_imputed_testing
             or return_imputed_training_csr
             or return_imputed_testing_csr
             or imputation_initialization == "proximity_first"
@@ -384,6 +404,9 @@ def train(
     entry_separator = _separator_arg(entry_separator)
     array_separator = _separator_arg(array_separator)
     output_directory = _ensure_output_directory(output_directory)
+    normalized_model_persistence_mode = _model_persistence_mode_arg(
+        model_persistence_mode
+    )
     
     if return_imputed_training and not impute_training_data:
         impute_training_data = True
@@ -437,6 +460,7 @@ def train(
         "-on_tree=" + _bool(on_tree),
         "-max_depth=" + str(max_depth),
         "-shuffle=" + _bool(shuffle),
+        "-early_abandon_distances=" + _bool(early_abandon_distances),
         
         "-subsample_dimensions=" + _bool(subsample_dimensions),
         "-dimension_selection_strategy=" + normalized_dimension_selection_strategy,
@@ -457,6 +481,7 @@ def train(
         "-collect_split_distance_summaries="
         + _bool(collect_split_distance_summaries),
         "-savemodel=" + _bool(save_model),
+        "-model_persistence_mode=" + normalized_model_persistence_mode,
         "-modelname=" + model_name,
 
         #"-parallelTrees=" + _bool(parallel_trees),
@@ -553,6 +578,7 @@ def predict(
     return_enhanced_outputs=False,
     return_ood_scores=False,
     ood_score_type="relative_support_exceedance",
+    early_abandon_distances=True,
     return_proximities=False,
     proximity_type="PFGAP",
     output_directory="",
@@ -630,6 +656,7 @@ def predict(
     if has_missing_values is None:
         has_missing_values = (
             impute_testing_data
+            or return_imputed_testing
             or return_imputed_testing_csr
             or imputation_initialization == "proximity_first"
             or missing_proximity_distances is not None
@@ -673,6 +700,7 @@ def predict(
         "-verbosity=" + str(verbosity),
         "-csv_has_header=" + _bool(file_has_header),
         "-target_column=" + target_column,
+        "-early_abandon_distances=" + _bool(early_abandon_distances),
 
         "-getprox=" + _bool(return_proximities),
         "-proximity_type=" + _proximity_type_arg(proximity_type),

@@ -152,6 +152,16 @@ Labels or targets may be:
 
 The task guide and reader reference define which combinations are valid.
 
+
+Readers with named-column selection can choose and reorder feature and label columns independently:
+
+```python
+feature_columns=["feature_0", "feature_1", "feature_2"]
+label_columns=["label_0", "label_1"]
+```
+
+One selected label column produces a scalar target. Multiple selected label columns produce an ordered multi-output target. Unselected metadata columns may be ignored.
+
 ### 3.2 Delimiters
 
 Common delimiters include:
@@ -265,7 +275,7 @@ The exact supported schema is reader-specific. A long-format source may include:
 - Time or position value
 - One or more feature columns
 - A single value column
-- Label or regression target
+- One or more label or regression-target columns
 - Additional metadata columns
 
 ### 5.1 Grouping
@@ -291,9 +301,9 @@ It can also express dimensions with different lengths inside one multivariate ob
 
 ### 5.4 Repeated labels or targets
 
-A long-format source may repeat an observation's label or target on every row, store it once, or provide it separately. Repeated values must be consistent within an observation.
+A long-format source may repeat an observation's scalar or multi-output label on every row. Repeated values must be consistent within an observation.
 
-A reader should reject conflicting labels or targets rather than silently choose one.
+Built-in long-format Parquet readers use embedded label columns rather than sidecar files and reject conflicting or missing label components.
 
 ### 5.5 Numeric and generic long format
 
@@ -361,6 +371,9 @@ series_{instance:05d}.csv
 The extracted numeric component defines deterministic observation order.
 
 Discovery order must remain aligned with labels, predictions, scores, proximities, and output artifacts.
+
+
+For built-in per-file delimited readers, a positional label sidecar follows the discovered order: sidecar record `i` labels instance file `i`. One field supplies a scalar target; multiple fields supply an ordered multi-output or multi-target value. The sidecar uses the same delimiter and header setting as the instance files. Labels are read eagerly even when feature series are lazy.
 
 ### 6.4 Lazy access
 
@@ -473,6 +486,9 @@ observation_id | dimension | time | value | label
 
 The selected reader determines the accepted schema.
 
+
+Long-format Parquet readers may select multiple embedded label columns. Every row in one observation group must carry a consistent scalar or multi-output label. Sidecar labels are not part of the documented long-format Parquet contract.
+
 ### 9.2 Per-file Parquet
 
 A per-file Parquet dataset stores one logical observation per Parquet file. Each row normally represents one time or position, and selected feature columns become dimensions.
@@ -496,6 +512,9 @@ float[dimension][time]
 ```
 
 Generic per-file Parquet readers may produce `Object[dimension][time]`.
+
+
+Label-sidecar conventions for per-file Parquet are deferred; consult [Readers](Readers.md) for currently verified behavior.
 
 ### 9.3 Schema requirements
 
@@ -558,9 +577,9 @@ class_a
 class_b
 ```
 
-The number and order of labels must match the number and order of observations unless an explicit ID-based join is supported.
+The number and order of label records must match the number and order of observations unless an explicit ID-based join is supported. A one-column file supplies scalar labels or targets; a multi-column file may supply ordered multi-output labels or multi-target vectors when the selected reader supports them.
 
-A separate target file should have an unambiguous schema. Extra columns, headers, or duplicate IDs must be handled according to the selected reader rather than silently ignored.
+A separate target file should have an unambiguous schema. Inconsistent row widths, extra columns, headers, or duplicate IDs must be handled according to the selected reader rather than silently ignored.
 
 ## 12. Training and evaluation sources
 
@@ -578,6 +597,7 @@ Reader configuration must interpret both datasets consistently. In particular, t
 - Tabular feature count and ordering
 - Multivariate dimension count and meaning
 - Generic value types
+- Label or target output count and ordering
 - Numeric precision
 - Missing-value representation
 - Standardization scope and fitted state
@@ -803,6 +823,7 @@ Before configuring a reader, answer the following questions:
 - Are values numeric, generic, or proprietary?
 - What source precision or dtype is used?
 - Where are labels or targets stored?
+- Are labels scalar or multi-output, with a consistent output count and ordering?
 - Does the evaluation source contain targets?
 - Are observation IDs explicit?
 - Is a time or position field present?
@@ -824,7 +845,7 @@ The reader reference provides the authoritative capability matrix. It should rec
 - Equal-length, unequal-length, and ragged support
 - Single and double precision
 - Eager and lazy access
-- Embedded or separate targets
+- Embedded or separate scalar and multi-output targets
 - Missing values
 - Explicit IDs and time coordinates
 - Standardization compatibility

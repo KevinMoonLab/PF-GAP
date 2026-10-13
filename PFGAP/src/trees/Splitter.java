@@ -16,10 +16,12 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
+import util.LabelUtils;
 
 /**
  * Selects and applies proximity-tree splits.
@@ -76,7 +78,6 @@ public class Splitter
 	protected Object[] exemplars;
 
 
-	protected ListObjectDataset[] best_split;
 
 	/** Winning-candidate distance summaries, or null when collection is disabled. */
 	private SplitDistanceSummary splitDistanceSummary;
@@ -286,20 +287,40 @@ public class Splitter
 			Map<Object, ListObjectDataset> dataPerClass,
 			Random random
 	) {
-		if (dataPerClass == null || dataPerClass.size() < 2) {
+		Map<Object, ListObjectDataset> candidateDataPerClass = dataPerClass;
+		if (sample.get_num_label_outputs() > 1) {
+			List<Integer> splittableOutputs =
+					LabelUtils.splittableClassificationOutputs(
+							sample._internal_class_list()
+					);
+			if (splittableOutputs.isEmpty()) {
+				return null;
+			}
+			int selectedOutput = splittableOutputs.get(
+					random.nextInt(splittableOutputs.size())
+			);
+			candidateDataPerClass = sample.split_classes(selectedOutput);
+		}
+		if (candidateDataPerClass == null
+				|| candidateDataPerClass.size() < 2) {
 			return null;
 		}
-		Object[] candidateExemplars = new Object[dataPerClass.size()];
+		Object[] candidateExemplars =
+				new Object[candidateDataPerClass.size()];
 		int branch = 0;
-		for (Map.Entry<Object, ListObjectDataset> entry : dataPerClass.entrySet()) {
+		for (Map.Entry<Object, ListObjectDataset> entry
+				: candidateDataPerClass.entrySet()) {
 			ListObjectDataset classData = entry.getValue();
 			if (classData == null || classData.size() == 0) {
 				return null;
 			}
-			candidateExemplars[branch++] = classData.get_series(random.nextInt(classData.size()));
+			candidateExemplars[branch++] = classData.get_series(
+					random.nextInt(classData.size())
+			);
 		}
 		return new CandidateInitialization(
-				candidateExemplars, createEmptySplits(sample.size(), candidateExemplars.length)
+				candidateExemplars,
+				createEmptySplits(sample.size(), candidateExemplars.length)
 		);
 	}
 
@@ -792,9 +813,9 @@ public class Splitter
 			Random queryRandom =
 					new Random(
 							SeedMixer.instance(batchSeed, stableInstanceIdentity(
-											data,
-											index
-									))
+									data,
+									index
+							))
 					);
 
 			assignments[index] =
@@ -809,9 +830,6 @@ public class Splitter
 		return assignments;
 	}
 
-	public ObjectDataset[] getBestSplits() {
-		return best_split;
-	}
 
 	/**
 	 * Searches candidate splits and retains the lowest-purity valid split.
@@ -826,7 +844,6 @@ public class Splitter
 			ObjectDataset data, ParallelRuntime runtime
 	) throws Exception {
 		Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
-		best_split = null;
 		distance_measure = null;
 		exemplars = null;
 		selectedDimensions = null;
@@ -840,9 +857,12 @@ public class Splitter
 				NodeObservationMultiplicity.from(data);
 		boolean collectDistanceSummaries =
 				AppContext.collect_split_distance_summaries;
-		Map<Object, ListObjectDataset> dataPerClass =
-				AppContext.isRegressionMode() || AppContext.isIsolationMode()
-						? null : data.split_classes();
+		Map<Object, ListObjectDataset> dataPerClass = null;
+		if (!AppContext.isRegressionMode()
+				&& !AppContext.isIsolationMode()
+				&& data.get_num_label_outputs() <= 1) {
+			dataPerClass = data.split_classes();
+		}
 		int count = AppContext.num_candidates_per_split;
 		if (count < 1) {
 			return null;
@@ -853,12 +873,13 @@ public class Splitter
 				&& observationMultiplicity.distinctCount()
 				>= MINIMUM_PARALLEL_CANDIDATE_SAMPLE_SIZE;
 		if (parallelCandidates) {
+			Map<Object, ListObjectDataset> finalDataPerClass = dataPerClass;
 			runtime.forRange(
 					0, count, 1,
 					i -> results[i] = evaluateCandidate(
-						i, data, dataPerClass, observationMultiplicity,
-						collectDistanceSummaries, runtime, true
-				)
+							i, data, finalDataPerClass, observationMultiplicity,
+							collectDistanceSummaries, runtime, true
+					)
 			);
 		} else {
 			for (int i = 0; i < count; i++) {
@@ -883,12 +904,12 @@ public class Splitter
 		if (winner == null) {
 			return null;
 		}
-		best_split = winner.splits();
+		ListObjectDataset[] winningSplits = winner.splits();
 		distance_measure = winner.distanceMeasure();
 		exemplars = winner.exemplars().clone();
 		splitDistanceSummary = winner.distanceSummary();
-		num_children = best_split.length;
-		return best_split;
+		num_children = winningSplits.length;
+		return winningSplits;
 	}
 
 	/**
@@ -1528,8 +1549,25 @@ public class Splitter
 			}
 		}
 
+		/*private void add(int branch, double distance, int weight) {
+			checkBranchIndex(branch);
+			branches[branch].add(distance, weight);
+		}*/
+
 		private void add(int branch, double distance, int weight) {
 			checkBranchIndex(branch);
+
+			if (!Double.isFinite(distance) || distance < 0.0) {
+				throw new IllegalStateException(
+						"Distance-based OOD scoring requires finite, nonnegative "
+								+ "winning distances, but received "
+								+ distance
+								+ " for branch "
+								+ branch
+								+ "."
+				);
+			}
+
 			branches[branch].add(distance, weight);
 		}
 

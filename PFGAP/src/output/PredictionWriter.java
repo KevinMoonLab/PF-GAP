@@ -1,380 +1,243 @@
 package output;
 
+import util.LabelUtils;
+
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Writes classification or regression predictions as indexed CSV records.
+ * Writes scalar or multi-output classification and regression predictions as
+ * indexed CSV records.
  *
- * This writer is deliberately independent of ProximityForestResult,
- * AppContext, and ListObjectDataset. The calling orchestration layer is
- * responsible for:
- *
- *     1. Selecting the output path.
- *
- *     2. Converting internal classification labels back to their original
- *        user-facing values.
- *
- *     3. Supplying actual labels or targets when they are available.
- *
- * Classification output without actual labels:
- *
- *     instance_index,prediction
- *     0,class_a
- *     1,class_b
- *
- * Classification output with actual labels:
- *
- *     instance_index,prediction,actual,correct
- *     0,class_a,class_a,true
- *     1,class_b,class_a,false
- *
- * Regression output without actual targets:
- *
- *     instance_index,prediction
- *     0,1.25
- *     1,4.81
- *
- * Regression output with actual targets:
- *
- *     instance_index,prediction,actual,residual,absolute_error
- *     0,1.25,1.30,-0.05,0.05
- *     1,4.81,4.50,0.31,0.31
- *
- * Regression residuals use:
- *
- *     residual = prediction - actual
- *
- * Actual-value columns are omitted when the supplied actual-value list is
- * null, empty, or contains only null values.
- *
- * CSV quoting, UTF-8 output, directory creation, and non-finite numeric
- * rendering are delegated to {@link CsvUtils}.
+ * <p>Scalar outputs retain the existing CSV layout. Multi-output values are
+ * expanded into positional columns such as {@code prediction_0} and
+ * {@code actual_0}. Classification correctness uses exact equality across the
+ * complete scalar or ordered multi-output label.</p>
  */
 public final class PredictionWriter {
 
     private PredictionWriter() {
     }
 
-    /**
-     * Writes classification predictions.
-     *
-     * @param path output CSV path
-     * @param predictions user-facing predicted labels
-     * @param actualLabels actual labels, or null when unavailable
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path writeClassification(
             Path path,
             List<?> predictions,
             List<?> actualLabels
     ) throws IOException {
-        validateCommonArguments(
-                path,
+        validateCommonArguments(path, predictions, actualLabels);
+        int outputCount = validateClassificationValues(
                 predictions,
-                actualLabels
+                "prediction",
+                false
         );
+        boolean includeActual = hasActualValues(actualLabels);
+        if (includeActual) {
+            int actualOutputCount = validateClassificationValues(
+                    actualLabels,
+                    "actual label",
+                    true
+            );
+            requireMatchingOutputCounts(outputCount, actualOutputCount);
+        }
 
-        boolean includeActual =
-                hasActualValues(actualLabels);
-
-        Path outputPath =
-                normalizePath(path);
-
-        try (BufferedWriter writer =
-                     CsvUtils.newWriter(outputPath)) {
-
-            if (includeActual) {
-                CsvUtils.writeHeader(
-                        writer,
-                        "instance_index",
-                        "prediction",
-                        "actual",
-                        "correct"
-                );
-            } else {
-                CsvUtils.writeHeader(
-                        writer,
-                        "instance_index",
-                        "prediction"
-                );
-            }
-
+        Path outputPath = normalizePath(path);
+        try (BufferedWriter writer = CsvUtils.newWriter(outputPath)) {
+            CsvUtils.writeHeader(
+                    writer,
+                    classificationHeader(outputCount, includeActual)
+            );
             for (int instanceIndex = 0;
                  instanceIndex < predictions.size();
                  instanceIndex++) {
+                Object prediction = predictions.get(instanceIndex);
+                Object actual = includeActual
+                        ? actualLabels.get(instanceIndex)
+                        : null;
+                List<Object> row = new ArrayList<>();
+                row.add(instanceIndex);
 
-                Object prediction =
-                        predictions.get(instanceIndex);
-
-                if (!includeActual) {
-                    CsvUtils.writeRow(
-                            writer,
-                            instanceIndex,
-                            prediction
-                    );
-
-                    continue;
-                }
-
-                Object actual =
-                        actualLabels.get(instanceIndex);
-
-                Object correct =
-                        actual == null
+                if (outputCount == 1) {
+                    row.add(prediction);
+                    if (includeActual) {
+                        row.add(actual);
+                        row.add(actual == null
                                 ? null
-                                : Objects.equals(
-                                prediction,
-                                actual
-                        );
-
-                CsvUtils.writeRow(
-                        writer,
-                        instanceIndex,
-                        prediction,
-                        actual,
-                        correct
-                );
+                                : Objects.equals(prediction, actual));
+                    }
+                } else {
+                    for (int outputIndex = 0;
+                         outputIndex < outputCount;
+                         outputIndex++) {
+                        row.add(LabelUtils.valueAt(prediction, outputIndex));
+                        if (includeActual) {
+                            row.add(actual == null
+                                    ? null
+                                    : LabelUtils.valueAt(actual, outputIndex));
+                        }
+                    }
+                    if (includeActual) {
+                        row.add(actual == null
+                                ? null
+                                : Objects.equals(prediction, actual));
+                    }
+                }
+                CsvUtils.writeRow(writer, row);
             }
         }
-
         return outputPath;
     }
 
-    /**
-     * Writes classification predictions when actual labels are unavailable.
-     *
-     * @param path output CSV path
-     * @param predictions user-facing predicted labels
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path writeClassification(
             Path path,
             List<?> predictions
     ) throws IOException {
-        return writeClassification(
-                path,
-                predictions,
-                null
-        );
+        return writeClassification(path, predictions, null);
     }
 
-    /**
-     * Writes regression predictions.
-     *
-     * Predictions must be numeric. Non-null actual targets must also be
-     * numeric.
-     *
-     * Null predictions are rejected because a regression prediction should
-     * always contain a numeric result. Null actual targets are permitted and
-     * produce blank actual, residual, and absolute-error fields.
-     *
-     * @param path output CSV path
-     * @param predictions predicted numeric targets
-     * @param actualTargets actual numeric targets, or null when unavailable
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path writeRegression(
             Path path,
             List<?> predictions,
             List<?> actualTargets
     ) throws IOException {
-        validateCommonArguments(
-                path,
+        validateCommonArguments(path, predictions, actualTargets);
+        int outputCount = validateRegressionValues(
                 predictions,
-                actualTargets
+                "prediction",
+                false
         );
-
-        validateRegressionPredictions(
-                predictions
-        );
-
-        boolean includeActual =
-                hasActualValues(actualTargets);
-
+        boolean includeActual = hasActualValues(actualTargets);
         if (includeActual) {
-            validateRegressionActualTargets(
-                    actualTargets
+            int actualOutputCount = validateRegressionValues(
+                    actualTargets,
+                    "actual target",
+                    true
             );
+            requireMatchingOutputCounts(outputCount, actualOutputCount);
         }
 
-        Path outputPath =
-                normalizePath(path);
-
-        try (BufferedWriter writer =
-                     CsvUtils.newWriter(outputPath)) {
-
-            if (includeActual) {
-                CsvUtils.writeHeader(
-                        writer,
-                        "instance_index",
-                        "prediction",
-                        "actual",
-                        "residual",
-                        "absolute_error"
-                );
-            } else {
-                CsvUtils.writeHeader(
-                        writer,
-                        "instance_index",
-                        "prediction"
-                );
-            }
-
+        Path outputPath = normalizePath(path);
+        try (BufferedWriter writer = CsvUtils.newWriter(outputPath)) {
+            CsvUtils.writeHeader(
+                    writer,
+                    regressionHeader(outputCount, includeActual)
+            );
             for (int instanceIndex = 0;
                  instanceIndex < predictions.size();
                  instanceIndex++) {
+                Object prediction = predictions.get(instanceIndex);
+                Object actual = includeActual
+                        ? actualTargets.get(instanceIndex)
+                        : null;
+                List<Object> row = new ArrayList<>();
+                row.add(instanceIndex);
 
-                Number predictionNumber =
-                        (Number) predictions.get(
-                                instanceIndex
-                        );
-
-                double prediction =
-                        predictionNumber.doubleValue();
-
-                if (!includeActual) {
-                    CsvUtils.writeRow(
-                            writer,
-                            instanceIndex,
-                            CsvUtils.numericField(
-                                    prediction
-                            )
+                for (int outputIndex = 0;
+                     outputIndex < outputCount;
+                     outputIndex++) {
+                    double predictedValue = numericValueAt(
+                            prediction,
+                            outputIndex
                     );
-
-                    continue;
+                    row.add(CsvUtils.numericField(predictedValue));
+                    if (!includeActual) {
+                        continue;
+                    }
+                    if (actual == null) {
+                        row.add(null);
+                        row.add(null);
+                        row.add(null);
+                        continue;
+                    }
+                    double actualValue = numericValueAt(actual, outputIndex);
+                    double residual = predictedValue - actualValue;
+                    row.add(CsvUtils.numericField(actualValue));
+                    row.add(CsvUtils.numericField(residual));
+                    row.add(CsvUtils.numericField(Math.abs(residual)));
                 }
-
-                Object actualValue =
-                        actualTargets.get(
-                                instanceIndex
-                        );
-
-                if (actualValue == null) {
-                    CsvUtils.writeRow(
-                            writer,
-                            instanceIndex,
-                            CsvUtils.numericField(
-                                    prediction
-                            ),
-                            null,
-                            null,
-                            null
-                    );
-
-                    continue;
-                }
-
-                double actual =
-                        ((Number) actualValue)
-                                .doubleValue();
-
-                double residual =
-                        prediction - actual;
-
-                double absoluteError =
-                        Math.abs(residual);
-
-                CsvUtils.writeRow(
-                        writer,
-                        instanceIndex,
-                        CsvUtils.numericField(
-                                prediction
-                        ),
-                        CsvUtils.numericField(
-                                actual
-                        ),
-                        CsvUtils.numericField(
-                                residual
-                        ),
-                        CsvUtils.numericField(
-                                absoluteError
-                        )
-                );
+                CsvUtils.writeRow(writer, row);
             }
         }
-
         return outputPath;
     }
 
-    /**
-     * Writes regression predictions when actual targets are unavailable.
-     *
-     * @param path output CSV path
-     * @param predictions predicted numeric targets
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path writeRegression(
             Path path,
             List<?> predictions
     ) throws IOException {
-        return writeRegression(
-                path,
-                predictions,
-                null
-        );
+        return writeRegression(path, predictions, null);
     }
 
-    /**
-     * Selects classification or regression output through one convenience
-     * entry point.
-     *
-     * @param path output CSV path
-     * @param predictions predicted labels or numeric targets
-     * @param actualValues actual labels or targets, possibly null
-     * @param regression whether predictions represent regression targets
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path write(
             Path path,
             List<?> predictions,
             List<?> actualValues,
             boolean regression
     ) throws IOException {
-        if (regression) {
-            return writeRegression(
-                    path,
-                    predictions,
-                    actualValues
-            );
-        }
-
-        return writeClassification(
-                path,
-                predictions,
-                actualValues
-        );
+        return regression
+                ? writeRegression(path, predictions, actualValues)
+                : writeClassification(path, predictions, actualValues);
     }
 
-    /**
-     * Selects classification or regression output when actual values are
-     * unavailable.
-     *
-     * @param path output CSV path
-     * @param predictions predicted labels or numeric targets
-     * @param regression whether predictions represent regression targets
-     * @return normalized absolute output path
-     * @throws IOException if writing fails
-     */
     public static Path write(
             Path path,
             List<?> predictions,
             boolean regression
     ) throws IOException {
-        return write(
-                path,
-                predictions,
-                null,
-                regression
-        );
+        return write(path, predictions, null, regression);
+    }
+
+    private static List<String> classificationHeader(
+            int outputCount,
+            boolean includeActual
+    ) {
+        List<String> columns = new ArrayList<>();
+        columns.add("instance_index");
+        if (outputCount == 1) {
+            columns.add("prediction");
+            if (includeActual) {
+                columns.add("actual");
+                columns.add("correct");
+            }
+            return List.copyOf(columns);
+        }
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            columns.add("prediction_" + outputIndex);
+            if (includeActual) {
+                columns.add("actual_" + outputIndex);
+            }
+        }
+        if (includeActual) {
+            columns.add("correct");
+        }
+        return List.copyOf(columns);
+    }
+
+    private static List<String> regressionHeader(
+            int outputCount,
+            boolean includeActual
+    ) {
+        List<String> columns = new ArrayList<>();
+        columns.add("instance_index");
+        for (int outputIndex = 0;
+             outputIndex < outputCount;
+             outputIndex++) {
+            String suffix = outputCount == 1
+                    ? ""
+                    : "_" + outputIndex;
+            columns.add("prediction" + suffix);
+            if (includeActual) {
+                columns.add("actual" + suffix);
+                columns.add("residual" + suffix);
+                columns.add("absolute_error" + suffix);
+            }
+        }
+        return List.copyOf(columns);
     }
 
     private static void validateCommonArguments(
@@ -382,124 +245,163 @@ public final class PredictionWriter {
             List<?> predictions,
             List<?> actualValues
     ) {
-        Objects.requireNonNull(
-                path,
-                "Prediction output path cannot be null."
-        );
-
-        Objects.requireNonNull(
-                predictions,
-                "Prediction list cannot be null."
-        );
-
+        Objects.requireNonNull(path, "Output path cannot be null.");
+        Objects.requireNonNull(predictions, "Predictions cannot be null.");
+        if (predictions.isEmpty()) {
+            throw new IllegalArgumentException("Predictions cannot be empty.");
+        }
         if (actualValues != null
                 && !actualValues.isEmpty()
-                && actualValues.size()
-                != predictions.size()) {
-
+                && actualValues.size() != predictions.size()) {
             throw new IllegalArgumentException(
-                    "Prediction and actual-value counts differ. "
-                            + "Predictions="
-                            + predictions.size()
-                            + ", actual values="
-                            + actualValues.size()
-                            + "."
+                    "Actual-value count must match prediction count."
             );
         }
     }
 
-    /**
-     * Returns whether actual labels or targets contain at least one
-     * non-null value.
-     *
-     * ListObjectDataset may maintain a label list containing one null entry
-     * per instance when labels are unavailable. Treating such a list as
-     * labeled would create unnecessary empty actual-value columns.
-     */
-    private static boolean hasActualValues(
-            List<?> actualValues
+    private static int validateClassificationValues(
+            List<?> values,
+            String role,
+            boolean allowNull
     ) {
-        if (actualValues == null
-                || actualValues.isEmpty()) {
+        int expectedOutputCount = -1;
+        Boolean expectedMultiOutput = null;
+        for (int index = 0; index < values.size(); index++) {
+            Object value = values.get(index);
+            if (value == null) {
+                if (allowNull) {
+                    continue;
+                }
+                throw invalidValue(role, index, value);
+            }
+            try {
+                LabelUtils.validateClassificationLabel(value);
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException(
+                        "Invalid classification " + role + " at instance "
+                                + index + ": " + exception.getMessage(),
+                        exception
+                );
+            }
+            int outputCount = LabelUtils.outputCount(value);
+            boolean multiOutput = LabelUtils.isMultiOutput(value);
+            if (expectedOutputCount < 0) {
+                expectedOutputCount = outputCount;
+                expectedMultiOutput = multiOutput;
+            } else if (outputCount != expectedOutputCount
+                    || multiOutput != expectedMultiOutput) {
+                throw inconsistentShape(role, index);
+            }
+        }
+        if (expectedOutputCount < 0) {
+            throw new IllegalArgumentException(
+                    "At least one non-null " + role + " is required."
+            );
+        }
+        return expectedOutputCount;
+    }
 
+    private static int validateRegressionValues(
+            List<?> values,
+            String role,
+            boolean allowNull
+    ) {
+        int expectedOutputCount = -1;
+        Boolean expectedMultiOutput = null;
+        for (int index = 0; index < values.size(); index++) {
+            Object value = values.get(index);
+            if (value == null) {
+                if (allowNull) {
+                    continue;
+                }
+                throw invalidValue(role, index, value);
+            }
+            try {
+                LabelUtils.validateRegressionLabel(value);
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException(
+                        "Invalid regression " + role + " at instance "
+                                + index + ": " + exception.getMessage(),
+                        exception
+                );
+            }
+            int outputCount = LabelUtils.outputCount(value);
+            boolean multiOutput = LabelUtils.isMultiOutput(value);
+            if (expectedOutputCount < 0) {
+                expectedOutputCount = outputCount;
+                expectedMultiOutput = multiOutput;
+            } else if (outputCount != expectedOutputCount
+                    || multiOutput != expectedMultiOutput) {
+                throw inconsistentShape(role, index);
+            }
+        }
+        if (expectedOutputCount < 0) {
+            throw new IllegalArgumentException(
+                    "At least one non-null " + role + " is required."
+            );
+        }
+        return expectedOutputCount;
+    }
+
+    private static boolean hasActualValues(List<?> actualValues) {
+        if (actualValues == null || actualValues.isEmpty()) {
             return false;
         }
-
-        for (Object value : actualValues) {
-            if (value != null) {
+        for (Object actualValue : actualValues) {
+            if (actualValue != null) {
                 return true;
             }
         }
-
         return false;
     }
 
-    private static void validateRegressionPredictions(
-            List<?> predictions
+    private static double numericValueAt(Object value, int outputIndex) {
+        return ((Number) LabelUtils.valueAt(value, outputIndex)).doubleValue();
+    }
+
+    private static void requireMatchingOutputCounts(
+            int predictionOutputCount,
+            int actualOutputCount
     ) {
-        for (int instanceIndex = 0;
-             instanceIndex < predictions.size();
-             instanceIndex++) {
-
-            Object prediction =
-                    predictions.get(instanceIndex);
-
-            if (!(prediction instanceof Number)) {
-                throw new IllegalArgumentException(
-                        "Regression prediction at instance "
-                                + instanceIndex
-                                + " must be numeric, but received "
-                                + describeValue(prediction)
-                                + "."
-                );
-            }
+        if (predictionOutputCount != actualOutputCount) {
+            throw new IllegalArgumentException(
+                    "Actual values have " + actualOutputCount
+                            + " outputs, but predictions have "
+                            + predictionOutputCount + "."
+            );
         }
     }
 
-    private static void validateRegressionActualTargets(
-            List<?> actualTargets
-    ) {
-        for (int instanceIndex = 0;
-             instanceIndex < actualTargets.size();
-             instanceIndex++) {
-
-            Object actual =
-                    actualTargets.get(instanceIndex);
-
-            if (actual == null) {
-                continue;
-            }
-
-            if (!(actual instanceof Number)) {
-                throw new IllegalArgumentException(
-                        "Regression actual target at instance "
-                                + instanceIndex
-                                + " must be numeric or null, but received "
-                                + describeValue(actual)
-                                + "."
-                );
-            }
-        }
-    }
-
-    private static Path normalizePath(
-            Path path
-    ) {
-        return path.toAbsolutePath()
-                .normalize();
-    }
-
-    private static String describeValue(
+    private static IllegalArgumentException invalidValue(
+            String role,
+            int index,
             Object value
     ) {
+        return new IllegalArgumentException(
+                role + " at instance " + index
+                        + " is invalid: " + describeValue(value) + "."
+        );
+    }
+
+    private static IllegalArgumentException inconsistentShape(
+            String role,
+            int index
+    ) {
+        return new IllegalArgumentException(
+                role + " at instance " + index
+                        + " has an inconsistent output shape."
+        );
+    }
+
+    private static Path normalizePath(Path path) {
+        return path.toAbsolutePath().normalize();
+    }
+
+    private static String describeValue(Object value) {
         if (value == null) {
             return "null";
         }
-
-        return "'"
-                + value
-                + "' of type "
-                + value.getClass()
-                .getName();
+        return "'" + value + "' of type "
+                + value.getClass().getName();
     }
 }

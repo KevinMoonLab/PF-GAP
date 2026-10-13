@@ -162,11 +162,35 @@ public final class ExperimentProximityCoordinator {
 
     /**
      * Computes test/train proximities if absent and returns the typed result.
+     *
+     * <p>This dataset-based overload is retained for training-time imputation
+     * and other existing callers.</p>
      */
     public ProximityMatrixResult ensureTestTrainProximities(
             ProximityForest forest,
             ListObjectDataset testingData,
             ListObjectDataset trainingData
+    ) throws Exception {
+        Objects.requireNonNull(
+                trainingData,
+                "Training data cannot be null."
+        );
+
+        return ensureTestTrainProximities(
+                forest,
+                testingData,
+                trainingData.size()
+        );
+    }
+
+    /**
+     * Computes test/train proximities if absent using the original training
+     * size retained by the saved model.
+     */
+    public ProximityMatrixResult ensureTestTrainProximities(
+            ProximityForest forest,
+            ListObjectDataset testingData,
+            int trainingSize
     ) throws Exception {
         Objects.requireNonNull(
                 forest,
@@ -176,10 +200,7 @@ public final class ExperimentProximityCoordinator {
                 testingData,
                 "Testing data cannot be null."
         );
-        Objects.requireNonNull(
-                trainingData,
-                "Training data cannot be null."
-        );
+        validateTrainingSize(trainingSize);
 
         if (testTrainProximities != null) {
             validateConfiguredRepresentation(
@@ -196,7 +217,7 @@ public final class ExperimentProximityCoordinator {
                 PFGAP.computeTestTrainProximities(
                         forest,
                         testingData,
-                        trainingData,
+                        trainingSize,
                         parallelRuntime
                 );
 
@@ -263,15 +284,48 @@ public final class ExperimentProximityCoordinator {
             ListObjectDataset trainingData,
             int repetition
     ) throws Exception {
+        Objects.requireNonNull(
+                trainingData,
+                "Training data cannot be null."
+        );
+
+        return computeAndWriteTestTrainProximities(
+                forest,
+                testingData,
+                trainingData.size(),
+                repetition
+        );
+    }
+
+    /**
+     * Computes and writes test/train proximities using a retained training
+     * size rather than materialized training observations.
+     */
+    public Path computeAndWriteTestTrainProximities(
+            ProximityForest forest,
+            ListObjectDataset testingData,
+            int trainingSize,
+            int repetition
+    ) throws Exception {
         ensureTestTrainProximities(
                 forest,
                 testingData,
-                trainingData
+                trainingSize
         );
 
         return writeTestTrainProximities(
                 repetition
         );
+    }
+
+    private static void validateTrainingSize(
+            int trainingSize
+    ) {
+        if (trainingSize < 0) {
+            throw new IllegalArgumentException(
+                    "Training size cannot be negative."
+            );
+        }
     }
 
     /** Records relative artifact paths in one repetition context. */

@@ -15,7 +15,7 @@ Use `Application/PFGAP.jar` and `Application/PF_wrapper.py` from the same PFGAP 
 
 ## How OOD scoring works
 
-During training, PFGAP can collect split-distance summaries from the fitted forest. During evaluation, each observation is routed through the saved forest and compared with the support recorded at the visited splits.
+During training, PFGAP can collect the distribution of winning split distances for each branch of each fitted split. During evaluation, each observation is routed through the saved forest. At every visited internal node, PFGAP compares the observation's winning distance with the maximum winning distance recorded for its selected branch during training.
 
 The current OOD score type is:
 
@@ -23,7 +23,26 @@ The current OOD score type is:
 relative_support_exceedance
 ```
 
-This score describes how strongly an evaluation observation's split distances exceed the corresponding training support. The output also records how many trees produced an available OOD score.
+For a finite, nonnegative evaluation winning distance `d` and the selected branch's finite, nonnegative training maximum `m`, the node contribution is:
+
+```text
+0,            if d <= m
+1 - (m / d),  if d > m
+```
+
+Each node contribution lies in `[0, 1]`:
+
+- `0.0` means the evaluation distance does not exceed the observed branch boundary;
+- `0.5` means the evaluation distance is twice the observed training maximum;
+- `0.75` means the evaluation distance is four times the observed training maximum;
+- values approach `1.0` as the exceedance grows; and
+- a positive evaluation distance against a zero training maximum contributes `1.0`.
+
+The tree score is the arithmetic mean of node contributions over every visited internal node. A visited node without usable summary metadata remains in the denominator and contributes zero to the numerator. Consequently, every available tree score also lies in `[0, 1]`.
+
+The enhanced output aggregates available tree scores into `ood_mean` and `ood_standard_deviation`. Higher values indicate stronger relative support exceedance. These scores are comparative support measures, not calibrated probabilities that an observation is out of distribution.
+
+The formula is invariant under positive rescaling of a distance measure and does not use an arbitrary near-zero denominator. OOD scoring requires finite, nonnegative winning distances and finite, nonnegative recorded training maxima.
 
 OOD scoring is evaluation-time scoring. It does not change the forest's classification or regression prediction rule.
 
@@ -305,6 +324,36 @@ forest_mode="regression"
 
 Use the same forest mode at evaluation that was used to train the saved model.
 
+## Distance requirements
+
+Relative support exceedance requires the selected distance measures to produce finite, nonnegative winning distances for both summary collection and later scoring.
+
+PFGAP rejects a non-finite or negative winning distance when collecting OOD summaries. It also rejects a non-finite or negative evaluation winning distance rather than assigning an artificial finite contribution.
+
+This requirement applies to built-in distances and custom Java distances. A distance that is valid for general routing is not necessarily compatible with distance-based OOD scoring if it can return `NaN`, positive infinity, negative infinity, or a negative value for the supplied data.
+
+### Early abandoning
+
+PFGAP can optionally disable best-so-far early abandoning:
+
+```python
+early_abandon_distances = False
+```
+
+Direct Java form:
+
+```text
+-early_abandon_distances=false
+```
+
+When early abandoning is enabled, cutoff-aware distances receive the current best competing distance. When it is disabled, they receive positive infinity and should perform a complete distance calculation.
+
+Disabling early abandoning is primarily a diagnostic and reproducibility option. A correct cutoff-aware distance should select the same branch and return the same winning distance in both modes. If the winning distance remains non-finite with early abandoning disabled, the distance calculation itself did not produce a finite result for those inputs.
+
+Custom Java distances may support the same contract through the cutoff-aware `compute(first, second, bestSoFar)` overload. Selected-dimension custom distances may support it through `compute(first, second, bestSoFar, selectedDimensions)`. Legacy custom distances may ignore the cutoff and compute the full distance.
+
+A custom distance may abandon only after proving that its exact result must be strictly greater than `bestSoFar`. Exact equality must remain available so nearest-exemplar ties are preserved.
+
 ## Data compatibility
 
 Evaluation data must use a representation and preprocessing contract compatible with the saved model, including:
@@ -346,8 +395,9 @@ See [Standardization](Standardization.md) for supported methods, statistics pers
 Record:
 
 ```python
-seed=42
-num_workers=4
+seed = 42
+num_workers = 4
+early_abandon_distances = True
 ```
 
 Also preserve:
@@ -355,7 +405,8 @@ Also preserve:
 - the PFGAP revision;
 - the training and evaluation data and their ordering;
 - the reader and representation settings;
-- selected distances;
+- selected distances and their finite-distance behavior;
+- the `early_abandon_distances` setting;
 - standardization and missing-value settings;
 - tree and split-candidate counts;
 - the saved model containing split-distance summaries; and
@@ -404,6 +455,26 @@ Use:
 ```text
 relative_support_exceedance
 ```
+
+### OOD scoring reports a non-finite winning distance
+
+The selected distance is not satisfying the finite-distance contract for the encountered inputs. Disable early abandoning and rerun the operation:
+
+```python
+early_abandon_distances = False
+```
+
+or:
+
+```text
+-early_abandon_distances=false
+```
+
+If the failure remains, inspect the distance implementation and the affected input representation. Do not convert a genuine or unresolved non-finite result into an arbitrary finite OOD score.
+
+### Scores are near `1.0`
+
+A score near `1.0` indicates strong relative exceedance. In particular, a positive evaluation winning distance against a branch whose recorded training maximum is zero contributes exactly `1.0` at that node. This is expected bounded behavior and is different from the former unbounded near-zero normalization.
 
 ### Some trees do not contribute a score
 

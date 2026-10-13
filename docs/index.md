@@ -83,8 +83,8 @@ Guides are organized around tasks rather than individual classes.
 
 ### Learning and scoring
 
-- [Classification](guides/Classification.md) explains training, validation, saved-model evaluation, labels, predictions, and classification metrics.
-- [Regression](guides/Regression.md) explains numeric targets, regression forests, aggregate predictions, and regression metrics.
+- [Classification](guides/Classification.md) explains training, validation, saved-model evaluation, scalar and multi-output labels, predictions, and classification metrics.
+- [Regression](guides/Regression.md) explains scalar and multi-target numeric outcomes, regression forests, aggregate predictions, and regression metrics.
 - [Imputation](guides/Imputation.md) explains initialization, iterative proximity updates, training and test imputation, and output choices.
 - [Outlier Scoring](guides/Outlier_Scoring.md) distinguishes unsupervised isolation scoring from Breiman-style supervised classification outlier scores.
 - [OOD Scoring](guides/OOD_Scoring.md) explains evaluation-time scoring from retained split-distance support.
@@ -100,8 +100,8 @@ Guides are organized around tasks rather than individual classes.
 PFGAP separates physical storage from logical observation representation.
 
 - [Data Formats](data/Data_Formats.md) describes supported external layouts and file formats.
-- [Dataset Representations](data/Dataset_Representations.md) defines numeric and generic in-memory observation shapes.
-- [Readers](data/Readers.md) lists implemented reader types, required options, materialization behavior, and representation contracts.
+- [Dataset Representations](data/Dataset_Representations.md) defines numeric and generic in-memory observation shapes and label representations.
+- [Readers](data/Readers.md) lists implemented reader types, required options, label sources, materialization behavior, and representation contracts.
 - [Writers](data/Writers.md) describes complete dataset output, mirror-writer support, labels, headers, and inverse transformation.
 
 For cross-cutting missing-data rules, see [Missing Values](reference/Missing_Values.md).
@@ -166,7 +166,7 @@ Reference pages define current public contracts.
 Depending on the task and configuration, PFGAP can write:
 
 - saved forest models;
-- validation or evaluation predictions;
+- scalar or multi-output validation or evaluation predictions;
 - structured prediction and OOD CSV files;
 - training and evaluation-to-training proximities;
 - supervised classification outlier scores;

@@ -10,6 +10,7 @@ import datasets.writers.DatasetWriter;
 import datasets.writers.DatasetWriterFactory;
 import imputation.results.ImputedValuesCSR;
 import imputation.results.ImputedValuesCSRBuilder;
+import imputation.results.ImputedValuesTensorWriter;
 import imputation.util.MissingIndices;
 import output.ExperimentResultWriter;
 import output.PredictionWriter;
@@ -201,7 +202,13 @@ public final class ExperimentOutputCoordinator {
         writeTestingDataWhenRequested(data, List.of());
     }
 
-    /** Builds a reader-independent CSR containing originally missing cells. */
+    /**
+     * Builds a reader-independent CSR containing originally missing tabular or
+     * univariate cells.
+     *
+     * <p>Multivariate imputed-only output uses explicit sparse tensor
+     * coordinates and therefore bypasses CSR construction.</p>
+     */
     public ImputedValuesCSR buildImputedValuesCsr(
             ListObjectDataset data,
             MissingIndices missing,
@@ -210,23 +217,89 @@ public final class ExperimentOutputCoordinator {
         Objects.requireNonNull(data, "Imputed dataset cannot be null.");
         Objects.requireNonNull(missing, "MissingIndices cannot be null.");
         validateStates(data, states, "imputed-output");
+
+        if (isMatrix(data) || missing.is2D()) {
+            throw new IllegalArgumentException(
+                    "ImputedValuesCSR supports only tabular or univariate "
+                            + "imputed-only output. Multivariate output uses "
+                            + "sparse tensor coordinates."
+            );
+        }
+
         return ImputedValuesCSRBuilder.build(
-                data, missing,
+                data,
+                missing,
                 states.isEmpty() ? AppContext.standardizationStats : null,
-                states);
+                states
+        );
     }
 
-    /** Builds and writes the imputed-only CSR as Matrix Market coordinate data. */
-    public Path writeImputedValuesMatrixMarket(
+    /**
+     * Writes only originally missing cells using the representation appropriate
+     * for the logical data rank.
+     *
+     * <p>Tabular and univariate data are written as Matrix Market coordinate
+     * data ({@code .mtx}). Multivariate data are written directly as sparse
+     * tensor coordinates ({@code .tns}) without flattening dimension and time.
+     * Complete imputed datasets remain the responsibility of the dataset writer
+     * path.</p>
+     */
+    public Path writeImputedValues(
             ListObjectDataset data,
             MissingIndices missing,
             List<PerSeriesStandardizationState> states,
             Path path,
             String description
     ) throws IOException {
-        Objects.requireNonNull(path, "Matrix Market path cannot be null.");
+        Objects.requireNonNull(data, "Imputed dataset cannot be null.");
+        Objects.requireNonNull(missing, "MissingIndices cannot be null.");
+        Objects.requireNonNull(path, "Imputed-only output path cannot be null.");
+        validateStates(data, states, "imputed-output");
+
+        boolean multivariateData = isMatrix(data);
+        if (multivariateData != missing.is2D()) {
+            throw new IllegalArgumentException(
+                    "Imputed dataset rank and MissingIndices rank do not match."
+            );
+        }
+
+        if (multivariateData) {
+            return ImputedValuesTensorWriter.write(
+                    data,
+                    missing,
+                    states.isEmpty()
+                            ? AppContext.standardizationStats
+                            : null,
+                    states,
+                    replaceExtension(path, ".tns"),
+                    description
+            );
+        }
+
         return buildImputedValuesCsr(data, missing, states)
-                .writeMatrixMarket(path, description);
+                .writeMatrixMarket(
+                        replaceExtension(path, ".mtx"),
+                        description
+                );
+    }
+
+    private static Path replaceExtension(Path path, String extension) {
+        Path fileName = path.getFileName();
+        if (fileName == null) {
+            throw new IllegalArgumentException(
+                    "Imputed-only output path must contain a file name: "
+                            + path
+                            + "."
+            );
+        }
+
+        String name = fileName.toString();
+        int finalSeparator = name.lastIndexOf('.');
+        String baseName = finalSeparator > 0
+                ? name.substring(0, finalSeparator)
+                : name;
+
+        return path.resolveSibling(baseName + extension);
     }
 
     private void writeDataset(

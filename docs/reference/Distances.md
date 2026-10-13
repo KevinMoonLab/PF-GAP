@@ -395,7 +395,7 @@ nan_euclidean_i
 javadistance
 ```
 
-A custom Java distance used with dimension subsampling must implement the selection-aware custom-distance interface.
+A custom Java distance used with dimension subsampling must implement the selection-aware custom-distance interface. It may optionally support early abandoning through `compute(first, second, bestSoFar, selectedDimensions)`.
 
 If dimension subsampling is enabled with a distance not handled by the selected-dimension dispatch, PFGAP rejects the distance calculation rather than silently using every dimension.
 
@@ -543,11 +543,23 @@ Parallel workers receive independent evaluators with copies of the selected cand
 
 ## Early abandoning and invalid results
 
-Distance dispatch accepts a `bestSoFar` value for implementations that support early abandoning.
+Distance dispatch accepts a `bestSoFar` cutoff. Configure the policy with:
 
-A distance may return positive infinity, including when early abandoning determines that a candidate cannot improve the current result. `NaN` is invalid and causes PFGAP to reject the distance result.
+```python
+early_abandon_distances=True
+```
 
-When multiple exemplars have exactly equal minimum distances, PFGAP selects among the tied branches using its seeded random source.
+Direct Java form:
+
+```text
+-early_abandon_distances=true
+```
+
+When enabled, cutoff-aware distances receive the current best competing distance. When disabled, they receive positive infinity and should perform a complete calculation. Correct implementations should select the same branch and return the same winning distance in either mode.
+
+Custom Java distances may optionally implement `compute(first, second, bestSoFar)`. Selection-aware custom distances may implement `compute(first, second, bestSoFar, selectedDimensions)`. Default overloads preserve compatibility with full-calculation implementations.
+
+A distance may abandon only after proving that its exact result must be strictly greater than `bestSoFar`; equality must remain exact to preserve ties. `NaN`, negative infinity, and negative distances are invalid. OOD scoring additionally requires finite, nonnegative winning distances. See [OOD Scoring](../guides/OOD_Scoring.md).
 
 ## Lazy materialization
 

@@ -11,21 +11,16 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Primitive CSR result containing only values at originally missing positions.
+ * Primitive CSR result containing only values at originally missing positions
+ * in tabular or univariate data.
  *
- * <p>Rows correspond to dataset instances. For one-dimensional instances,
- * columns are time/feature positions. For dimension-major two-dimensional
- * instances, columns use the global flattening rule:</p>
+ * <p>Rows correspond to dataset instances and columns correspond directly to
+ * feature or time positions. Exact zero values are retained because entry
+ * presence denotes original missingness, not mathematical nonzero status.</p>
  *
- * <pre>
- * column = dimension * maximumTimeLength + position
- * </pre>
- *
- * <p>This global rule supports unequal instance lengths and unequal dimension
- * counts while producing one valid rectangular matrix. Actual source shape is
- * retained by {@code instanceDimensionOffsets} and {@code dimensionLengths}.
- * Exact zero values are retained because CSR presence means the source cell was
- * originally missing, not merely numerically nonzero.</p>
+ * <p>Multivariate imputed-only output bypasses this representation and is
+ * written directly as sparse tensor coordinates by
+ * {@link ImputedValuesTensorWriter}.</p>
  */
 public final class ImputedValuesCSR implements Serializable {
 
@@ -57,6 +52,13 @@ public final class ImputedValuesCSR implements Serializable {
             int[] instanceDimensionOffsets,
             int[] dimensionLengths
     ) {
+        if (twoDimensionalSource) {
+            throw new IllegalArgumentException(
+                    "ImputedValuesCSR supports only tabular or univariate "
+                            + "data. Multivariate imputed-only output must "
+                            + "use ImputedValuesTensorWriter."
+            );
+        }
         this.rowCount = rowCount;
         this.columnCount = columnCount;
         this.rowOffsets = rowOffsets.clone();

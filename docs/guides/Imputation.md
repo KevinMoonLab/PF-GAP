@@ -25,7 +25,7 @@ PFGAP imputation has three main choices:
    - `dtw_alignment`: use DTW alignment when transferring proximity-weighted values between sequences.
 3. **Output form**
    - a complete imputed dataset; or
-   - an imputed-only Matrix Market `.mtx` file containing values at the originally missing coordinates.
+   - an imputed-only coordinate file: `.mtx` for tabular or univariate data, or `.tns` for multivariate data.
 
 The initialization and update choices are independent. For example, a run can use `impute_first` initialization followed by `dtw_alignment` updates.
 
@@ -357,45 +357,31 @@ The Python helper automatically enables the corresponding training or test imput
 
 Complete imputed output contains both originally observed values and imputed values. See [Writers](../data/Writers.md) and [Outputs](../reference/Outputs.md) for the applicable output layout and file names.
 
-## Imputed-only Matrix Market output
+## Imputed-only coordinate output
 
-PFGAP can return only the values at originally missing coordinates in a Matrix Market `.mtx` file.
-
-For training data:
+PFGAP can return only values at originally missing coordinates. Tabular or univariate data uses Matrix Market `.mtx`; multivariate data uses sparse tensor `.tns` with `(instance, dimension, time, value)` entries.
 
 ```python
 return_imputed_training_csr=True
-training_imputed_csr_file="../output/train_imputed_only.mtx"
+training_imputed_csr_file="../output/train_imputed_only"
+return_imputed_testing_csr=True
+testing_imputed_csr_file="../output/test_imputed_only"
 ```
 
-Direct Java form:
+Direct Java forms:
 
 ```text
 -output_train_imputed_csr=true
--train_imputed_csr_file=output/train_imputed_only.mtx
-```
-
-For test data:
-
-```python
-return_imputed_testing_csr=True
-testing_imputed_csr_file="../output/test_imputed_only.mtx"
-```
-
-Direct Java form:
-
-```text
+-train_imputed_csr_file=output/train_imputed_only
 -output_test_imputed_csr=true
--test_imputed_csr_file=output/test_imputed_only.mtx
+-test_imputed_csr_file=output/test_imputed_only
 ```
 
-The option names retain `csr`, while the supported file output is Matrix Market `.mtx`. Requesting imputed-only output automatically enables the corresponding imputation operation.
-
-The `.mtx` output contains entries only for positions that were missing in the original input, including imputed values that are exactly zero. See [Imputed-Only Output](../reference/Imputed_Only_Output.md) for matrix dimensions, coordinate conventions, and metadata.
+The option names retain `csr` for compatibility. PFGAP selects `.mtx` or `.tns` from the logical data rank. Multivariate output bypasses CSR and streams explicit coordinates without flattening dimension and time. Both formats preserve exact-zero imputations and are sparse patches instead of complete datasets. See [Imputed-Only Output](../reference/Imputed_Only_Output.md).
 
 ## Example: impute first with standard updates
 
-This example performs mean initialization followed by five standard proximity updates. It returns a complete imputed dataset and imputed-only `.mtx` output for both training and test data.
+This example performs mean initialization followed by five standard proximity updates. It returns a complete imputed dataset and imputed-only coordinate output for both training and test data.
 
 ### Python helper
 
@@ -427,8 +413,8 @@ status = PF.train(
     return_imputed_testing=True,
     return_imputed_training_csr=True,
     return_imputed_testing_csr=True,
-    training_imputed_csr_file="../output/imputation/train_imputed_only.mtx",
-    testing_imputed_csr_file="../output/imputation/test_imputed_only.mtx",
+    training_imputed_csr_file="../output/imputation/train_imputed_only",
+    testing_imputed_csr_file="../output/imputation/test_imputed_only",
     save_model=True,
     model_name="imputed_model",
     output_directory="../output/imputation",
@@ -468,8 +454,8 @@ java -Xmx4g -jar Application/PFGAP.jar \
   -impute_test=true \
   -output_train_imputed_csr=true \
   -output_test_imputed_csr=true \
-  -train_imputed_csr_file=output/imputation/train_imputed_only.mtx \
-  -test_imputed_csr_file=output/imputation/test_imputed_only.mtx \
+  -train_imputed_csr_file=output/imputation/train_imputed_only \
+  -test_imputed_csr_file=output/imputation/test_imputed_only \
   -savemodel=true \
   -modelname=imputed_model \
   -out=output/imputation/
@@ -591,7 +577,7 @@ status = PF.predict(
     impute_iterations=5,
     return_imputed_testing=True,
     return_imputed_testing_csr=True,
-    testing_imputed_csr_file="../output/predict/test_imputed_only.mtx",
+    testing_imputed_csr_file="../output/predict/test_imputed_only",
     output_directory="../output/predict",
 )
 
@@ -713,16 +699,16 @@ return_imputed_training=True
 return_imputed_testing=True
 ```
 
-or request imputed-only `.mtx` output:
+or request imputed-only coordinate output:
 
 ```python
 return_imputed_training_csr=True
 return_imputed_testing_csr=True
 ```
 
-### The `.mtx` path is incorrect
+### The imputed-only path or extension is unexpected
 
-Set `training_imputed_csr_file` or `testing_imputed_csr_file` to the desired `.mtx` path. Ensure that its parent output directory exists for direct Java execution.
+Set `training_imputed_csr_file` or `testing_imputed_csr_file` to the desired base path. PFGAP selects `.mtx` or `.tns` from the data rank. Ensure that its parent output directory exists for direct Java execution.
 
 ### DTW-aligned imputation is not used
 
@@ -749,7 +735,7 @@ Configure all missing-value strings needed by both datasets. The same token must
 ## Next steps
 
 - Read [Missing Values](../reference/Missing_Values.md) for the full missing-data contract.
-- Read [Imputed-Only Output](../reference/Imputed_Only_Output.md) for `.mtx` coordinate and metadata conventions.
+- Read [Imputed-Only Output](../reference/Imputed_Only_Output.md) for `.mtx` and `.tns` coordinate conventions.
 - Read [Distances](../reference/Distances.md) for ordinary and missing-aware distance compatibility.
 - Read [Standardization](Standardization.md) before combining preprocessing and imputation.
 - Read [Outputs](../reference/Outputs.md) for complete imputed dataset filenames and layouts.

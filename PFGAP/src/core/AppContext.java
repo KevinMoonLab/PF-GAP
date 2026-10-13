@@ -152,11 +152,13 @@ public class AppContext {
 
 	public static Runtime runtime = Runtime.getRuntime();
 	public static boolean savemodel;
+	public static ModelPersistenceMode modelPersistenceMode = ModelPersistenceMode.EMBEDDED;
 	public static boolean getprox;
 	public static boolean get_training_outlier_scores;
 	public static boolean get_predictions = false; // write aggregate prediction artifacts
 	public static String modelname = "Thor";
 	public static MEASURE[] userdistances; //= {MEASURE.dtw};
+	public static boolean early_abandon_distances = true;
 	public static MEASURE[] KNNdistances; //only used in KNN initial imputation.
 	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
 	/**

@@ -2,6 +2,7 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
+import core.ModelPersistenceMode;
 import datasets.NumericStorageType;
 import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
@@ -36,7 +37,7 @@ public class PFApplication {
 	public static final String[] test_args = new String[]{
 			"-train=" + System.getProperty("user.dir") + "/Data/" + UCR_dataset + "_TRAIN.tsv", //"-train=E:/data/ucr/" + UCR_dataset + "/" + UCR_dataset + "_TRAIN.txt",
 			"-test=" + System.getProperty("user.dir") + "/Data/" + UCR_dataset + "_TEST.tsv",
-//			"-train=E:/data/satellite/sample100000_TRAIN.txt", 
+//			"-train=E:/data/satellite/sample100000_TRAIN.txt",
 //			"-test=E:/data/satellite/sample100000_TEST.txt",
 			"-out=output",
 			"-repeats=1",
@@ -373,6 +374,35 @@ public class PFApplication {
 		}
 
 		return values;
+	}
+
+	private static ModelPersistenceMode parseModelPersistenceMode(String raw) {
+		if (raw == null) {
+			throw new IllegalArgumentException(
+					"model_persistence_mode cannot be null."
+			);
+		}
+
+		String normalized = raw
+				.trim()
+				.replace('-', '_')
+				.toUpperCase(Locale.ROOT);
+
+		if (normalized.isEmpty()) {
+			throw new IllegalArgumentException(
+					"model_persistence_mode cannot be blank."
+			);
+		}
+
+		try {
+			return ModelPersistenceMode.valueOf(normalized);
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException(
+					"Invalid model_persistence_mode '" + raw +
+							"'. Expected one of: embedded, prediction_only.",
+					exception
+			);
+		}
 	}
 
 	private static String parseNullableString(String raw) {
@@ -742,6 +772,9 @@ public class PFApplication {
 					case "-savemodel":
 						AppContext.savemodel = Boolean.parseBoolean(options[1]);
 						break;
+					case "-model_persistence_mode":
+						AppContext.modelPersistenceMode = parseModelPersistenceMode(options[1]);
+						break;
 					// parallelization strategy is now being changed
 					// we utilize a single work-stealing strategy.
 					/*case "-parallelTrees":
@@ -905,6 +938,9 @@ public class PFApplication {
 						String temp_strings_rm = temp_strings.substring(1, temp_strings.length() - 1); // Removes '[' and ']'
 						String[] contents_strings = temp_strings_rm.split(","); // Splits by ","
 						AppContext.MissingStrings = new HashSet<>(Arrays.asList(contents_strings));
+						break;
+					case "-early_abandon_distances":
+						AppContext.early_abandon_distances = Boolean.parseBoolean(options[1]);
 						break;
 					case "-distances":
 						String temp = options[1];

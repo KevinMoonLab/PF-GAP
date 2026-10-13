@@ -15,20 +15,11 @@ Use `Application/PFGAP.jar` and `Application/PF_wrapper.py` from the same PFGAP 
 
 ## Regression data
 
-A labeled regression dataset contains:
+A labeled regression dataset contains one observation and one regression target per instance.
 
-- one observation per instance; and
-- one numeric target per instance.
+A scalar target may be an integer or floating-point value, but PFGAP treats it as a continuous outcome and represents it as a finite `Double`.
 
-Targets may be integers or floating-point values, but PFGAP treats them as continuous regression outcomes. Classification labels and multi-target regression are not part of the regression workflow described here.
-
-Example targets include:
-
-```text
-2.4
--0.75
-18.0
-```
+Multi-target regression uses an ordered target vector with one finite numeric component per output. Every labeled instance must use the same target count and ordering. A single target remains scalar rather than being wrapped in a one-element list.
 
 Missing training targets are not supported. Missing feature values are handled separately through imputation or compatible missing-aware distances.
 
@@ -65,6 +56,17 @@ Direct Java configuration:
 
 To use the final column instead, set `target_column="last"` or `-target_column=last`.
 
+### Named target columns
+
+Readers that support named columns can select multiple embedded targets:
+
+```python
+feature_columns=["Chins", "Situps", "Jumps"]
+label_columns=["Weight", "Waist", "Pulse"]
+```
+
+The configured column order defines the target order. See [Readers](../data/Readers.md) for reader-specific support.
+
 ### Separate target files
 
 When targets are stored separately, use `train_labels` and, when available, `test_labels`:
@@ -76,7 +78,7 @@ test_file="../data/test.csv"
 test_labels="../data/test_targets.csv"
 ```
 
-The target order must match the observation order exactly.
+The target order must match the observation order exactly. A one-column sidecar supplies scalar targets; multiple columns supply an ordered multi-target vector. Per-file sidecars use the same delimiter and header setting as the instance files.
 
 ## Train a regression forest
 
@@ -246,7 +248,7 @@ Direct Java form:
 -purity_threshold=1e-6
 ```
 
-The [Configuration Reference](../reference/Configuration_Reference.md) contains the complete regression option definitions and accepted values.
+For multi-target regression, the selected purity measure is computed per target and aggregated internally. Use the ordinary `variance` or `mad` setting. The [Configuration Reference](../reference/Configuration_Reference.md) contains the complete regression option definitions and accepted values.
 
 ## Core forest settings
 
@@ -514,7 +516,7 @@ Direct Java:
 -get_predictions=true
 ```
 
-Regression predictions are numeric values.
+Scalar regression predictions are numeric values. Multi-target predictions preserve the configured target order. Prediction-file schemas are documented in [Outputs](../reference/Outputs.md).
 
 ### Enhanced outputs
 
@@ -530,7 +532,7 @@ Direct Java:
 -return_enhanced_outputs=true
 ```
 
-Enhanced regression output includes the supported per-instance regression summary fields, including the mean and standard deviation of tree predictions and the number of contributing trees. See [Outputs](../reference/Outputs.md) for the exact file and column definitions.
+Enhanced regression output includes the supported per-instance regression summary fields, including the mean and standard deviation of tree predictions and the number of contributing trees. Enhanced prediction details are scalar-only in v1; ordinary prediction output supports multi-target regression. See [Outputs](../reference/Outputs.md) for the exact file and column definitions.
 
 The Python helper can read an enhanced CSV file:
 
@@ -576,7 +578,7 @@ Regression data may contain supported missing feature values. PFGAP can handle t
 - imputation; or
 - compatible missing-aware distances.
 
-Missing regression targets are not supported for supervised training.
+Missing regression targets or target components are not supported for supervised training.
 
 See [Imputation](Imputation.md) for the imputation workflow and [Missing Values](../reference/Missing_Values.md) for the complete missing-data contract.
 
@@ -635,11 +637,11 @@ or:
 
 ### Targets are not numeric
 
-Convert the targets to numeric values before running PFGAP. Use classification instead when the target values represent discrete classes.
+Convert every target component to a finite numeric value before running PFGAP. Use classification instead when the targets represent discrete classes.
 
 ### Targets and observations are misaligned
 
-When targets are stored separately, ensure that the target count and ordering match the observations exactly.
+When targets are stored separately, ensure that the target count and ordering match the observations exactly. Multi-target sidecar rows must also have a consistent number of columns.
 
 ### A selected distance is incompatible
 

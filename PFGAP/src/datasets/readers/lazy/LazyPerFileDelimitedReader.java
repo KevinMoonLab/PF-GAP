@@ -4,6 +4,7 @@ import core.AppContext;
 import datasets.ListObjectDataset;
 import datasets.NumericStorageType;
 import datasets.readers.DatasetReader;
+import datasets.readers.LabelSidecarReader;
 import datasets.readers.NumericPerFileParquetSeriesReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
@@ -58,6 +59,9 @@ public final class LazyPerFileDelimitedReader implements DatasetReader {
     private final StandardizationStats standardizationStats;
     private final int initialTimeCapacity;
     private final NumericStorageType numericStorageType;
+    private String labelPath;
+    private LabelSidecarReader.LabelMode labelMode;
+    private boolean labelsExpected;
 
     public LazyPerFileDelimitedReader(ReaderOptions options) {
         this(requireOptions(options).getDataPath(),
@@ -70,6 +74,7 @@ public final class LazyPerFileDelimitedReader implements DatasetReader {
                 options.getStandardizationStats(),
                 DEFAULT_INITIAL_TIME_CAPACITY,
                 options.getNumericStorageType());
+        configureLabels(options.getLabelPath(), options.isTest());
     }
 
     public LazyPerFileDelimitedReader(
@@ -154,6 +159,7 @@ public final class LazyPerFileDelimitedReader implements DatasetReader {
     @Override
     public ListObjectDataset read() throws IOException {
         List<Path> files = discoverFiles();
+        List<Object> labels = readLabels(files.size());
 
         LazySeriesReaderSpec spec = new LazySeriesReaderSpec(
                 readerKey,
@@ -175,7 +181,7 @@ public final class LazyPerFileDelimitedReader implements DatasetReader {
         for (int instance = 0; instance < files.size(); instance++) {
             Path file = files.get(instance);
             dataset.add(
-                    inferLabel(file, instance),
+                    labels.isEmpty() ? null : labels.get(instance),
                     new LazySeriesRef(readerKey, instance, file),
                     instance
             );
@@ -280,8 +286,53 @@ public final class LazyPerFileDelimitedReader implements DatasetReader {
         return List.copyOf(result);
     }
 
-    private Object inferLabel(Path file, int instanceIndex) {
-        return null;
+    private void configureLabels(
+            String configuredLabelPath,
+            boolean testDataset
+    ) {
+        labelsExpected = !AppContext.isIsolationMode()
+                && (!testDataset || AppContext.exists_testlabels);
+        labelPath = normalizeNullableString(configuredLabelPath);
+
+        if (!labelsExpected) {
+            if (labelPath != null && AppContext.isIsolationMode()) {
+                throw new IllegalArgumentException(
+                        "Isolation mode does not use a label sidecar."
+                );
+            }
+            labelMode = null;
+            return;
+        }
+        if (labelPath == null) {
+            throw new IllegalArgumentException(
+                    "LazyPerFileDelimitedReader requires labelPath when "
+                            + "supervised labels are expected."
+            );
+        }
+        labelMode = AppContext.isRegressionMode()
+                ? LabelSidecarReader.LabelMode.REGRESSION
+                : LabelSidecarReader.LabelMode.CLASSIFICATION;
+    }
+
+    private List<Object> readLabels(
+            int instanceFileCount
+    ) throws IOException {
+        if (!labelsExpected) {
+            return List.of();
+        }
+        Path path = Path.of(labelPath);
+        List<Object> labels = LabelSidecarReader.read(
+                path,
+                hasHeader,
+                entrySeparator.charAt(0),
+                labelMode
+        );
+        LabelSidecarReader.validateCount(
+                labels,
+                instanceFileCount,
+                path
+        );
+        return labels;
     }
 
     private static ReaderOptions requireOptions(ReaderOptions options) {

@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -59,6 +61,8 @@ public class DelimitedFileReader implements DatasetReader {
     private final boolean isTest;
     private final boolean isRegression;
     private final NumericStorageType numericStorageType;
+    private final List<String> featureColumns;
+    private final List<String> labelColumns;
 
     public DelimitedFileReader(
             String dataFileName,
@@ -77,7 +81,9 @@ public class DelimitedFileReader implements DatasetReader {
                 dataFileName, labelFileName, entrySeparator, arraySeparator,
                 hasHeader, is2D, isNumeric, hasMissingValues,
                 targetColumnIsFirst, isTest, isRegression,
-                NumericStorageType.AUTO
+                NumericStorageType.AUTO,
+                List.of(),
+                List.of()
         );
     }
 
@@ -94,6 +100,20 @@ public class DelimitedFileReader implements DatasetReader {
             boolean isTest,
             boolean isRegression,
             NumericStorageType numericStorageType
+    ) {
+        this(dataFileName, labelFileName, entrySeparator, arraySeparator,
+                hasHeader, is2D, isNumeric, hasMissingValues,
+                targetColumnIsFirst, isTest, isRegression, numericStorageType,
+                List.of(), List.of());
+    }
+
+    public DelimitedFileReader(
+            String dataFileName, String labelFileName, String entrySeparator,
+            String arraySeparator, boolean hasHeader, boolean is2D,
+            boolean isNumeric, boolean hasMissingValues,
+            boolean targetColumnIsFirst, boolean isTest, boolean isRegression,
+            NumericStorageType numericStorageType,
+            List<String> featureColumns, List<String> labelColumns
     ) {
         this.dataFileName = requireNonblank(dataFileName, "dataFileName");
         this.labelFileName = normalizeNullableString(labelFileName);
@@ -119,6 +139,10 @@ public class DelimitedFileReader implements DatasetReader {
                             + "row-encoded 2D observations. Supply a separate "
                             + "label file or configure unlabeled input.");
         }
+
+        this.featureColumns = copyColumnNames(featureColumns, "featureColumns");
+        this.labelColumns = copyColumnNames(labelColumns, "labelColumns");
+        validateNamedColumnConfiguration();
     }
 
     @Override
@@ -126,11 +150,15 @@ public class DelimitedFileReader implements DatasetReader {
         long start = System.nanoTime();
         List<Object> labels = labelFileName == null
                 ? List.of()
-                : readGenericLabels(labelFileName, hasHeader, isRegression);
+                : readGenericLabels(
+                labelFileName,
+                hasHeader,
+                isRegression,
+                innerSeparator
+        );
 
         Path dataPath = Path.of(dataFileName);
         validateDataFile(dataPath);
-
         ListObjectDataset dataset = new ListObjectDataset();
         int instanceIndex = 0;
         int commonLength = -1;
@@ -142,25 +170,53 @@ public class DelimitedFileReader implements DatasetReader {
                 .detectBomHeader(true)
                 .ofCsvRecord(dataPath)) {
             var iterator = csvReader.iterator();
+            int[] featureIndices = null;
+            int[] labelIndices = null;
+
             if (hasHeader) {
                 if (!iterator.hasNext()) {
                     throw new IOException(
                             "Delimited file contains no header or data: " + dataPath);
                 }
-                iterator.next();
+                List<String> header = iterator.next().getFields();
+                if (usesNamedColumns()) {
+                    featureIndices = resolveColumns(
+                            header,
+                            featureColumns,
+                            dataPath
+                    );
+                    labelIndices = resolveColumns(
+                            header,
+                            labelColumns,
+                            dataPath
+                    );
+                }
             }
 
             while (iterator.hasNext()) {
-                CsvRecord record = iterator.next();
-                List<String> fields = record.getFields();
+                List<String> fields = iterator.next().getFields();
                 if (fields.isEmpty()) {
                     throw new IllegalArgumentException(
                             "Encountered a delimited record with no fields in file "
-                                    + dataPath + ".");
+                                    + dataPath + "."
+                    );
                 }
 
-                ParsedInstance parsed = parseRecord(
-                        fields, labels, instanceIndex, dataPath);
+                ParsedInstance parsed = usesNamedColumns()
+                        ? parseNamedRecord(
+                        fields,
+                        featureIndices,
+                        labelIndices,
+                        labels,
+                        instanceIndex,
+                        dataPath
+                )
+                        : parseRecord(
+                        fields,
+                        labels,
+                        instanceIndex,
+                        dataPath
+                );
                 dataset.add(parsed.label, parsed.data, instanceIndex);
 
                 if (commonLength < 0) {
@@ -168,7 +224,6 @@ public class DelimitedFileReader implements DatasetReader {
                 } else if (parsed.length != commonLength) {
                     unequalLengths = true;
                 }
-
                 ProgressLogger.logProgress(instanceIndex);
                 instanceIndex++;
             }
@@ -176,21 +231,111 @@ public class DelimitedFileReader implements DatasetReader {
             throw e;
         } catch (RuntimeException e) {
             throw new IOException(
-                    "Failed while parsing delimited dataset: " + dataPath, e);
+                    "Failed while parsing delimited dataset: " + dataPath,
+                    e
+            );
         }
 
         if (instanceIndex == 0) {
             throw new IOException(
-                    "Delimited dataset contains no data records: " + dataPath);
+                    "Delimited dataset contains no data records: " + dataPath
+            );
         }
         validateSeparateLabelCount(labels, instanceIndex);
-
         int datasetLength = unequalLengths ? 0 : Math.max(commonLength, 0);
         dataset.setLength(datasetLength);
         AppContext.length = datasetLength;
-
         ProgressLogger.logDuration(start, System.nanoTime());
         return dataset;
+    }
+
+    private boolean usesNamedColumns() {
+        return !featureColumns.isEmpty() || !labelColumns.isEmpty();
+    }
+
+    private ParsedInstance parseNamedRecord(
+            List<String> fields,
+            int[] featureIndices,
+            int[] labelIndices,
+            List<Object> separateLabels,
+            int instanceIndex,
+            Path dataPath
+    ) {
+        Object label = labelIndices.length == 0
+                ? getSeparateLabel(separateLabels, instanceIndex)
+                : parseSelectedLabels(fields, labelIndices);
+
+        if (isNumeric) {
+            if (numericStorageType == NumericStorageType.FLOAT32) {
+                float[] data = new float[featureIndices.length];
+                for (int i = 0; i < featureIndices.length; i++) {
+                    int source = featureIndices[i];
+                    data[i] = parsePrimitiveFloatToken(
+                            fields.get(source), dataPath, instanceIndex, source
+                    );
+                }
+                return new ParsedInstance(label, data, data.length);
+            }
+            double[] data = new double[featureIndices.length];
+            for (int i = 0; i < featureIndices.length; i++) {
+                int source = featureIndices[i];
+                data[i] = parsePrimitiveDoubleToken(
+                        fields.get(source), dataPath, instanceIndex, source
+                );
+            }
+            return new ParsedInstance(label, data, data.length);
+        }
+
+        Object[] data = new Object[featureIndices.length];
+        for (int i = 0; i < featureIndices.length; i++) {
+            int source = featureIndices[i];
+            data[i] = parseGenericToken(
+                    fields.get(source), dataPath, instanceIndex, source
+            );
+        }
+        return new ParsedInstance(label, data, data.length);
+    }
+
+    private Object parseSelectedLabels(
+            List<String> fields,
+            int[] labelIndices
+    ) {
+        ArrayList<Object> values = new ArrayList<>(labelIndices.length);
+        for (int source : labelIndices) {
+            values.add(parseLabel(fields.get(source)));
+        }
+        return values.size() == 1
+                ? values.get(0)
+                : List.copyOf(values);
+    }
+
+    private static int[] resolveColumns(
+            List<String> header,
+            List<String> requested,
+            Path dataPath
+    ) {
+        Map<String, Integer> indices = new HashMap<>();
+        for (int i = 0; i < header.size(); i++) {
+            String name = header.get(i).trim();
+            if (indices.putIfAbsent(name, i) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate header column '" + name + "' in "
+                                + dataPath + "."
+                );
+            }
+        }
+        int[] resolved = new int[requested.size()];
+        for (int i = 0; i < requested.size(); i++) {
+            Integer index = indices.get(requested.get(i));
+            if (index == null) {
+                throw new IllegalArgumentException(
+                        "Requested column '" + requested.get(i)
+                                + "' is absent from " + dataPath + "."
+                );
+            }
+            resolved[i] = index;
+        }
+        return resolved;
     }
 
     private ParsedInstance parseRecord(
@@ -588,6 +733,61 @@ public class DelimitedFileReader implements DatasetReader {
         }
     }
 
+    private void validateNamedColumnConfiguration() {
+        if (!usesNamedColumns()) {
+            return;
+        }
+        if (!hasHeader) {
+            throw new IllegalArgumentException(
+                    "featureColumns and labelColumns require hasHeader=true."
+            );
+        }
+        if (featureColumns.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Named-column mode requires at least one feature column."
+            );
+        }
+        if (is2D) {
+            throw new IllegalArgumentException(
+                    "Named-column mode is supported only for tabular/1D records."
+            );
+        }
+        if (labelFileName != null && !labelColumns.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "labelColumns cannot be combined with a separate label file."
+            );
+        }
+        Set<String> overlap = new HashSet<>(featureColumns);
+        overlap.retainAll(labelColumns);
+        if (!overlap.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Columns cannot be both features and labels: " + overlap
+            );
+        }
+    }
+
+    private static List<String> copyColumnNames(
+            List<String> input,
+            String argumentName
+    ) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        ArrayList<String> result = new ArrayList<>(input.size());
+        Set<String> seen = new HashSet<>();
+        for (String item : input) {
+            String value = requireNonblank(item, argumentName + " entry");
+            if (!seen.add(value)) {
+                throw new IllegalArgumentException(
+                        argumentName + " contains duplicate column '"
+                                + value + "'."
+                );
+            }
+            result.add(value);
+        }
+        return List.copyOf(result);
+    }
+
     private static NumericStorageType resolveStorageType(
             NumericStorageType requested
     ) {
@@ -728,26 +928,61 @@ public class DelimitedFileReader implements DatasetReader {
             boolean hasHeader,
             boolean isRegression
     ) throws IOException {
+        return readGenericLabels(
+                labelFileName,
+                hasHeader,
+                isRegression,
+                ','
+        );
+    }
+
+    public static List<Object> readGenericLabels(
+            String labelFileName,
+            boolean hasHeader,
+            boolean isRegression,
+            char separator
+    ) throws IOException {
         List<Object> labels = new ArrayList<>();
         if (labelFileName == null) {
             return labels;
         }
-        try (BufferedReader reader = Files.newBufferedReader(
-                Path.of(labelFileName), StandardCharsets.UTF_8)) {
-            if (hasHeader) {
-                reader.readLine();
+        Path path = Path.of(labelFileName);
+        try (CsvReader<CsvRecord> csvReader = CsvReader.builder()
+                .fieldSeparator(separator)
+                .skipEmptyLines(false)
+                .detectBomHeader(true)
+                .ofCsvRecord(path)) {
+            var iterator = csvReader.iterator();
+            if (hasHeader && iterator.hasNext()) {
+                iterator.next();
             }
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) {
+            while (iterator.hasNext()) {
+                List<String> fields = iterator.next().getFields();
+                if (fields.isEmpty()) {
                     throw new IllegalArgumentException(
-                            "Encountered an empty label in file: "
-                                    + labelFileName);
+                            "Encountered an empty label record in file: "
+                                    + labelFileName
+                    );
                 }
-                labels.add(isRegression
-                        ? JavaDoubleParser.parseDouble(trimmed)
-                        : RowParser.tryParseLabel(trimmed));
+                ArrayList<Object> values = new ArrayList<>(fields.size());
+                for (String field : fields) {
+                    String token = requireNonemptyToken(
+                            field,
+                            "Separate label"
+                    );
+                    if (isRegression) {
+                        values.add(JavaDoubleParser.parseDouble(token));
+                    } else {
+                        try {
+                            values.add(Integer.valueOf(token));
+                        } catch (NumberFormatException ignored) {
+                            values.add(token);
+                        }
+                    }
+                }
+                labels.add(values.size() == 1
+                        ? values.get(0)
+                        : List.copyOf(values));
             }
         }
         return labels;

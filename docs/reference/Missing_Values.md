@@ -322,37 +322,25 @@ The output layout depends on the supported writer selected by the application wo
 
 ## Imputed-only output
 
-PFGAP can write only the final values at originally missing coordinates in Matrix Market `.mtx` format.
-
-For training data:
+PFGAP can write only final values at originally missing coordinates. Tabular or univariate data uses Matrix Market `.mtx`; multivariate data uses sparse tensor `.tns` with `(instance, dimension, time, value)` records.
 
 ```python
 return_imputed_training_csr=True
-training_imputed_csr_file="../output/training_imputed_values.mtx"
-```
-
-For test data:
-
-```python
+training_imputed_csr_file="../output/training_imputed_values"
 return_imputed_testing_csr=True
-testing_imputed_csr_file="../output/testing_imputed_values.mtx"
+testing_imputed_csr_file="../output/testing_imputed_values"
 ```
 
 Direct Java forms:
 
 ```text
 -output_train_imputed_csr=true
--train_imputed_csr_file=output/training_imputed_values.mtx
-```
-
-```text
+-train_imputed_csr_file=output/training_imputed_values
 -output_test_imputed_csr=true
--test_imputed_csr_file=output/testing_imputed_values.mtx
+-test_imputed_csr_file=output/testing_imputed_values
 ```
 
-The option names retain `csr`, while the supported file representation is Matrix Market `.mtx`.
-
-The output includes entries for originally missing coordinates even when the final imputed value is exactly zero. See [Imputed-Only Output](Imputed_Only_Output.md) for matrix shape, coordinate conventions, and companion metadata.
+The option names retain `csr` for compatibility. PFGAP selects `.mtx` or `.tns` from the logical data rank. Multivariate output bypasses CSR and does not flatten dimension and time. Both formats preserve exact-zero imputations and are sparse patches rather than complete datasets. See [Imputed-Only Output](Imputed_Only_Output.md).
 
 ## Standardization and missing values
 
@@ -446,11 +434,11 @@ Use the PFGAP imputation workflow and a supported reader. Iterative imputation u
 
 ## An exactly zero imputation is absent from an external conversion
 
-Use the PFGAP Matrix Market `.mtx` output and preserve its original-missing-coordinate semantics. A zero imputation is meaningful and must not be dropped solely because its value is zero.
+Use the original PFGAP `.mtx` or `.tns` output and preserve its original-missing-coordinate semantics. A zero imputation is meaningful and must not be dropped solely because its value is zero.
 
 ## Complete imputed output is unavailable
 
-Choose a reader and writer combination that supports complete materialization and output, or request imputed-only `.mtx` output where supported.
+Choose a reader and writer combination that supports complete materialization and output, or request imputed-only `.mtx` or `.tns` output where supported.
 
 ## Training and evaluation use different missing tokens
 

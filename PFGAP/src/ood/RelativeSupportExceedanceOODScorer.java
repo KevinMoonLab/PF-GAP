@@ -1,32 +1,35 @@
 package ood;
 
 /**
- * Computes a conservative relative exceedance score along one tree path.
+ * Computes a bounded relative support exceedance score along one tree path.
  *
- * <p>For a finite query winning distance {@code d} and the selected branch's
- * finite training maximum {@code m}, the node contribution is:</p>
+ * <p>For a finite, nonnegative query winning distance {@code d} and the
+ * selected branch's finite, nonnegative training maximum {@code m}, the node
+ * contribution is:</p>
  *
  * <pre>
- * max(0, d - m) / max(m, relativeScaleFloor)
+ * 0,            if d <= m
+ * 1 - (m / d),  if d > m
  * </pre>
  *
- * <p>A contribution of {@code 1.0}, for example, means that the query distance
- * exceeded the training maximum by an amount equal to that maximum, so the
- * query distance was twice the observed branch boundary.</p>
+ * <p>Each node contribution lies in {@code [0, 1]}. A contribution of
+ * {@code 0.5} means that the query distance is twice the observed training
+ * maximum. A positive query distance against a zero training maximum
+ * contributes {@code 1.0}. The formulation is invariant under positive
+ * rescaling of the distance measure and requires no arbitrary scale floor.</p>
  *
- * <p>If the training maximum is positive infinity, the node contributes zero:
- * that branch does not establish a finite upper support boundary. If the query
- * distance is positive infinity while the training maximum is finite, its
- * unresolved excess is represented conservatively by {@code q} effective
- * standard deviations beyond the maximum. The effective standard deviation is
- * the greatest of the selected branch standard deviation, the splitter's
- * minimum positive finite branch standard deviation, and the hard scale floor.</p>
+ * <p>Distance-based OOD scoring requires finite winning distances and finite
+ * branch training maxima. A distance measure that produces a non-finite
+ * winning distance is not compatible with this score. Disabling early
+ * abandoning can help determine whether a non-finite result comes from the
+ * distance calculation itself.</p>
  *
  * <p>The tree score is the arithmetic mean of node contributions over every
  * visited internal node. Nodes without usable summary metadata contribute zero
- * to the numerator and remain in the denominator, making this scorer blind to
- * path length while preventing sparse metadata from amplifying a small number
- * of contributions.</p>
+ * to the numerator and remain in the denominator, making the score independent
+ * of path length while preventing sparse metadata from amplifying a small
+ * number of contributions. The resulting tree score also lies in
+ * {@code [0, 1]}.</p>
  *
  * <p>Instances are mutable and not thread-safe. One instance represents one
  * query-tree traversal at a time.</p>
@@ -34,57 +37,13 @@ package ood;
 public final class RelativeSupportExceedanceOODScorer
         implements PathOODScorer {
 
-    /** Conservative default for an unresolved positive-infinite query distance. */
-    public static final double DEFAULT_INFINITY_SIGMA_MULTIPLIER = 1.0;
-
-    /** Absolute lower bound used when the observed branch scale is zero. */
-    public static final double DEFAULT_RELATIVE_SCALE_FLOOR = 1.0e-12;
-
-    private final double relativeScaleFloor;
-    private final double infinitySigmaMultiplier;
-
     private int visitedNodeCount;
     private int summarizedNodeCount;
     private double contributionSum;
     private double contributionCompensation;
 
-    /** Creates a scorer with the documented default parameters. */
+    /** Creates an empty scorer for one query-tree traversal. */
     public RelativeSupportExceedanceOODScorer() {
-        this(
-                DEFAULT_RELATIVE_SCALE_FLOOR,
-                DEFAULT_INFINITY_SIGMA_MULTIPLIER
-        );
-    }
-
-    /**
-     * Creates a configured scorer.
-     *
-     * @param relativeScaleFloor positive finite denominator and fallback scale
-     * @param infinitySigmaMultiplier nonnegative finite number of effective
-     *                                standard deviations used for an infinite
-     *                                query distance against a finite boundary
-     */
-    public RelativeSupportExceedanceOODScorer(
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
-    ) {
-        if (!Double.isFinite(relativeScaleFloor)
-                || relativeScaleFloor <= 0.0) {
-            throw new IllegalArgumentException(
-                    "Relative OOD scale floor must be positive and finite, but received "
-                            + relativeScaleFloor + "."
-            );
-        }
-        if (!Double.isFinite(infinitySigmaMultiplier)
-                || infinitySigmaMultiplier < 0.0) {
-            throw new IllegalArgumentException(
-                    "Infinity sigma multiplier must be nonnegative and finite, but received "
-                            + infinitySigmaMultiplier + "."
-            );
-        }
-
-        this.relativeScaleFloor = relativeScaleFloor;
-        this.infinitySigmaMultiplier = infinitySigmaMultiplier;
         reset();
     }
 
@@ -101,9 +60,7 @@ public final class RelativeSupportExceedanceOODScorer
         contributionCompensation = 0.0;
     }
 
-    /**
-     * Adds one selected-branch contribution to the current path score.
-     */
+    /** Adds one selected-branch contribution to the current path score. */
     @Override
     public void observe(
             int nodeId,
@@ -134,18 +91,14 @@ public final class RelativeSupportExceedanceOODScorer
             return;
         }
 
+        double trainingMaximum = branchSummary.maximum();
+        validateTrainingMaximum(nodeId, branch, trainingMaximum);
+
         summarizedNodeCount++;
-        double contribution = nodeContribution(
-                winningDistance,
-                branchSummary,
-                trainingSummary
-        );
-        addContribution(contribution);
+        addContribution(nodeContribution(winningDistance, trainingMaximum));
     }
 
-    /**
-     * Finalizes the tree score without resetting this scorer.
-     */
+    /** Finalizes the tree score without resetting this scorer. */
     @Override
     public OODScoreResult finish() {
         if (visitedNodeCount == 0 || summarizedNodeCount == 0) {
@@ -159,7 +112,7 @@ public final class RelativeSupportExceedanceOODScorer
         double score = canonicalizeZero(
                 contributionSum / visitedNodeCount
         );
-        if (!Double.isFinite(score) || score < 0.0) {
+        if (!Double.isFinite(score) || score < 0.0 || score > 1.0) {
             throw new IllegalStateException(
                     "Relative support exceedance produced an invalid tree score: "
                             + score + "."
@@ -174,14 +127,6 @@ public final class RelativeSupportExceedanceOODScorer
         );
     }
 
-    public double relativeScaleFloor() {
-        return relativeScaleFloor;
-    }
-
-    public double infinitySigmaMultiplier() {
-        return infinitySigmaMultiplier;
-    }
-
     public int visitedNodeCount() {
         return visitedNodeCount;
     }
@@ -190,62 +135,17 @@ public final class RelativeSupportExceedanceOODScorer
         return summarizedNodeCount;
     }
 
-    private double nodeContribution(
+    private static double nodeContribution(
             double winningDistance,
-            DistanceDistributionSummary branchSummary,
-            SplitDistanceSummary splitSummary
+            double trainingMaximum
     ) {
-        double trainingMaximum = branchSummary.maximum();
-        validateTrainingMaximum(trainingMaximum);
-
-        if (trainingMaximum == Double.POSITIVE_INFINITY) {
+        if (winningDistance <= trainingMaximum) {
             return 0.0;
         }
 
-        double denominator = Math.max(
-                canonicalizeZero(trainingMaximum),
-                relativeScaleFloor
+        return checkedContribution(
+                1.0 - trainingMaximum / winningDistance
         );
-
-        if (winningDistance == Double.POSITIVE_INFINITY) {
-            double effectiveStandardDeviation =
-                    resolveEffectiveStandardDeviation(
-                            branchSummary,
-                            splitSummary
-                    );
-            return checkedContribution(
-                    infinitySigmaMultiplier
-                            * effectiveStandardDeviation
-                            / denominator
-            );
-        }
-
-        double exceedance = winningDistance - trainingMaximum;
-        if (exceedance <= 0.0) {
-            return 0.0;
-        }
-        return checkedContribution(exceedance / denominator);
-    }
-
-    private double resolveEffectiveStandardDeviation(
-            DistanceDistributionSummary branchSummary,
-            SplitDistanceSummary splitSummary
-    ) {
-        double effective = relativeScaleFloor;
-
-        double branchStandardDeviation = branchSummary.standardDeviation();
-        if (Double.isFinite(branchStandardDeviation)
-                && branchStandardDeviation > effective) {
-            effective = branchStandardDeviation;
-        }
-
-        double splitMinimum =
-                splitSummary.minimumPositiveFiniteStandardDeviation();
-        if (Double.isFinite(splitMinimum) && splitMinimum > effective) {
-            effective = splitMinimum;
-        }
-
-        return effective;
     }
 
     /** Neumaier compensated addition limits path-order roundoff. */
@@ -269,7 +169,9 @@ public final class RelativeSupportExceedanceOODScorer
 
     private static double checkedContribution(double contribution) {
         contribution = canonicalizeZero(contribution);
-        if (!Double.isFinite(contribution) || contribution < 0.0) {
+        if (!Double.isFinite(contribution)
+                || contribution < 0.0
+                || contribution > 1.0) {
             throw new IllegalStateException(
                     "Relative support exceedance produced an invalid node contribution: "
                             + contribution + "."
@@ -278,13 +180,18 @@ public final class RelativeSupportExceedanceOODScorer
         return contribution;
     }
 
-    private static void validateTrainingMaximum(double trainingMaximum) {
-        if (Double.isNaN(trainingMaximum)
-                || trainingMaximum == Double.NEGATIVE_INFINITY
-                || trainingMaximum < 0.0) {
+    private static void validateTrainingMaximum(
+            int nodeId,
+            int branch,
+            double trainingMaximum
+    ) {
+        if (!Double.isFinite(trainingMaximum) || trainingMaximum < 0.0) {
             throw new IllegalStateException(
-                    "Branch training maximum must be nonnegative or positive infinity, but was "
-                            + trainingMaximum + "."
+                    "Relative support exceedance requires a finite, nonnegative "
+                            + "branch training maximum, but received "
+                            + trainingMaximum
+                            + " for branch " + branch
+                            + " at node " + nodeId + "."
             );
         }
     }
@@ -310,12 +217,13 @@ public final class RelativeSupportExceedanceOODScorer
                     "Observed branch cannot be negative: " + branch + "."
             );
         }
-        if (Double.isNaN(winningDistance)
-                || winningDistance == Double.NEGATIVE_INFINITY
-                || winningDistance < 0.0) {
+        if (!Double.isFinite(winningDistance) || winningDistance < 0.0) {
             throw new IllegalArgumentException(
-                    "Winning distance must be nonnegative or positive infinity, but was "
-                            + winningDistance + "."
+                    "Relative support exceedance requires a finite, nonnegative "
+                            + "winning distance, but received "
+                            + winningDistance
+                            + " at node " + nodeId
+                            + " and depth " + depth + "."
             );
         }
     }

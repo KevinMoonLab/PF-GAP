@@ -102,6 +102,7 @@ public final class DatasetPreparationCoordinator {
 
         return new PreparedDatasets(
                 preparedTrainingData,
+                preparedTrainingData.size(),
                 preparedTestingData,
                 datasetName,
                 standardizationResult
@@ -111,20 +112,28 @@ public final class DatasetPreparationCoordinator {
     /**
      * Reads and prepares evaluation data for a previously loaded model.
      *
-     * <p>The supplied training data are retained exactly as loaded from the
-     * model. Only the newly read testing data pass through evaluation-time
+     * <p>The supplied training data are retained exactly as loaded when they
+     * are present. Prediction-only models may supply {@code null} training
+     * data together with the original training size and saved classification
+     * label map. Only the newly read testing data pass through evaluation-time
      * standardization and label remapping.</p>
      *
-     * @param loadedTrainingData training data restored with the model
-     * @return loaded training data, prepared testing data, and inferred
-     *         dataset name
+     * @param loadedTrainingData training data restored with the model, or
+     *                           {@code null} for prediction-only persistence
+     * @param trainingSize original number of training instances
+     * @param initialClassLabels saved training label map for classification;
+     *                           ignored for non-classification workflows
+     * @return optional loaded training data, prepared testing data, inferred
+     *         dataset name, and original training size
      */
     public PreparedDatasets prepareEvaluationMode(
-            ListObjectDataset loadedTrainingData
+            ListObjectDataset loadedTrainingData,
+            int trainingSize,
+            Map<Object, Integer> initialClassLabels
     ) throws IOException {
-        Objects.requireNonNull(
+        validateTrainingSize(
                 loadedTrainingData,
-                "Loaded training data cannot be null."
+                trainingSize
         );
 
         ListObjectDataset originalTestingData =
@@ -143,11 +152,16 @@ public final class DatasetPreparationCoordinator {
                         )
                 );
 
+        Map<Object, Integer> labelMap =
+                loadedTrainingData == null
+                        ? initialClassLabels
+                        : loadedTrainingData
+                                ._get_initial_class_labels();
+
         ListObjectDataset preparedTestingData =
                 prepareTestingData(
                         originalTestingData,
-                        loadedTrainingData
-                                ._get_initial_class_labels()
+                        labelMap
                 );
 
         String datasetName =
@@ -163,9 +177,28 @@ public final class DatasetPreparationCoordinator {
 
         return new PreparedDatasets(
                 loadedTrainingData,
+                trainingSize,
                 preparedTestingData,
                 datasetName,
                 standardizationResult
+        );
+    }
+
+    /**
+     * Backward-compatible evaluation preparation for embedded models.
+     */
+    public PreparedDatasets prepareEvaluationMode(
+            ListObjectDataset loadedTrainingData
+    ) throws IOException {
+        Objects.requireNonNull(
+                loadedTrainingData,
+                "Loaded training data cannot be null."
+        );
+
+        return prepareEvaluationMode(
+                loadedTrainingData,
+                loadedTrainingData.size(),
+                loadedTrainingData._get_initial_class_labels()
         );
     }
 
@@ -347,9 +380,10 @@ public final class DatasetPreparationCoordinator {
             ListObjectDataset testingData
     ) {
         boolean lazyTraining =
-                StandardizationPipeline.isLazyDataset(
-                        trainingData
-                );
+                trainingData != null
+                        && StandardizationPipeline.isLazyDataset(
+                                trainingData
+                        );
 
         boolean lazyTesting =
                 StandardizationPipeline.isLazyDataset(
@@ -445,6 +479,24 @@ public final class DatasetPreparationCoordinator {
         );
     }
 
+    private static void validateTrainingSize(
+            ListObjectDataset trainingData,
+            int trainingSize
+    ) {
+        if (trainingSize < 0) {
+            throw new IllegalArgumentException(
+                    "Training size cannot be negative."
+            );
+        }
+
+        if (trainingData != null
+                && trainingData.size() != trainingSize) {
+            throw new IllegalArgumentException(
+                    "Training size must match the loaded training dataset."
+            );
+        }
+    }
+
     private static void publishPreparedDatasets(
             ListObjectDataset trainingData,
             ListObjectDataset testingData,
@@ -495,14 +547,15 @@ public final class DatasetPreparationCoordinator {
      */
     public record PreparedDatasets(
             ListObjectDataset trainingData,
+            int trainingSize,
             ListObjectDataset testingData,
             String datasetName,
             StandardizationPipeline.ApplicationResult standardizationResult
     ) {
         public PreparedDatasets {
-            Objects.requireNonNull(
+            validateTrainingSize(
                     trainingData,
-                    "Prepared training data cannot be null."
+                    trainingSize
             );
             Objects.requireNonNull(
                     standardizationResult,
@@ -532,6 +585,10 @@ public final class DatasetPreparationCoordinator {
         public List<PerSeriesStandardizationState>
         testingStandardizationStates() {
             return standardizationResult.testingStates();
+        }
+
+        public boolean hasTrainingData() {
+            return trainingData != null;
         }
 
         public boolean hasTestingData() {

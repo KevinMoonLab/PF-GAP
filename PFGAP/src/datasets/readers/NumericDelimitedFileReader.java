@@ -14,6 +14,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -55,6 +57,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
     private final boolean isRegression;
     private final NumericStorageType numericStorageType;
     private final Set<String> missingStrings;
+    private final List<String> featureColumns;
+    private final List<String> labelColumns;
 
     public NumericDelimitedFileReader(
             ReaderOptions options
@@ -71,7 +75,9 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 options.targetColumnIsFirst(),
                 options.isTest(),
                 options.isRegression(),
-                options.getNumericStorageType()
+                options.getNumericStorageType(),
+                options.getFeatureColumns(),
+                options.getLabelColumns()
         );
     }
 
@@ -98,7 +104,9 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 targetColumnIsFirst,
                 isTest,
                 isRegression,
-                NumericStorageType.AUTO
+                NumericStorageType.AUTO,
+                List.of(),
+                List.of()
         );
     }
 
@@ -112,6 +120,18 @@ public class NumericDelimitedFileReader implements DatasetReader {
             boolean isTest,
             boolean isRegression,
             NumericStorageType numericStorageType
+    ) {
+        this(dataFileName, labelFileName, entrySeparator, hasHeader,
+                hasMissingValues, targetColumnIsFirst, isTest, isRegression,
+                numericStorageType, List.of(), List.of());
+    }
+
+    private NumericDelimitedFileReader(
+            String dataFileName, String labelFileName, String entrySeparator,
+            boolean hasHeader, boolean hasMissingValues,
+            boolean targetColumnIsFirst, boolean isTest, boolean isRegression,
+            NumericStorageType numericStorageType,
+            List<String> featureColumns, List<String> labelColumns
     ) {
         this.dataFileName = requireNonblank(
                 dataFileName,
@@ -130,6 +150,10 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 numericStorageType
         );
         this.missingStrings = snapshotMissingStrings();
+
+        this.featureColumns = normalizeColumns(featureColumns, "featureColumns");
+        this.labelColumns = normalizeColumns(labelColumns, "labelColumns");
+        validateNamedColumns();
     }
 
     @Override
@@ -141,10 +165,11 @@ public class NumericDelimitedFileReader implements DatasetReader {
         List<Object> labels = labelFileName == null
                 ? List.of()
                 : DelimitedFileReader.readGenericLabels(
-                        labelFileName,
-                        hasHeader,
-                        isRegression
-                );
+                labelFileName,
+                hasHeader,
+                isRegression,
+                fieldSeparator
+        );
         ListObjectDataset dataset = new ListObjectDataset();
         NumericDatasetCallbackHandler handler = createHandler(
                 dataPath,
@@ -206,8 +231,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                     hasMissingValues,
                     embeddedLabel,
                     targetColumnIsFirst,
-                    isRegression,
-                    missingStrings
+                    isRegression, missingStrings,
+                    featureColumns, labelColumns
             );
         }
         return new DoubleNumericDatasetCallbackHandler(
@@ -218,8 +243,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 hasMissingValues,
                 embeddedLabel,
                 targetColumnIsFirst,
-                isRegression,
-                missingStrings
+                isRegression, missingStrings,
+                featureColumns, labelColumns
         );
     }
 
@@ -227,6 +252,34 @@ public class NumericDelimitedFileReader implements DatasetReader {
         return labelFileName == null
                 && !AppContext.isIsolationMode()
                 && (!isTest || AppContext.exists_testlabels);
+    }
+
+    private void validateNamedColumns() {
+        if (featureColumns.isEmpty() && labelColumns.isEmpty()) return;
+        if (!hasHeader) throw new IllegalArgumentException(
+                "featureColumns and labelColumns require hasHeader=true.");
+        if (featureColumns.isEmpty()) throw new IllegalArgumentException(
+                "Named-column mode requires at least one feature column.");
+        if (labelFileName != null && !labelColumns.isEmpty())
+            throw new IllegalArgumentException(
+                    "labelColumns cannot be combined with a separate label file.");
+        Set<String> overlap = new HashSet<>(featureColumns);
+        overlap.retainAll(labelColumns);
+        if (!overlap.isEmpty()) throw new IllegalArgumentException(
+                "Columns cannot be both features and labels: " + overlap);
+    }
+
+    private static List<String> normalizeColumns(List<String> input, String name) {
+        if (input == null || input.isEmpty()) return List.of();
+        ArrayList<String> result = new ArrayList<>(input.size());
+        Set<String> seen = new HashSet<>();
+        for (String value : input) {
+            String column = requireNonblank(value, name + " entry");
+            if (!seen.add(column)) throw new IllegalArgumentException(
+                    name + " contains duplicate column '" + column + "'.");
+            result.add(column);
+        }
+        return List.copyOf(result);
     }
 
     private void validateSeparateLabelCount(
@@ -381,6 +434,9 @@ public class NumericDelimitedFileReader implements DatasetReader {
         private final boolean targetColumnIsFirst;
         private final boolean isRegression;
         private final Set<String> missingStrings;
+        private final List<String> featureColumns;
+        private final List<String> labelColumns;
+        private final boolean namedMode;
 
         private List<String> firstRecordFields = new ArrayList<>();
         private int expectedFieldCount = -1;
@@ -388,6 +444,10 @@ public class NumericDelimitedFileReader implements DatasetReader {
         private int instanceCount;
         private int commonFeatureCount = -1;
         private String currentLabelToken;
+        private String[] currentLabelTokens;
+        private int[] sourceToFeature;
+        private int[] sourceToLabel;
+        private int selectedFeatureCount;
         private boolean commonFeatureCountValid = true;
         private boolean schemaResolved;
 
@@ -399,8 +459,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 boolean hasMissingValues,
                 boolean embeddedLabel,
                 boolean targetColumnIsFirst,
-                boolean isRegression,
-                Set<String> missingStrings
+                boolean isRegression, Set<String> missingStrings,
+                List<String> featureColumns, List<String> labelColumns
         ) {
             this.file = file;
             this.dataset = dataset;
@@ -411,6 +471,9 @@ public class NumericDelimitedFileReader implements DatasetReader {
             this.targetColumnIsFirst = targetColumnIsFirst;
             this.isRegression = isRegression;
             this.missingStrings = missingStrings;
+            this.featureColumns = featureColumns;
+            this.labelColumns = labelColumns;
+            this.namedMode = !featureColumns.isEmpty() || !labelColumns.isEmpty();
         }
 
         @Override
@@ -430,18 +493,25 @@ public class NumericDelimitedFileReader implements DatasetReader {
             if (fieldIndex >= expectedFieldCount) {
                 throw inconsistentColumnCount(fieldIndex + 1);
             }
-            ensureCurrentRow();
-            if (embeddedLabel && isLabelField(fieldIndex)) {
-                currentLabelToken =
-                        new String(buffer, offset, length).trim();
+            if (namedMode) {
+                int featureIndex = sourceToFeature[fieldIndex];
+                if (featureIndex >= 0) {
+                    ensureCurrentRow();
+                    setNumericField(buffer, offset, length, fieldIndex, featureIndex);
+                    selectedFeatureCount++;
+                } else {
+                    int labelIndex = sourceToLabel[fieldIndex];
+                    if (labelIndex >= 0) currentLabelTokens[labelIndex] =
+                            new String(buffer, offset, length).trim();
+                }
                 return;
             }
-            appendNumericField(
-                    buffer,
-                    offset,
-                    length,
-                    fieldIndex
-            );
+            ensureCurrentRow();
+            if (embeddedLabel && isLabelField(fieldIndex)) {
+                currentLabelToken = new String(buffer, offset, length).trim();
+                return;
+            }
+            appendNumericField(buffer, offset, length, fieldIndex);
         }
 
         @Override
@@ -471,12 +541,13 @@ public class NumericDelimitedFileReader implements DatasetReader {
                                 + "."
                 );
             }
-            if (getCurrentOutputIndex() != expectedFeatureCount) {
+            int produced = namedMode ? selectedFeatureCount : getCurrentOutputIndex();
+            if (produced != expectedFeatureCount) {
                 throw new IllegalStateException(
                         "Numeric record in file "
                                 + file
                                 + " produced "
-                                + getCurrentOutputIndex()
+                                + produced
                                 + " features; expected "
                                 + expectedFeatureCount
                                 + "."
@@ -486,6 +557,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
             Object label = resolveCurrentLabel();
             finishCurrentRow(label);
             currentLabelToken = null;
+            if (currentLabelTokens != null) java.util.Arrays.fill(currentLabelTokens, null);
+            selectedFeatureCount = 0;
             return Boolean.TRUE;
         }
 
@@ -494,6 +567,11 @@ public class NumericDelimitedFileReader implements DatasetReader {
         protected abstract boolean hasCurrentRow();
 
         protected abstract int getCurrentOutputIndex();
+
+        protected abstract void setNumericField(
+                char[] buffer, int offset, int length,
+                int sourceFieldIndex, int featureIndex
+        );
 
         protected abstract void appendNumericField(
                 char[] buffer,
@@ -625,39 +703,49 @@ public class NumericDelimitedFileReader implements DatasetReader {
         }
 
         private void resolveSchema(int fieldCount) {
-            if (fieldCount <= 0
-                    || firstRecordFields.size() != fieldCount) {
-                throw new IllegalArgumentException(
-                        "Numeric delimited file has no valid columns: "
-                                + file
-                );
-            }
-            if (embeddedLabel && fieldCount < 2) {
-                throw new IllegalArgumentException(
-                        "Numeric delimited records in file "
-                                + file
-                                + " must contain at least one feature and "
-                                + "one label."
-                );
-            }
+            if (fieldCount <= 0) throw new IllegalArgumentException(
+                    "Numeric delimited records cannot be empty: " + file);
             expectedFieldCount = fieldCount;
-            expectedFeatureCount = embeddedLabel
-                    ? fieldCount - 1
-                    : fieldCount;
-            if (expectedFeatureCount <= 0) {
-                throw new IllegalArgumentException(
-                        "No numeric feature columns are available in file: "
-                                + file
-                );
+            if (namedMode) {
+                Map<String, Integer> header = new HashMap<>();
+                for (int i = 0; i < firstRecordFields.size(); i++) {
+                    String name = firstRecordFields.get(i).trim();
+                    if (header.putIfAbsent(name, i) != null)
+                        throw new IllegalArgumentException(
+                                "Duplicate header column '" + name + "' in " + file + ".");
+                }
+                sourceToFeature = new int[fieldCount];
+                sourceToLabel = new int[fieldCount];
+                java.util.Arrays.fill(sourceToFeature, -1);
+                java.util.Arrays.fill(sourceToLabel, -1);
+                for (int i = 0; i < featureColumns.size(); i++)
+                    sourceToFeature[requiredColumn(header, featureColumns.get(i))] = i;
+                for (int i = 0; i < labelColumns.size(); i++)
+                    sourceToLabel[requiredColumn(header, labelColumns.get(i))] = i;
+                expectedFeatureCount = featureColumns.size();
+                currentLabelTokens = new String[labelColumns.size()];
+                return;
             }
+            if (embeddedLabel && fieldCount < 2) throw new IllegalArgumentException(
+                    "Embedded labels require at least one feature and one label.");
+            expectedFeatureCount = embeddedLabel ? fieldCount - 1 : fieldCount;
+            if (expectedFeatureCount <= 0) throw new IllegalArgumentException(
+                    "No numeric feature columns are available in file: " + file);
+        }
+
+        private int requiredColumn(Map<String, Integer> header, String column) {
+            Integer index = header.get(column);
+            if (index == null) throw new IllegalArgumentException(
+                    "Requested column '" + column + "' is absent from " + file + ".");
+            return index;
         }
 
         private void appendBufferedFirstDataRecord() {
             ensureCurrentRow();
             String labelToken = null;
             for (int fieldIndex = 0;
-                    fieldIndex < expectedFieldCount;
-                    fieldIndex++) {
+                 fieldIndex < expectedFieldCount;
+                 fieldIndex++) {
                 String token = firstRecordFields.get(fieldIndex);
                 if (embeddedLabel && isLabelField(fieldIndex)) {
                     labelToken = token == null ? "" : token.trim();
@@ -740,8 +828,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
             return token == null
                     || token.isEmpty()
                     || missingStrings.contains(
-                            token.toUpperCase(Locale.ROOT)
-                    );
+                    token.toUpperCase(Locale.ROOT)
+            );
         }
 
         private IllegalArgumentException missingValue(
@@ -794,9 +882,12 @@ public class NumericDelimitedFileReader implements DatasetReader {
         }
 
         private Object resolveCurrentLabel() {
-            if (embeddedLabel) {
-                return parseEmbeddedLabel(currentLabelToken);
+            if (namedMode && !labelColumns.isEmpty()) {
+                ArrayList<Object> values = new ArrayList<>(labelColumns.size());
+                for (String token : currentLabelTokens) values.add(parseEmbeddedLabel(token));
+                return values.size() == 1 ? values.get(0) : List.copyOf(values);
             }
+            if (embeddedLabel) return parseEmbeddedLabel(currentLabelToken);
             return getSeparateLabel(instanceCount);
         }
 
@@ -826,7 +917,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                     );
                 }
             }
-            return DelimitedFileReader.RowParser.tryParseLabel(token);
+            try { return Integer.valueOf(token); }
+            catch (NumberFormatException ignored) { return token; }
         }
 
         private Object getSeparateLabel(int index) {
@@ -888,8 +980,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 boolean hasMissingValues,
                 boolean embeddedLabel,
                 boolean targetColumnIsFirst,
-                boolean isRegression,
-                Set<String> missingStrings
+                boolean isRegression, Set<String> missingStrings,
+                List<String> featureColumns, List<String> labelColumns
         ) {
             super(
                     file,
@@ -899,8 +991,7 @@ public class NumericDelimitedFileReader implements DatasetReader {
                     hasMissingValues,
                     embeddedLabel,
                     targetColumnIsFirst,
-                    isRegression,
-                    missingStrings
+                    isRegression, missingStrings, featureColumns, labelColumns
             );
         }
 
@@ -921,6 +1012,15 @@ public class NumericDelimitedFileReader implements DatasetReader {
         @Override
         protected int getCurrentOutputIndex() {
             return currentOutputIndex;
+        }
+
+        @Override
+        protected void setNumericField(
+                char[] buffer, int offset, int length,
+                int sourceFieldIndex, int featureIndex
+        ) {
+            currentFeatures[featureIndex] = parseDoubleField(
+                    buffer, offset, length, sourceFieldIndex);
         }
 
         @Override
@@ -974,8 +1074,8 @@ public class NumericDelimitedFileReader implements DatasetReader {
                 boolean hasMissingValues,
                 boolean embeddedLabel,
                 boolean targetColumnIsFirst,
-                boolean isRegression,
-                Set<String> missingStrings
+                boolean isRegression, Set<String> missingStrings,
+                List<String> featureColumns, List<String> labelColumns
         ) {
             super(
                     file,
@@ -985,8 +1085,7 @@ public class NumericDelimitedFileReader implements DatasetReader {
                     hasMissingValues,
                     embeddedLabel,
                     targetColumnIsFirst,
-                    isRegression,
-                    missingStrings
+                    isRegression, missingStrings, featureColumns, labelColumns
             );
         }
 
@@ -1007,6 +1106,15 @@ public class NumericDelimitedFileReader implements DatasetReader {
         @Override
         protected int getCurrentOutputIndex() {
             return currentOutputIndex;
+        }
+
+        @Override
+        protected void setNumericField(
+                char[] buffer, int offset, int length,
+                int sourceFieldIndex, int featureIndex
+        ) {
+            currentFeatures[featureIndex] = parseFloatField(
+                    buffer, offset, length, sourceFieldIndex);
         }
 
         @Override

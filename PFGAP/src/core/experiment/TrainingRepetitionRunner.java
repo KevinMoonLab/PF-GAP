@@ -148,7 +148,7 @@ public final class TrainingRepetitionRunner {
                 datasets.trainingStandardizationStates()
         );
 
-        writeImputedOnlyMatrixMarketWhenRequested(
+        writeImputedOnlyWhenRequested(
                 trainingData,
                 datasets.trainingStandardizationStates(),
                 true,
@@ -159,15 +159,15 @@ public final class TrainingRepetitionRunner {
         ProximityForestResult result = testingData == null
                 ? null
                 : runValidation(
-                        forest,
-                        trainingData,
-                        testingData,
-                        effectiveDatasetName,
-                        context,
-                        scoringCoordinator,
-                        proximityCoordinator,
-                        datasets.testingStandardizationStates()
-                );
+                forest,
+                trainingData,
+                testingData,
+                effectiveDatasetName,
+                context,
+                scoringCoordinator,
+                proximityCoordinator,
+                datasets.testingStandardizationStates()
+        );
 
         handleTrainingScores(
                 forest,
@@ -197,7 +197,7 @@ public final class TrainingRepetitionRunner {
         ExperimentResultRecord record = resultAssembler.assemble(
                 result,
                 effectiveDatasetName,
-                trainingData,
+                datasets.trainingSize(),
                 testingData,
                 context
         );
@@ -255,7 +255,7 @@ public final class TrainingRepetitionRunner {
                 testingStandardizationStates
         );
 
-        writeImputedOnlyMatrixMarketWhenRequested(
+        writeImputedOnlyWhenRequested(
                 testingData,
                 testingStandardizationStates,
                 false,
@@ -420,7 +420,7 @@ public final class TrainingRepetitionRunner {
      * test_imputed_csr_file}. The artifact is repetition-aware and contains
      * values in original coordinates.</p>
      */
-    private void writeImputedOnlyMatrixMarketWhenRequested(
+    private void writeImputedOnlyWhenRequested(
             ListObjectDataset dataset,
             List<PerSeriesStandardizationState> standardizationStates,
             boolean training,
@@ -438,20 +438,20 @@ public final class TrainingRepetitionRunner {
                 dataset.getMissingIndices(),
                 (training ? "Training" : "Testing")
                         + " MissingIndices cannot be null when imputed-only "
-                        + "CSR output is requested."
+                        + "output is requested."
         );
         String configuredName = training
                 ? AppContext.train_imputed_csr_file
                 : AppContext.test_imputed_csr_file;
         String defaultName = training
-                ? "training_imputed_values.mtx"
-                : "testing_imputed_values.mtx";
+                ? "training_imputed_values"
+                : "testing_imputed_values";
         String fileName = configuredName == null || configuredName.isBlank()
                 ? defaultName
                 : configuredName.trim();
         Path path = artifactPaths.resolveRepeated(fileName, repetition);
 
-        Path written = outputCoordinator.writeImputedValuesMatrixMarket(
+        Path written = outputCoordinator.writeImputedValues(
                 dataset,
                 missing,
                 standardizationStates,
@@ -489,7 +489,8 @@ public final class TrainingRepetitionRunner {
                 modelPath.toString(),
                 forest,
                 trainingData,
-                snapshot
+                snapshot,
+                AppContext.modelPersistenceMode
         );
 
         context.addArtifact(

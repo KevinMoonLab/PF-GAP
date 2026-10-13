@@ -24,6 +24,13 @@ public final class ImputedValuesCSRBuilder {
     ) {
         Objects.requireNonNull(dataset, "Dataset cannot be null.");
         Objects.requireNonNull(missingIndices, "MissingIndices cannot be null.");
+        if (!missingIndices.is1D()) {
+            throw new IllegalArgumentException(
+                    "ImputedValuesCSRBuilder supports only tabular or "
+                            + "univariate data. Multivariate imputed-only "
+                            + "output must use ImputedValuesTensorWriter."
+            );
+        }
         List<Object> data = Objects.requireNonNull(
                 dataset.getData(), "Dataset data cannot be null."
         );

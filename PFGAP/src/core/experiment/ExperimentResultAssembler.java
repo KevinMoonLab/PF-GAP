@@ -28,7 +28,7 @@ public final class ExperimentResultAssembler {
      *
      * @param result completed forest result
      * @param datasetName logical dataset name
-     * @param trainingData prepared training data, or null when unavailable
+     * @param trainingSize original number of training instances
      * @param testingData prepared testing data, or null when unavailable
      * @param context repetition-specific execution and artifact state
      * @return immutable result record
@@ -36,7 +36,7 @@ public final class ExperimentResultAssembler {
     public ExperimentResultRecord assemble(
             ProximityForestResult result,
             String datasetName,
-            ListObjectDataset trainingData,
+            int trainingSize,
             ListObjectDataset testingData,
             ExperimentRepetitionContext context
     ) {
@@ -48,6 +48,12 @@ public final class ExperimentResultAssembler {
                 context,
                 "ExperimentRepetitionContext cannot be null."
         );
+
+        if (trainingSize < 0) {
+            throw new IllegalArgumentException(
+                    "Training size cannot be negative."
+            );
+        }
 
         String normalizedDatasetName =
                 normalizeDatasetName(datasetName);
@@ -66,7 +72,7 @@ public final class ExperimentResultAssembler {
                         .setForestMode(AppContext.forest_mode)
                         .addCount(
                                 "trainingInstanceCount",
-                                sizeOf(trainingData)
+                                trainingSize
                         )
                         .addCount(
                                 "testingInstanceCount",

@@ -66,13 +66,13 @@ Python `None` is used for optional values. The helper forwards `None` as text fo
 | `train_file` | `-train` | Required | Not used by name | Path | Training observations. |
 | `test_file` | `-test` | `None` | Not used by name | Path or `None` | Optional validation or test observations supplied during training. |
 | `testfile` | `-train` and `-test` | Not applicable | Required | Path | Evaluation observations. The helper sends the same path through both Java options. |
-| `train_labels` | `-train_labels` | `None` | Not exposed | Path or `None` | Separate training labels or targets. |
-| `test_labels` | `-test_labels` | `None` | `None` | Path or `None` | Separate test, validation, or evaluation labels or targets. Supplying a Java `-test_labels` path also marks test labels as present. |
-| `exists_testlabels` | `-exists_testlabels` | `False` | `False` | Boolean | Indicates whether known evaluation labels or targets are available. |
+| `train_labels` | `-train_labels` | `None` | Not exposed | Path or `None` | Separate training labels or targets. Built-in per-file delimited readers interpret this as a positional sidecar aligned with deterministic instance-file order. One column is scalar; multiple columns are ordered outputs. |
+| `test_labels` | `-test_labels` | `None` | `None` | Path or `None` | Separate test, validation, or evaluation labels or targets. Built-in per-file delimited readers interpret this as a positional sidecar aligned with deterministic instance-file order. Supplying a Java `-test_labels` path also marks test labels as present. |
+| `exists_testlabels` | `-exists_testlabels` | `False` | `False` | Boolean | Indicates whether known evaluation labels or targets are available. When false, supported readers may construct unlabeled prediction data without a sidecar. |
 | `target_column` | `-target_column` | `first` | `first` | `first`, `last` | Position of an embedded target in supported delimited layouts. |
-| `file_has_header` | `-csv_has_header` | `False` | `False` | Boolean | Indicates whether supported delimited input has a header row. |
+| `file_has_header` | `-csv_has_header` | `False` | `False` | Boolean | Indicates whether supported delimited input has a header row. Positional per-file delimited label sidecars currently use the same header setting. |
 
-Classification currently uses one integer class label per labeled observation. Regression uses one numeric target per labeled observation.
+Classification targets may be scalar integers or strings, or ordered multi-output values whose components are integers or strings. Regression targets may be scalar finite doubles or ordered multi-target values of finite doubles. A single output remains scalar. Built-in per-file delimited sidecars use the same delimiter and header setting as their instance files and are loaded eagerly, including for lazy feature readers. Isolation mode does not require labels.
 
 ## Reader selection
 
@@ -86,12 +86,16 @@ Classification currently uses one integer class label per labeled observation. R
 | Not exposed | `-test_file_pattern` | Java default `None` | Not applicable | String or `None` | Test-specific file pattern. |
 | `id_column` | `-id_column` | `None` | `None` | Column name or `None` | Instance identifier column for compatible long-form readers. |
 | `time_column` | `-time_column` | `None` | `None` | Column name or `None` | Time or order column for compatible long-form readers. |
-| `feature_columns` | `-feature_columns` | `None` | `None` | Sequence of column names | Explicit feature columns for compatible readers. |
-| `label_columns` | `-label_columns` | `None` | `None` | Sequence of column names | Explicit label or target columns for compatible readers. |
+| `feature_columns` | `-feature_columns` | `None` | `None` | Sequence of column names | Explicit ordered feature columns for compatible readers. Columns not selected as features or labels may be ignored where supported. |
+| `label_columns` | `-label_columns` | `None` | `None` | Sequence of column names | Explicit ordered embedded label or target columns for compatible readers. One column produces a scalar target; multiple columns produce an ordered multi-output target. This is distinct from `train_labels` and `test_labels` sidecar paths. |
 | `hdf5_dataset_path` | `-hdf5_dataset_path` | `/X` | `/X` | HDF5 dataset path | Feature dataset location for HDF5 readers. |
 | `hdf5_label_dataset_path` | `-hdf5_label_dataset_path` | `/y` | `/y` | HDF5 dataset path | Label dataset location for HDF5 readers. |
 
 Reader type names and their requirements are documented in [Readers](../data/Readers.md).
+
+### Reader-specific label sources
+
+Use `label_columns` for labels embedded in a shared tabular or long-format source. Use `train_labels` and `test_labels` for separate positional sidecars supported by per-file delimited readers. Long-format Parquet readers currently use embedded label columns; shared sidecar conventions for Parquet readers are deferred.
 
 ### Eager and lazy selection
 
@@ -114,7 +118,7 @@ Custom parameter names cannot be blank or contain `;` or `=`. Values cannot cont
 | `data_dimension` | `-is2D` | `1` | `1` | Python: `1` or `2`; Java: Boolean | `1` maps to `false` and selects one-dimensional observations. `2` maps to `true` and selects two-dimensional observations. |
 | `numeric_data` | `-isNumeric` | `True` | `True` | Boolean | Selects numeric or supported generic observations. |
 | `numeric_storage` | `-numeric_storage` | `auto` | Defined but not forwarded by current `predict(...)` | `auto`, `float32`, `float64` and aliases | Selects primitive numeric feature storage. Training helper forwards this option. |
-| `entry_separator` | `-entry_separator` | `,` | `,` | String | Separates entries in supported delimited input. Python converts a literal tab to `\t` for Java. |
+| `entry_separator` | `-entry_separator` | `,` | `,` | String | Separates entries in supported delimited input. Python converts a literal tab to `\t` for Java. Positional per-file delimited label sidecars currently use the same separator. |
 | `array_separator` | `-array_separator` | `:` | `:` | String | Separates nested arrays in compatible delimited 2D layouts. |
 
 `numeric_storage` aliases are:
@@ -152,9 +156,9 @@ Strategy-specific numeric values are ignored when subsampling is disabled or the
 
 | Python argument | Java option | Train default | Predict default | Type and accepted values | Description |
 |---|---|---:|---:|---|---|
-| `purity` | `-purity_measure` | `gini` | Not exposed | Purity name | Classification helper default. The helper substitutes `variance` for regression and `isolation_path_length` for isolation when the caller leaves `gini`. |
+| `purity` | `-purity_measure` | `gini` | Not exposed | Purity name | Classification helper default. Gini and entropy apply to scalar and multi-output classification; multi-output impurity is aggregated across outputs. The helper substitutes `variance` for regression and `isolation_path_length` for isolation when the caller leaves `gini`. |
 | `purity_threshold` | `-purity_threshold` | `1e-6` | Not exposed | Floating-point value | Purity stopping threshold. |
-| `regressor_aggregation` | `-voting` | `mean` | Not exposed | Aggregation name | Combines tree-level regression predictions. |
+| `regressor_aggregation` | `-voting` | `mean` | Not exposed | Aggregation name | Combines tree-level regression predictions. Multi-target predictions are aggregated independently in configured target order. |
 | `regression_num_branches` | `-regression_num_branches` | `2` | Not exposed | Positive integer | Number of branches for regression splits. |
 | `isolation_num_branches` | `-isolation_num_branches` | `2` | Not exposed | Positive integer | Number of branches for isolation splits. |
 | `isolation_min_leaf_size` | `-isolation_min_leaf_size` | `1` | Not exposed | Positive integer | Minimum isolation leaf size. |
@@ -166,6 +170,7 @@ Strategy-specific numeric values are ignored when subsampling is disabled or the
 | `distances` | `-distances` | `None` | `None` | Sequence, encoded list, or descriptors | Candidate forest distances. The helper encodes `None` as an empty list, which delegates to application behavior. |
 | `knn_distances` | `-knn_distances` | `None` | `None` | Distance sequence | Required when `initial_imputer="knn"`. |
 | `missing_proximity_distances` | `-missing_proximity_distances` | `None` | `None` | Missing-compatible distance sequence | Distances used for `proximity_first` initialization. |
+| `early_abandon_distances` | `-early_abandon_distances` | `True` | `True` | Boolean | Controls best-so-far early abandoning. When false, cutoff-aware distances receive positive infinity and should perform a complete calculation. Useful for diagnosing non-finite OOD distances. |
 
 Valid missing-proximity distances are:
 
@@ -231,12 +236,12 @@ KNN initialization uses five neighbors and requires at least one `knn_distances`
 |---|---|---:|---:|---|---|
 | `return_imputed_training` | `-impute_train` | `False` | Not exposed | Boolean | Requests a complete imputed training dataset and enables training imputation. |
 | `return_imputed_testing` | `-impute_test` | `False` | `False` | Boolean | Requests a complete imputed test dataset and enables test imputation. |
-| `return_imputed_training_csr` | `-output_train_imputed_csr` | `False` | Not exposed | Boolean | Requests imputed-only training output in Matrix Market `.mtx` form and enables training imputation. |
-| `return_imputed_testing_csr` | `-output_test_imputed_csr` | `False` | `False` | Boolean | Requests imputed-only test output in Matrix Market `.mtx` form and enables test imputation. |
+| `return_imputed_training_csr` | `-output_train_imputed_csr` | `False` | Not exposed | Boolean | Requests imputed-only training output and enables training imputation. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. |
+| `return_imputed_testing_csr` | `-output_test_imputed_csr` | `False` | `False` | Boolean | Requests imputed-only test output and enables test imputation. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. |
 | `training_imputed_csr_file` | `-train_imputed_csr_file` | `None` | Not exposed | Path or `None` | Output path for imputed-only training values. Java default: `training_imputed_values.mtx`. |
 | `testing_imputed_csr_file` | `-test_imputed_csr_file` | `None` | `None` | Path or `None` | Output path for imputed-only test values. Java default: `testing_imputed_values.mtx`. |
 
-The option names retain `csr`; the supported file output is Matrix Market `.mtx`. See [Imputed-Only Output](Imputed_Only_Output.md).
+The option names retain `csr` for compatibility. One-dimensional output uses `.mtx`; multivariate output bypasses CSR and uses `.tns`. See [Imputed-Only Output](Imputed_Only_Output.md).
 
 ### Lazy per-file Parquet restriction
 
@@ -275,8 +280,8 @@ The Java context default output directory is `output/`. The helper always sends 
 
 | Python argument | Java option | Train default | Predict default | Type and accepted values | Description |
 |---|---|---:|---:|---|---|
-| `return_predictions` | `-get_predictions` | `False` | `False` | Boolean | Requests ordinary aggregate prediction artifacts. |
-| `return_enhanced_outputs` | `-return_enhanced_outputs` | `False` | `False` | Boolean | Requests structured per-instance prediction details. |
+| `return_predictions` | `-get_predictions` | `False` | `False` | Boolean | Requests ordinary aggregate prediction artifacts, including supported multi-output classification and multi-target regression layouts. |
+| `return_enhanced_outputs` | `-return_enhanced_outputs` | `False` | `False` | Boolean | Requests structured per-instance prediction details. Enhanced prediction details remain scalar-only in v1. |
 | `return_training_outlier_scores` | `-get_training_outlier_scores` | `False` | Not exposed | Boolean | Requests Breiman-style supervised classification training outlier scores. |
 
 Prediction, enhanced output, and OOD output are independent requests.
@@ -286,7 +291,7 @@ Prediction, enhanced output, and OOD output are independent requests.
 | Python argument | Java option | Train default | Predict default | Type and accepted values | Description |
 |---|---|---:|---:|---|---|
 | `return_ood_scores` | `-return_ood_scores` | `False` | `False` | Boolean | Requests OOD output. It does not require enhanced prediction output. |
-| `ood_score_type` | `-ood_score_type` | `relative_support_exceedance` | Same | `relative_support_exceedance` | Selects the evaluation-time OOD scorer. |
+| `ood_score_type` | `-ood_score_type` | `relative_support_exceedance` | Same | `relative_support_exceedance` | Selects the bounded `[0, 1]` evaluation-time OOD scorer. Finite, nonnegative winning distances are required. |
 | `collect_split_distance_summaries` | `-collect_split_distance_summaries` | `False` | Not exposed | Boolean | Retains branch-local distance summaries during training so the model can support distance-based OOD scoring. |
 
 When `return_ood_scores=True` is passed to `train(...)`, the helper enables split-distance summary collection for same-run validation.
@@ -341,8 +346,10 @@ The helper applies these configuration rules before launching Java:
 6. `has_missing_values=None` is derived from imputation and missing-aware settings.
 7. `gap_update=None` becomes `dtw_alignment` when `DTWImpute=True`; otherwise `standard`.
 8. `data_dimension=1` maps to `-is2D=false`; `2` maps to `-is2D=true`.
-9. The training model name is reduced to its final path component.
-10. The output directory is created when one directory level is missing and normalized with a trailing slash.
+9. Per-file delimited sidecars use the configured entry separator and header setting.
+10. Lazy per-file delimited readers load labels eagerly and defer only observation values.
+11. The training model name is reduced to its final path component.
+12. The output directory is created when one directory level is missing and normalized with a trailing slash.
 
 ## Training-only Python arguments
 
@@ -410,6 +417,10 @@ Common causes of rejection include:
 - KNN initialization without KNN distances;
 - invalid dimension-selection count or proportion;
 - incompatible standardization statistics;
+- a missing supervised label path for a built-in per-file delimited reader;
+- a positional sidecar count that does not match discovered instance files;
+- inconsistent sidecar output widths, missing label components, or non-finite regression targets;
+- a label sidecar supplied in isolation mode;
 - a custom reader parameter with invalid delimiters;
 - `PER_FILE_PARQUET` without a file pattern in the Python helper; or
 - imputation requested for Python-helper `PER_FILE_PARQUET` access.

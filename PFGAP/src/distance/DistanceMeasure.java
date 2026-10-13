@@ -927,7 +927,8 @@ public class DistanceMeasure implements Serializable {
 			 //materialized. Do not ask a LazyDistanceFunction to resolve them again.
 
 			distance =
-					distanceFunction.compute(s,t);
+					//distanceFunction.compute(s,t);
+					distanceFunction.compute(s,t,bsf);
 
 			break;
 		case manhattan:
@@ -1209,6 +1210,7 @@ public class DistanceMeasure implements Serializable {
 				return computeSelectedJavaDistance(
 						first,
 						second,
+						bestSoFar,
 						selectedDimensions
 				);
 
@@ -1459,6 +1461,7 @@ public class DistanceMeasure implements Serializable {
 	private double computeSelectedJavaDistance(
 			Object first,
 			Object second,
+			double bestSoFar,
 			int[] selectedDimensions
 	) {
 		if (distanceFunction == null) {
@@ -1655,10 +1658,14 @@ public class DistanceMeasure implements Serializable {
 				return branch;
 			}
 
+			double cutoff = AppContext.early_abandon_distances
+					? bestDistance
+					: Double.POSITIVE_INFINITY;
+
 			double currentDistance = distanceResolved(
 					resolvedQuery,
 					exemplar,
-					bestDistance,
+					cutoff,
 					selectedDimensions
 			);
 
