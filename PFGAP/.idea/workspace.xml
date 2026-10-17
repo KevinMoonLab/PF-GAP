@@ -7,20 +7,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ModelIO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ModelIO.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/DatasetPreparationCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/DatasetPreparationCoordinator.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/experiment/EvaluationRepetitionRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/EvaluationRepetitionRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentProximityCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentProximityCoordinator.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/proximity/PFGAP.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/proximity/PFGAP.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/trees/Splitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/Splitter.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../docs/reference/Model_Persistence.md" beforeDir="false" afterPath="$PROJECT_DIR$/../docs/reference/Model_Persistence.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

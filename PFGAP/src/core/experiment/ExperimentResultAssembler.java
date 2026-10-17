@@ -193,6 +193,7 @@ public final class ExperimentResultAssembler {
 
         addModeSpecificConfiguration(builder);
         addLearningMetrics(builder, result);
+        addStructuredResultSummary(builder, result);
 
         return builder.build();
     }

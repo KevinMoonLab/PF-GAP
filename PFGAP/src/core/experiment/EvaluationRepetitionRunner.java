@@ -6,9 +6,9 @@ import core.parallel.ParallelRuntime;
 import datasets.ListObjectDataset;
 import imputation.ProximityImputation;
 import imputation.util.MissingIndices;
-import preprocessing.standardization.PerSeriesStandardizationState;
 import output.ExperimentResultRecord;
 import output.ExperimentResultWriter;
+import preprocessing.standardization.PerSeriesStandardizationState;
 import trees.ProximityForest;
 
 import java.nio.file.Path;
@@ -21,8 +21,9 @@ import java.util.Objects;
  *
  * <p>The runner coordinates optional test imputation, classification or
  * regression prediction, isolation scoring, full and sparse imputed output,
- * requested test/train proximity output, and result-record assembly. Model loading and dataset preparation
- * remain responsibilities of the top-level experiment workflow.</p>
+ * requested test/train proximity output, and result-record assembly. Model
+ * loading and dataset preparation remain responsibilities of the top-level
+ * experiment workflow.</p>
  *
  * <p>Each invocation receives an {@link ExperimentRepetitionContext} that owns
  * exactly one repetition's parallel runtime and artifact metadata. Proximity
@@ -49,12 +50,10 @@ public final class EvaluationRepetitionRunner {
                 artifactPaths,
                 "ExperimentArtifactPaths cannot be null."
         );
-
         this.resultAssembler = Objects.requireNonNull(
                 resultAssembler,
                 "ExperimentResultAssembler cannot be null."
         );
-
         this.outputCoordinator = Objects.requireNonNull(
                 outputCoordinator,
                 "ExperimentOutputCoordinator cannot be null."
@@ -91,7 +90,6 @@ public final class EvaluationRepetitionRunner {
                         artifactPaths,
                         context.getParallelRuntime()
                 );
-
         ExperimentScoringCoordinator scoringCoordinator =
                 new ExperimentScoringCoordinator(
                         artifactPaths,
@@ -100,18 +98,16 @@ public final class EvaluationRepetitionRunner {
 
         ListObjectDataset trainingData = datasets.trainingData();
         int trainingSize = datasets.trainingSize();
-
         ListObjectDataset testingData = Objects.requireNonNull(
                 datasets.testingData(),
                 "Evaluation mode requires prepared testing data."
         );
-
         String effectiveDatasetName = normalizeDatasetName(
                 datasetName,
                 datasets.datasetName()
         );
-
         int repetition = context.getRepetition();
+
         AppContext.validateEvaluationOutputConfiguration();
         validateTrainingDataRequirements(trainingData);
 
@@ -134,7 +130,6 @@ public final class EvaluationRepetitionRunner {
                 testingData,
                 datasets.testingStandardizationStates()
         );
-
         writeImputedOnlyWhenRequested(
                 testingData,
                 datasets.testingStandardizationStates(),
@@ -143,7 +138,6 @@ public final class EvaluationRepetitionRunner {
         );
 
         ProximityForestResult result;
-
         if (AppContext.isIsolationMode()) {
             result = runIsolationEvaluation(
                     forest,
@@ -165,6 +159,13 @@ public final class EvaluationRepetitionRunner {
             );
         }
 
+        /*
+         * ProximityForestResult deliberately keeps its forest reference
+         * transient. Restore that back-reference after model deserialization
+         * and before result assembly collates tree-level statistics.
+         */
+        result.attachForest(forest);
+
         ExperimentResultRecord record = resultAssembler.assemble(
                 result,
                 effectiveDatasetName,
@@ -172,7 +173,6 @@ public final class EvaluationRepetitionRunner {
                 testingData,
                 context
         );
-
         resultWriter.add(record);
     }
 
@@ -184,16 +184,25 @@ public final class EvaluationRepetitionRunner {
             ExperimentRepetitionContext context,
             ExperimentScoringCoordinator scoringCoordinator
     ) throws Exception {
-        /* Isolation path-length scores and branch-distance OOD scores are
-         * independent and may both be requested. */
+        /*
+         * Isolation path-length scores and branch-distance OOD scores are
+         * independent and may both be requested.
+         */
         ExperimentScoringCoordinator.ScoreArtifact scoreArtifact =
                 scoringCoordinator.computeTestIsolationScores(
-                        forest, testingData, trainingSize, repetition
+                        forest,
+                        testingData,
+                        trainingSize,
+                        repetition
                 );
         scoringCoordinator.recordArtifact(
-                "testOutlierScores", scoreArtifact,
-                "testIsolationScore", "testIsolationScoringMilliseconds", context
+                "testOutlierScores",
+                scoreArtifact,
+                "testIsolationScore",
+                "testIsolationScoringMilliseconds",
+                context
         );
+
         if (AppContext.shouldUseStructuredEvaluation()) {
             forest.evaluateEnhanced(
                     testingData,
@@ -206,6 +215,7 @@ public final class EvaluationRepetitionRunner {
                     context
             );
         }
+
         return forest.getResultSet();
     }
 
@@ -223,7 +233,10 @@ public final class EvaluationRepetitionRunner {
         ProximityForestResult result;
 
         if (!structured) {
-            result = forest.test(testingData, context.getParallelRuntime());
+            result = forest.test(
+                    testingData,
+                    context.getParallelRuntime()
+            );
             predictionsProduced = true;
         } else {
             forest.evaluateEnhanced(
@@ -240,7 +253,9 @@ public final class EvaluationRepetitionRunner {
         }
         if (predictionsProduced) {
             outputCoordinator.writeTestPredictionsWhenRequested(
-                    result, testingData, context
+                    result,
+                    testingData,
+                    context
             );
         } else if (AppContext.shouldReturnOODScores()) {
             outputCoordinator.writeTestStructuredOutputWhenRequested(
@@ -249,10 +264,16 @@ public final class EvaluationRepetitionRunner {
                     context
             );
         }
+
         writeTestTrainProximitiesWhenRequested(
-                forest, testingData, trainingSize, repetition,
-                context, proximityCoordinator
+                forest,
+                testingData,
+                trainingSize,
+                repetition,
+                context,
+                proximityCoordinator
         );
+
         return result;
     }
 
@@ -260,6 +281,7 @@ public final class EvaluationRepetitionRunner {
     createStructuredEvaluationOptions() {
         boolean predictions = AppContext.shouldReturnEnhancedOutputs();
         boolean ood = AppContext.shouldReturnOODScores();
+
         if (predictions && ood) {
             return ProximityForest.EnhancedEvaluationOptions
                     .predictionsAndOOD(AppContext.ood_score_type);
@@ -271,8 +293,10 @@ public final class EvaluationRepetitionRunner {
             return ProximityForest.EnhancedEvaluationOptions
                     .oodOnly(AppContext.ood_score_type);
         }
+
         throw new IllegalStateException(
-                "Structured evaluation requires enhanced predictions, OOD scores, or both."
+                "Structured evaluation requires enhanced predictions, OOD "
+                        + "scores, or both."
         );
     }
 
@@ -302,7 +326,6 @@ public final class EvaluationRepetitionRunner {
                 ? "testing_imputed_values"
                 : configuredName.trim();
         Path path = artifactPaths.resolveRepeated(fileName, repetition);
-
         Path written = outputCoordinator.writeImputedValues(
                 testingData,
                 missing,
@@ -327,10 +350,11 @@ public final class EvaluationRepetitionRunner {
                 || AppContext.impute_test
                 || AppContext.output_test_imputed_csr) {
             throw new UnsupportedOperationException(
-                    "Testing-data imputation is unavailable for a " +
-                    "PREDICTION_ONLY model because the saved model does not " +
-                    "contain the complete training observations. Save the " +
-                    "model in EMBEDDED mode to retain imputation support."
+                    "Testing-data imputation is unavailable for a "
+                            + "PREDICTION_ONLY model because the saved model "
+                            + "does not contain the complete training "
+                            + "observations. Save the model in EMBEDDED mode "
+                            + "to retain imputation support."
             );
         }
     }
@@ -376,12 +400,9 @@ public final class EvaluationRepetitionRunner {
                         trainingSize,
                         repetition
                 );
-
         context.addArtifact(
                 "testTrainProximities",
-                artifactPaths.relativeArtifactPath(
-                        proximityPath
-                )
+                artifactPaths.relativeArtifactPath(proximityPath)
         );
     }
 
@@ -392,11 +413,9 @@ public final class EvaluationRepetitionRunner {
         if (suppliedName != null && !suppliedName.isBlank()) {
             return suppliedName.trim();
         }
-
         if (preparedName != null && !preparedName.isBlank()) {
             return preparedName.trim();
         }
-
         return "dataset";
     }
 }

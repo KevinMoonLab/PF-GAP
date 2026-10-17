@@ -598,10 +598,12 @@ def predict(
     # Data controls
     data_dimension=1,
     numeric_data=True,
+    numeric_storage="auto",
     entry_separator=",",
     array_separator=":",
     reader_type=None,
     file_pattern=None,
+    numeric_storate="auto",
     custom_reader_descriptor=None,
     custom_reader_parameters=None,
     custom_reader_thread_safe=False,
@@ -685,7 +687,7 @@ def predict(
     output_directory = _ensure_output_directory(output_directory)
     
     if use_vector_api:
-        msgList = ["java", "--add-modules jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
+        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
     else:
         msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
 
@@ -715,6 +717,7 @@ def predict(
         #"-parallelPredict=" + _bool(parallel_predict),
         "-num_workers=" + str(num_workers),
         "-use_vector_api=" + _bool(use_vector_api),
+        "-numeric_storage=" + numeric_storage,
 
         "-is2D=" + _bool(is2D),
         "-isNumeric=" + _bool(numeric_data),
