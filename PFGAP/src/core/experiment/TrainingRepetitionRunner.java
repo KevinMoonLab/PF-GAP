@@ -264,6 +264,12 @@ public final class TrainingRepetitionRunner {
         );
 
         if (AppContext.isIsolationMode()) {
+            /*
+             * Isolation path-length scores and branch-distance OOD scores are
+             * independent outputs. Always compute the validation isolation
+             * scores, then perform structured evaluation separately when OOD
+             * scores or enhanced output were requested.
+             */
             ExperimentScoringCoordinator.ScoreArtifact scoreArtifact =
                     scoringCoordinator.computeValidationIsolationScores(
                             forest,
@@ -279,6 +285,22 @@ public final class TrainingRepetitionRunner {
                     "validationIsolationScoringMilliseconds",
                     context
             );
+
+            if (AppContext.shouldUseStructuredEvaluation()) {
+                forest.evaluateEnhanced(
+                        testingData,
+                        createStructuredEvaluationOptions(
+                                AppContext.shouldReturnEnhancedOutputs(),
+                                AppContext.shouldReturnOODScores()
+                        ),
+                        context.getParallelRuntime()
+                );
+                outputCoordinator.writeValidationStructuredOutputWhenRequested(
+                        forest.getResultSet(),
+                        testingData,
+                        context
+                );
+            }
 
             return forest.getResultSet();
         }

@@ -58,14 +58,16 @@ public final class ExperimentOutputCoordinator {
         Path basePath = artifactPaths.validationPredictions(
                 context.getRepetition()
         );
+        StructuredArtifactTarget structuredTarget =
+                validationStructuredArtifactTarget(context.getRepetition());
         writeRequestedEvaluationArtifacts(
                 result,
                 data,
                 context,
                 basePath,
-                artifactPaths.validationEnhancedOutput(context.getRepetition()),
+                structuredTarget.path(),
                 "validationPredictions",
-                "validationEnhancedOutput"
+                structuredTarget.artifactName()
         );
     }
 
@@ -79,14 +81,16 @@ public final class ExperimentOutputCoordinator {
         Path basePath = artifactPaths.testPredictions(
                 context.getRepetition()
         );
+        StructuredArtifactTarget structuredTarget =
+                testStructuredArtifactTarget(context.getRepetition());
         writeRequestedEvaluationArtifacts(
                 result,
                 data,
                 context,
                 basePath,
-                artifactPaths.testEnhancedOutput(context.getRepetition()),
+                structuredTarget.path(),
                 "testPredictions",
-                "testEnhancedOutput"
+                structuredTarget.artifactName()
         );
     }
 
@@ -101,14 +105,14 @@ public final class ExperimentOutputCoordinator {
             ListObjectDataset data,
             ExperimentRepetitionContext context
     ) throws IOException {
+        StructuredArtifactTarget target =
+                validationStructuredArtifactTarget(context.getRepetition());
         writeStructuredArtifactWhenRequested(
                 result,
                 data,
                 context,
-                artifactPaths.validationEnhancedOutput(
-                        context.getRepetition()
-                ),
-                "validationEnhancedOutput"
+                target.path(),
+                target.artifactName()
         );
     }
 
@@ -118,14 +122,44 @@ public final class ExperimentOutputCoordinator {
             ListObjectDataset data,
             ExperimentRepetitionContext context
     ) throws IOException {
+        StructuredArtifactTarget target =
+                testStructuredArtifactTarget(context.getRepetition());
         writeStructuredArtifactWhenRequested(
                 result,
                 data,
                 context,
-                artifactPaths.testEnhancedOutput(
-                        context.getRepetition()
-                ),
-                "testEnhancedOutput"
+                target.path(),
+                target.artifactName()
+        );
+    }
+
+    private StructuredArtifactTarget validationStructuredArtifactTarget(
+            int repetition
+    ) {
+        if (AppContext.shouldReturnEnhancedOutputs()) {
+            return new StructuredArtifactTarget(
+                    artifactPaths.validationEnhancedOutput(repetition),
+                    "validationEnhancedOutput"
+            );
+        }
+        return new StructuredArtifactTarget(
+                artifactPaths.validationOODScores(repetition),
+                "validationOODScores"
+        );
+    }
+
+    private StructuredArtifactTarget testStructuredArtifactTarget(
+            int repetition
+    ) {
+        if (AppContext.shouldReturnEnhancedOutputs()) {
+            return new StructuredArtifactTarget(
+                    artifactPaths.testEnhancedOutput(repetition),
+                    "testEnhancedOutput"
+            );
+        }
+        return new StructuredArtifactTarget(
+                artifactPaths.testOODScores(repetition),
+                "testOODScores"
         );
     }
 
@@ -165,7 +199,9 @@ public final class ExperimentOutputCoordinator {
         if (!AppContext.shouldUseStructuredEvaluation()) {
             return;
         }
-        Path writtenPath = writeStructuredResults(result, data, outputPath);
+        Path writtenPath = AppContext.shouldReturnEnhancedOutputs()
+                ? writeStructuredResults(result, data, outputPath)
+                : writeOODScores(result, data, outputPath);
         context.addArtifact(
                 artifactName,
                 artifactPaths.relativeArtifactPath(writtenPath)
@@ -491,6 +527,77 @@ public final class ExperimentOutputCoordinator {
         return outputPath;
     }
 
+    /** Writes the basic two-column per-instance OOD score artifact. */
+    public Path writeOODScores(
+            ProximityForestResult result,
+            ListObjectDataset data,
+            Path outputPath
+    ) throws IOException {
+        Objects.requireNonNull(
+                result,
+                "ProximityForestResult cannot be null."
+        );
+        Objects.requireNonNull(
+                data,
+                "Evaluation dataset cannot be null."
+        );
+        Objects.requireNonNull(
+                outputPath,
+                "OOD output path cannot be null."
+        );
+
+        if (result.PredictionResults == null
+                || result.PredictionResults.isEmpty()) {
+            throw new IllegalStateException(
+                    "OOD output was requested, but no OOD results are available."
+            );
+        }
+        if (result.PredictionResults.size() != data.size()) {
+            throw new IllegalStateException(
+                    "OOD result count " + result.PredictionResults.size()
+                            + " does not match dataset size " + data.size() + "."
+            );
+        }
+
+        Path parent = outputPath.toAbsolutePath().getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+
+        try (BufferedWriter writer = Files.newBufferedWriter(
+                outputPath,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE
+        )) {
+            writer.write("instance_index,ood_score");
+            writer.newLine();
+
+            for (int index = 0;
+                 index < result.PredictionResults.size();
+                 index++) {
+                ForestPredictionResult output =
+                        result.PredictionResults.get(index);
+                Objects.requireNonNull(
+                        output,
+                        "OOD result cannot be null at index " + index + "."
+                );
+                if (!output.wasOODRequested()) {
+                    throw new IllegalStateException(
+                            "OOD output was requested, but result " + index
+                                    + " does not contain an OOD score."
+                    );
+                }
+
+                writer.write(Integer.toString(index));
+                writeFiniteField(writer, output.oodMean());
+                writer.newLine();
+            }
+        }
+        return outputPath;
+    }
+
     private static void writeStructuredRow(
             BufferedWriter writer,
             int instanceIndex,
@@ -581,4 +688,22 @@ public final class ExperimentOutputCoordinator {
         writer.write(text.replace("\"", "\"\""));
         writer.write('"');
     }
+
+    private record StructuredArtifactTarget(
+            Path path,
+            String artifactName
+    ) {
+        private StructuredArtifactTarget {
+            Objects.requireNonNull(
+                    path,
+                    "Structured output path cannot be null."
+            );
+            if (artifactName == null || artifactName.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Structured artifact name cannot be null or blank."
+                );
+            }
+        }
+    }
+
 }
