@@ -40,6 +40,7 @@ public final class CustomReaderContext
             1L;
 
     private final Path dataPath;
+    private final Path labelPath;
     private final boolean test;
     private final boolean regression;
     private final boolean numeric;
@@ -47,6 +48,7 @@ public final class CustomReaderContext
     private final NumericStorageType numericStorageType;
     private final Map<String, String> parameters;
     private final List<String> featureColumns;
+    private final List<String> labelColumns;
 
     /**
      * Creates an immutable custom-reader context with ordered feature-column
@@ -98,35 +100,65 @@ public final class CustomReaderContext
             Map<String, String> parameters,
             NumericStorageType numericStorageType
     ) {
-        this.dataPath =
-                dataPath;
+        this(
+                dataPath,
+                null,
+                test,
+                regression,
+                numeric,
+                hasMissingValues,
+                featureColumns,
+                List.of(),
+                parameters,
+                numericStorageType
+        );
+    }
 
-        this.test =
-                test;
-
-        this.regression =
-                regression;
-
-        this.numeric =
-                numeric;
-
-        this.hasMissingValues =
-                hasMissingValues;
-
-        this.numericStorageType =
-                numericStorageType == null
-                        ? NumericStorageType.AUTO
-                        : numericStorageType;
-
-        this.featureColumns =
-                copyFeatureColumns(
-                        featureColumns
-                );
-
-        this.parameters =
-                normalizeParameters(
-                        parameters
-                );
+    /**
+     * Creates a complete immutable custom-reader context with optional label
+     * source and label-column metadata.
+     *
+     * @param dataPath configured dataset path, possibly null
+     * @param labelPath configured sidecar-label path, possibly null
+     * @param test whether this context is for evaluation data
+     * @param regression whether the experiment is a regression task
+     * @param numeric whether numerical output is expected
+     * @param hasMissingValues whether missing values are expected
+     * @param featureColumns ordered selected feature columns
+     * @param labelColumns ordered selected label columns
+     * @param parameters reader-specific string parameters
+     * @param numericStorageType requested primitive numeric representation
+     */
+    public CustomReaderContext(
+            Path dataPath,
+            Path labelPath,
+            boolean test,
+            boolean regression,
+            boolean numeric,
+            boolean hasMissingValues,
+            List<String> featureColumns,
+            List<String> labelColumns,
+            Map<String, String> parameters,
+            NumericStorageType numericStorageType
+    ) {
+        this.dataPath = dataPath;
+        this.labelPath = labelPath;
+        this.test = test;
+        this.regression = regression;
+        this.numeric = numeric;
+        this.hasMissingValues = hasMissingValues;
+        this.numericStorageType = numericStorageType == null
+                ? NumericStorageType.AUTO
+                : numericStorageType;
+        this.featureColumns = copyColumns(
+                featureColumns,
+                "feature"
+        );
+        this.labelColumns = copyColumns(
+                labelColumns,
+                "label"
+        );
+        this.parameters = normalizeParameters(parameters);
     }
 
     /**
@@ -186,6 +218,27 @@ public final class CustomReaderContext
         return dataPath;
     }
 
+    /** Returns the configured sidecar-label path, possibly null. */
+    public Path getLabelPath() {
+        return labelPath;
+    }
+
+    /** Returns whether a sidecar-label path is configured. */
+    public boolean hasLabelPath() {
+        return labelPath != null;
+    }
+
+    /** Returns the configured sidecar-label path or throws when absent. */
+    public Path requireLabelPath() {
+        if (labelPath == null) {
+            throw new IllegalStateException(
+                    "This custom reader requires a label path, but no "
+                            + "labelPath was supplied."
+            );
+        }
+        return labelPath;
+    }
+
     /**
      * Returns the configured dataset path or throws when none is available.
      *
@@ -236,6 +289,14 @@ public final class CustomReaderContext
 
     public boolean hasFeatureColumns() {
         return !featureColumns.isEmpty();
+    }
+
+    public List<String> getLabelColumns() {
+        return labelColumns;
+    }
+
+    public boolean hasLabelColumns() {
+        return !labelColumns.isEmpty();
     }
 
     /**
@@ -539,26 +600,29 @@ public final class CustomReaderContext
                 .normalize();
     }
 
-    private static List<String> copyFeatureColumns(
-            List<String> featureColumns
+    private static List<String> copyColumns(
+            List<String> columns,
+            String role
     ) {
-        if (featureColumns == null || featureColumns.isEmpty()) {
+        if (columns == null || columns.isEmpty()) {
             return List.of();
         }
 
-        List<String> copy = new ArrayList<>(featureColumns.size());
+        List<String> copy = new ArrayList<>(columns.size());
         Set<String> used = new HashSet<>();
-        for (String featureColumn : featureColumns) {
-            if (featureColumn == null || featureColumn.isBlank()) {
+        for (String column : columns) {
+            if (column == null || column.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Custom-reader feature columns cannot be null or blank."
+                        "Custom-reader " + role
+                                + " columns cannot be null or blank."
                 );
             }
-            String normalized = featureColumn.trim();
+            String normalized = column.trim();
             if (!used.add(normalized)) {
                 throw new IllegalArgumentException(
-                        "Custom-reader feature column was selected more than "
-                                + "once: " + normalized
+                        "Custom-reader " + role
+                                + " column was selected more than once: "
+                                + normalized
                 );
             }
             copy.add(normalized);
@@ -796,6 +860,8 @@ public final class CustomReaderContext
         return "CustomReaderContext{"
                 + "dataPath="
                 + dataPath
+                + ", labelPath="
+                + labelPath
                 + ", test="
                 + test
                 + ", regression="
@@ -808,6 +874,8 @@ public final class CustomReaderContext
                 + getNumericStorageType()
                 + ", featureColumns="
                 + featureColumns
+                + ", labelColumns="
+                + labelColumns
                 + ", parameterNames="
                 + parameters.keySet()
                 + '}';

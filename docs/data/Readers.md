@@ -540,10 +540,12 @@ Apply standardization exactly once. A custom plugin must return raw values and m
 
 ## 13. Custom Java readers
 
-PFGAP exposes two custom extension levels:
+PFGAP exposes two Java plugin contracts:
 
 1. `CustomSeriesReader` materializes one observation. The built-in eager and lazy custom coordinators use this contract for per-file datasets.
-2. `DatasetReader` controls discovery and assembly of an entire dataset. Implement it directly when the source is not naturally one file per observation or requires proprietary coordination.
+2. `CustomDatasetReader` eagerly reads and assembles one complete dataset. Use it when one file, directory, archive, or other shared source contains multiple observations.
+
+Both plugin types use the same `javareader:` descriptor format. A whole-dataset plugin receives a `CustomReaderContext` containing the configured data path, optional sidecar label path, train/evaluation state, task metadata, selected columns, numeric storage policy, and custom parameters. It may return labeled training, validation, or test data, or unlabeled isolation data. Plugins return raw values; PFGAP applies configured standardization afterward.
 
 ### 13.1 Custom plugin descriptor
 
@@ -749,65 +751,83 @@ Validation occurs before standardization. Closing or replacing the registered ou
 
 Set `customReaderThreadSafe` to `true` only if one plugin instance can safely serve concurrent calls. If it is `false`, the runtime adapter synchronizes plugin invocation.
 
-### 13.6 Dummy non-per-file eager reader
+### 13.6 Eager whole-dataset custom reader
 
-The built-in custom factory types are per-file coordinators. For a database, socket, archive, service, or proprietary shared container, implement `DatasetReader` directly.
+Use `CUSTOM_DATASET` when one plugin invocation should construct the complete eager dataset. The plugin implements `datasets.readers.api.CustomDatasetReader` and may read labels embedded in the main source or from `CustomReaderContext.getLabelPath()`.
+
+The following test plugin delegates to PFGAP's built-in NPY reader. It is intentionally simple and verifies that the external whole-dataset plugin path produces the same data as `ReaderType.NPY`.
 
 ```java
-package example.reader;
-
 import datasets.ListObjectDataset;
-import datasets.readers.DatasetReader;
+import datasets.readers.DatasetReaderFactory;
+import datasets.readers.ReaderOptions;
+import datasets.readers.ReaderType;
+import datasets.readers.api.CustomDatasetReader;
+import datasets.readers.api.CustomReaderContext;
 
 import java.io.IOException;
+import java.nio.file.Path;
 
-public final class DummyContainerReader implements DatasetReader {
-    private final String source;
+public final class DummyNpyDatasetReader
+        implements CustomDatasetReader {
 
-    public DummyContainerReader(String source) {
-        this.source = source;
+    public DummyNpyDatasetReader() {
     }
 
     @Override
-    public ListObjectDataset read() throws IOException {
-        ListObjectDataset dataset =
-                new ListObjectDataset(1);
+    public ListObjectDataset read(
+            CustomReaderContext context
+    ) throws IOException {
+        Path dataPath = context.requireDataPath();
 
-        // Open the shared source here.
-        // Discover records or observations here.
-        // Parse each observation into a supported representation.
-        // Add labels and observations in stable instance order.
+        ReaderOptions delegated = new ReaderOptions()
+                .setReaderType(ReaderType.NPY)
+                .setDataPath(dataPath.toString())
+                .setTest(context.isTest())
+                .setRegression(context.isRegression())
+                .setNumeric(context.isNumeric())
+                .setHasMissingValues(context.hasMissingValues())
+                .setNumericStorageType(
+                        context.getNumericStorageType()
+                );
 
-        double[] tabularObservation = {
-                32.0,
-                1.82,
-                78.5
-        };
+        if (context.hasLabelPath()) {
+            delegated.setLabelPath(
+                    context.requireLabelPath().toString()
+            );
+        }
 
-        dataset.add(
-                "class-a",
-                tabularObservation,
-                0
-        );
-
-        dataset.setLength(tabularObservation.length);
-        return dataset;
+        return DatasetReaderFactory.create(delegated).read();
     }
 }
 ```
 
-Construct this reader directly or add a project-specific `ReaderType` and `DatasetReaderFactory` branch:
+Compile and package the plugin against the current PFGAP JAR:
 
-```java
-DatasetReader reader =
-        new DummyContainerReader(
-                "data/proprietary.container"
-        );
-
-ListObjectDataset dataset = reader.read();
+```bash
+javac -cp PFGAP.jar DummyNpyDatasetReader.java
+jar --create --file dummy-npy-reader.jar \
+    DummyNpyDatasetReader.class
 ```
 
-A non-per-file reader may return a supported one-dimensional tabular observation, one-dimensional sequence, two-dimensional observation, or a supported proprietary representation.
+Because this example has no `package` declaration and its class is stored at the JAR root, the descriptor uses the simple binary class name:
+
+```python
+PF.train(
+    train_file="data/train.npy",
+    test_file="data/test.npy",
+    reader_type="CUSTOM_DATASET",
+    custom_reader_descriptor=(
+        "javareader:dummy-npy-reader.jar:"
+        "DummyNpyDatasetReader"
+    ),
+    numeric_data=True,
+)
+```
+
+A packaged implementation must instead use its fully qualified binary name, such as `example.reader.DummyNpyDatasetReader`, and the JAR must place the class at the corresponding path.
+
+Training and evaluation reads receive their own data and optional label paths. The same plugin may therefore support training, validation, and test labels. `CUSTOM_DATASET` is eager; non-per-file lazy sources still require a project-specific lazy coordinator and reconstruction specification.
 
 ### 13.7 Dummy non-per-file lazy materializer
 
@@ -933,7 +953,7 @@ Choose a reader using these rules:
 - Use NPY or HDF5 for existing array-oriented scientific data.
 - Use Parquet when typed columnar storage, projection, and efficient numeric decoding are valuable.
 - Use a custom series plugin when only per-observation parsing is proprietary.
-- Implement `DatasetReader` directly when discovery, grouping, labeling, or source coordination is also proprietary.
+- Use a custom whole-dataset plugin when discovery, grouping, labeling, or shared-container parsing is proprietary and eager loading is appropriate.
 
 ## 16. Current deferred work
 

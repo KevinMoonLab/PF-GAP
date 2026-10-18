@@ -3,9 +3,9 @@
 PFGAP supports custom Java readers at two extension levels:
 
 1. **Custom per-file series plugins**, where PFGAP handles discovery, ordering, eager or deferred materialization, validation, standardization, and lifecycle management.
-2. **Custom whole-dataset readers**, where the extension controls source discovery and dataset assembly directly.
+2. **Custom whole-dataset plugins**, where one eager plugin invocation reads and assembles the complete dataset.
 
-A custom reader can be packaged in a separate JAR. Use a per-file plugin when only the parsing of one observation is proprietary. Implement a whole-dataset reader when grouping, labeling, source coordination, or observation discovery is also proprietary.
+A custom reader can be packaged in a separate JAR. Use a per-file plugin when only the parsing of one observation is proprietary. Use a whole-dataset plugin when observations share a container or grouping, labeling, source coordination, or discovery is proprietary.
 
 For built-in formats and representation rules, see [Readers](../data/Readers.md). For eager and deferred access behavior, see [Eager and Lazy Data](../guides/Eager_and_Lazy_Data.md).
 
@@ -19,15 +19,16 @@ For built-in formats and representation rules, see [Readers](../data/Readers.md)
 - the plugin only needs to parse one file into one observation; and
 - the same parser should support both eager and deferred materialization.
 
-#### Implement `DatasetReader` directly when
+#### Use `CustomDatasetReader` when
 
 - one observation spans multiple files;
 - multiple observations share one proprietary container;
-- observations come from a database, service, socket, archive, or stream;
-- discovery and ordering are source-specific;
-- labels must be extracted through proprietary logic;
-- a one-dimensional custom representation is required; or
+- the source is a directory, archive, database export, or other dataset-level resource;
+- discovery, grouping, ordering, or labeling is source-specific;
+- labels are embedded or read from a sidecar source; or
 - per-file coordination does not match the data source.
+
+`CUSTOM_DATASET` is eager. A proprietary shared source that requires deferred materialization still needs a project-specific lazy materializer and coordinator.
 
 ## Custom per-file series plugins
 
@@ -121,14 +122,16 @@ For generic output:
 
 ### `CustomReaderContext`
 
-The custom context supplies the configured information needed to parse one observation, including:
+The custom context supplies stable configuration needed by either plugin contract, including:
 
 - data path;
-- training or test state;
+- optional sidecar label path;
+- training or evaluation state;
 - classification or regression state;
 - numeric-data setting;
 - missing-value hint;
 - requested feature columns;
+- requested label columns;
 - custom plugin parameters; and
 - requested numeric storage.
 
@@ -569,84 +572,103 @@ See [Model Persistence](../reference/Model_Persistence.md).
 
 ## Whole-dataset eager readers
 
-The built-in custom reader types are per-file coordinators. For a proprietary shared source, implement `DatasetReader` directly.
-
-### Minimal whole-dataset reader
+Use `CUSTOM_DATASET` when one external plugin should eagerly construct the complete `ListObjectDataset`. The plugin implements:
 
 ```java
-package example.reader;
+package datasets.readers.api;
 
+public interface CustomDatasetReader {
+    ListObjectDataset read(
+            CustomReaderContext context
+    ) throws IOException;
+}
+```
+
+The plugin may read labels embedded in the primary source or from the optional sidecar path in `CustomReaderContext`. Training, validation, and test reads each receive the paths configured for that specific read. Unlabeled isolation data is also supported.
+
+### Minimal NPY delegation example
+
+This test plugin delegates to PFGAP's built-in eager NPY reader. It is useful for comparing `CUSTOM_DATASET` with `NPY` while testing the plugin boundary.
+
+```java
 import datasets.ListObjectDataset;
-import datasets.readers.DatasetReader;
+import datasets.readers.DatasetReaderFactory;
+import datasets.readers.ReaderOptions;
+import datasets.readers.ReaderType;
+import datasets.readers.api.CustomDatasetReader;
+import datasets.readers.api.CustomReaderContext;
 
 import java.io.IOException;
+import java.nio.file.Path;
 
-public final class ContainerReader
-        implements DatasetReader {
+public final class DummyNpyDatasetReader
+        implements CustomDatasetReader {
 
-    private final String source;
-
-    public ContainerReader(String source) {
-        this.source = source;
+    public DummyNpyDatasetReader() {
     }
 
     @Override
-    public ListObjectDataset read()
-            throws IOException {
-        ListObjectDataset dataset =
-                new ListObjectDataset(1);
+    public ListObjectDataset read(
+            CustomReaderContext context
+    ) throws IOException {
+        Path dataPath = context.requireDataPath();
 
-        // Open the shared source.
-        // Discover observations in stable order.
-        // Parse labels and observations.
+        ReaderOptions delegated = new ReaderOptions()
+                .setReaderType(ReaderType.NPY)
+                .setDataPath(dataPath.toString())
+                .setTest(context.isTest())
+                .setRegression(context.isRegression())
+                .setNumeric(context.isNumeric())
+                .setHasMissingValues(
+                        context.hasMissingValues()
+                )
+                .setNumericStorageType(
+                        context.getNumericStorageType()
+                );
 
-        double[] observation = {
-                32.0,
-                1.82,
-                78.5
-        };
+        if (context.hasLabelPath()) {
+            delegated.setLabelPath(
+                    context.requireLabelPath().toString()
+            );
+        }
 
-        dataset.add(
-                1,
-                observation,
-                0
-        );
-
-        dataset.setLength(observation.length);
-        return dataset;
+        return DatasetReaderFactory.create(delegated).read();
     }
 }
 ```
 
-A whole-dataset reader can return supported:
+Compile and package a default-package demo reader against the current PFGAP JAR:
 
-```text
-float[]
-double[]
-Object[]
-float[][]
-double[][]
-Object[][]
+```bash
+javac -cp PFGAP.jar DummyNpyDatasetReader.java
+jar --create --file dummy-npy-reader.jar \
+    DummyNpyDatasetReader.class
 ```
 
-It can also return a proprietary representation when built-in standardization is disabled and the configured distance or downstream consumer understands the representation.
+Call it from Python with:
 
-### Factory integration
+```python
+import PF_wrapper as PF
 
-A whole-dataset reader can be constructed directly in a Java integration:
+status = PF.train(
+    train_file="data/train.npy",
+    test_file="data/test.npy",
+    reader_type="CUSTOM_DATASET",
+    custom_reader_descriptor=(
+        "javareader:dummy-npy-reader.jar:"
+        "DummyNpyDatasetReader"
+    ),
+    numeric_data=True,
+    output_directory="output/custom_dataset",
+)
 
-```java
-DatasetReader reader =
-        new ContainerReader(
-                "data/proprietary.container"
-        );
-
-ListObjectDataset dataset = reader.read();
+if status != 0:
+    raise SystemExit(status)
 ```
 
-To select it through ordinary application configuration, add a project-specific `ReaderType` and a corresponding `DatasetReaderFactory` branch.
+The final descriptor component is the Java binary class name. The simple name above works because the demo class has no `package` declaration and is stored at the JAR root. A packaged implementation must use its fully qualified binary name, such as `example.reader.DummyNpyDatasetReader`, and the JAR entry must follow the corresponding package path.
 
-That project integration must define how the reader receives paths, labels, options, and reconstruction state.
+Whole-dataset plugins return raw values. PFGAP performs configured standardization and later dataset preparation after the eager plugin returns. The adapter closes the plugin, when it implements `AutoCloseable`, and then closes the plugin class loader.
 
 ## Whole-dataset deferred readers
 
