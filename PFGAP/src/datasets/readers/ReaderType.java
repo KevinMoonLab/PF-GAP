@@ -100,6 +100,13 @@ public enum ReaderType {
     PARQUET_COLUMN_FILE_READER,
     PER_FILE_CUSTOM,
     LAZY_PER_FILE_CUSTOM,
+
+    /**
+     * Eager user-defined reader that materializes one complete dataset per
+     * invocation. The configured plugin may read a single shared container,
+     * a directory, an archive, or another dataset-level source.
+     */
+    CUSTOM_DATASET,
     /**
      * Optimized numeric long-format Parquet reader.
      *

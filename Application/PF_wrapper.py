@@ -603,7 +603,6 @@ def predict(
     array_separator=":",
     reader_type=None,
     file_pattern=None,
-    numeric_storate="auto",
     custom_reader_descriptor=None,
     custom_reader_parameters=None,
     custom_reader_thread_safe=False,
