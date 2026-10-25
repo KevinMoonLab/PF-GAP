@@ -53,6 +53,14 @@ def _ensure_output_directory(output_directory):
 
 
 def _append_common_distance_arg(msg_list, arg_name, distances):
+    """Append a distance-list argument only when explicitly provided.
+
+    ``None`` means that the Python caller did not override the corresponding
+    Java-side configuration. An explicit empty iterable remains distinct and
+    is serialized as ``[]``.
+    """
+    if distances is None:
+        return
     msg_list.append(f"-{arg_name}={_list_arg(distances)}")
 
 
