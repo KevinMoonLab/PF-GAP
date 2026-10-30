@@ -204,25 +204,25 @@ public class ProximityTree
 						this
 				);
 
-		BootstrapSample bootstrapSample =
-				createBootstrapSample(
+		TreeSample treeSample =
+				createTreeSample(
 						data.size()
 				);
 
-		populateRootBootstrapMetadata(
-				bootstrapSample
+		populateRootSamplingMetadata(
+				treeSample
 		);
 
 		ListObjectDataset inBagData =
 				createDatasetFromPositions(
 						data,
-						bootstrapSample.sampledPositions
+						treeSample.sampledPositions
 				);
 
 		ListObjectDataset outOfBagData =
 				createDatasetFromPositions(
 						data,
-						bootstrapSample.outOfBagPositions
+						treeSample.outOfBagPositions
 				);
 
 		root.train(
@@ -330,75 +330,89 @@ public class ProximityTree
 	}
 
 	/**
-	 * Creates the bootstrap draw, multiplicities, and OOB positions in linear
-	 * time.
+	 * Creates one tree's sample, multiplicities, and OOB complement.
 	 */
-	private BootstrapSample createBootstrapSample(
-			int size
+	private TreeSample createTreeSample(
+			int populationSize
 	) {
+		SamplingStrategy strategy =
+				AppContext.getSamplingStrategy();
+
+		int sampleSize =
+				AppContext.resolveTreeSampleSize(
+						populationSize
+				);
+
 		int[] sampledPositions =
-				new int[size];
+				new int[sampleSize];
 
 		int[] multiplicities =
-				new int[size];
+				new int[populationSize];
 
-		if (AppContext.bootstrap_trees) {
-			for (int draw = 0;
-				 draw < size;
-				 draw++) {
-
-				int position =
-						rand.nextInt(
-								size
-						);
-
-				sampledPositions[draw] =
-						position;
-
-				multiplicities[position]++;
+		switch (strategy) {
+			case FULL -> {
+				for (int position = 0;
+					 position < populationSize;
+					 position++) {
+					sampledPositions[position] = position;
+					multiplicities[position] = 1;
+				}
 			}
-		} else {
-			for (int position = 0;
-				 position < size;
-				 position++) {
-
-				sampledPositions[position] =
-						position;
-
-				multiplicities[position] =
-						1;
+			case BOOTSTRAP -> {
+				for (int draw = 0;
+					 draw < sampleSize;
+					 draw++) {
+					int position =
+							rand.nextInt(
+									populationSize
+							);
+					sampledPositions[draw] = position;
+					multiplicities[position]++;
+				}
+			}
+			case SUBSAMPLE -> {
+				int[] candidates =
+						new int[populationSize];
+				for (int position = 0;
+					 position < populationSize;
+					 position++) {
+					candidates[position] = position;
+				}
+				for (int draw = 0;
+					 draw < sampleSize;
+					 draw++) {
+					int swapPosition =
+							draw + rand.nextInt(
+									populationSize - draw
+							);
+					int selected = candidates[swapPosition];
+					candidates[swapPosition] = candidates[draw];
+					candidates[draw] = selected;
+					sampledPositions[draw] = selected;
+					multiplicities[selected] = 1;
+				}
 			}
 		}
 
-		int outOfBagCount =
-				0;
-
-		for (int position = 0;
-			 position < size;
-			 position++) {
-
-			if (multiplicities[position] == 0) {
+		int outOfBagCount = 0;
+		for (int multiplicity : multiplicities) {
+			if (multiplicity == 0) {
 				outOfBagCount++;
 			}
 		}
 
 		int[] outOfBagPositions =
 				new int[outOfBagCount];
-
-		int outputIndex =
-				0;
-
+		int outputIndex = 0;
 		for (int position = 0;
-			 position < size;
+			 position < populationSize;
 			 position++) {
-
 			if (multiplicities[position] == 0) {
-				outOfBagPositions[outputIndex++] =
-						position;
+				outOfBagPositions[outputIndex++] = position;
 			}
 		}
 
-		return new BootstrapSample(
+		return new TreeSample(
 				sampledPositions,
 				multiplicities,
 				outOfBagPositions
@@ -409,15 +423,15 @@ public class ProximityTree
 	 * Preserves the current root-node metadata representation for
 	 * compatibility with existing proximity and OOB code.
 	 */
-	private void populateRootBootstrapMetadata(
-			BootstrapSample bootstrapSample
+	private void populateRootSamplingMetadata(
+			TreeSample treeSample
 	) {
 		root.InBagIndices.ensureCapacity(
-				bootstrapSample.sampledPositions.length
+				treeSample.sampledPositions.length
 		);
 
 		for (int position
-				: bootstrapSample.sampledPositions) {
+				: treeSample.sampledPositions) {
 
 			root.InBagIndices.add(
 					position
@@ -425,11 +439,11 @@ public class ProximityTree
 		}
 
 		root.OutOfBagIndices.ensureCapacity(
-				bootstrapSample.outOfBagPositions.length
+				treeSample.outOfBagPositions.length
 		);
 
 		for (int position
-				: bootstrapSample.outOfBagPositions) {
+				: treeSample.outOfBagPositions) {
 
 			root.OutOfBagIndices.add(
 					position
@@ -440,11 +454,11 @@ public class ProximityTree
 				new HashMap<>();
 
 		for (int position = 0;
-			 position < bootstrapSample.multiplicities.length;
+			 position < treeSample.multiplicities.length;
 			 position++) {
 
 			int count =
-					bootstrapSample.multiplicities[position];
+					treeSample.multiplicities[position];
 
 			if (count > 0) {
 				root.multiplicities.put(
@@ -493,13 +507,12 @@ public class ProximityTree
 	}
 
 	/**
-	 * Legacy helper retained for compatibility with callers that may still
-	 * use it indirectly.
+	 * Compatibility helper returning only the selected source positions.
 	 */
 	private int[] sampleTrainingIndices(
 			int size
 	) {
-		return createBootstrapSample(
+		return createTreeSample(
 				size
 		).sampledPositions;
 	}
@@ -940,15 +953,15 @@ public class ProximityTree
 	}
 
 	/**
-	 * Immutable bootstrap construction result.
+	 * Immutable whole-tree sampling result.
 	 */
-	private static final class BootstrapSample {
+	private static final class TreeSample {
 
 		private final int[] sampledPositions;
 		private final int[] multiplicities;
 		private final int[] outOfBagPositions;
 
-		private BootstrapSample(
+		private TreeSample(
 				int[] sampledPositions,
 				int[] multiplicities,
 				int[] outOfBagPositions

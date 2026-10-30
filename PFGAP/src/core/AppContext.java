@@ -20,6 +20,8 @@ import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationStats;
 import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
+import trees.SamplingStrategy;
+import trees.TreeSampleSize;
 
 /**
  *
@@ -80,7 +82,12 @@ public class AppContext {
 
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
-	public static boolean bootstrap_trees = true;
+	/** Whole-tree sampling strategy. */
+	public static SamplingStrategy sampling_strategy =
+			SamplingStrategy.BOOTSTRAP;
+	/** Per-tree sample size; None/fullSize resolves to the training size. */
+	public static TreeSampleSize sample_size =
+			TreeSampleSize.fullSize();
 
 	// additional imputation variables
 	public static boolean perform_train_imputation = false; // should the model impute (not return) train data?
@@ -361,8 +368,24 @@ public class AppContext {
 				|| forest_mode.trim().equalsIgnoreCase("classification");
 	}
 
-	public static boolean useBootstrapTrees() {
-		return bootstrap_trees;
+	public static SamplingStrategy getSamplingStrategy() {
+		return Objects.requireNonNull(
+				sampling_strategy,
+				"Sampling strategy cannot be null."
+		);
+	}
+	public static TreeSampleSize getTreeSampleSize() {
+		return Objects.requireNonNull(
+				sample_size,
+				"Tree sample size cannot be null."
+		);
+	}
+	/** Resolves and validates the configured sample size for training. */
+	public static int resolveTreeSampleSize(int populationSize) {
+		return getTreeSampleSize().resolve(
+				populationSize,
+				getSamplingStrategy()
+		);
 	}
 
 	//public static Map<String, LazySeriesReader> lazySeriesReaders =

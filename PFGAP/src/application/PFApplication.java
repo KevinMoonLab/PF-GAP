@@ -15,6 +15,8 @@ import preprocessing.standardization.StandardizationScope;
 import preprocessing.standardization.VarianceConvention;
 import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
+import trees.SamplingStrategy;
+import trees.TreeSampleSize;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -465,8 +467,13 @@ public class PFApplication {
 					case "-seed":
 						AppContext.setRandomSeed(Long.parseLong(options[1]));
 						break;
-					case "-bootstrap_trees":
-						AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
+					case "-sampling":
+						AppContext.sampling_strategy =
+								SamplingStrategy.parse(options[1]);
+						break;
+					case "-sample_size":
+						AppContext.sample_size =
+								TreeSampleSize.parse(options[1]);
 						break;
 					case "-eval":
 						AppContext.eval = Boolean.parseBoolean(options[1]);
