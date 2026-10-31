@@ -109,6 +109,20 @@ public final class ExperimentResultAssembler {
                                 AppContext.getTreeSampleSize()
                         )
                         .addConfiguration(
+                                "oobScoresRequested",
+                                AppContext.oob_scores
+                        )
+                        .addConfiguration(
+                                "oobRoutingRequired",
+                                AppContext.getOobRoutingPlan()
+                                        .routingRequired()
+                        )
+                        .addConfiguration(
+                                "oobRoutingReasons",
+                                AppContext.getOobRoutingPlan()
+                                        .reasons()
+                        )
+                        .addConfiguration(
                                 "numWorkersRequested",
                                 AppContext.num_workers
                         )

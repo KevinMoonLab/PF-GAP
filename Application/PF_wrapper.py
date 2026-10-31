@@ -312,6 +312,8 @@ def train(
     regression_num_branches=2,
     sampling="bootstrap",
     sample_size=None,
+    oob_scores=False,
+    return_oob_predictions=False,
     seed=None,
     on_tree=True,
     max_depth=0,
@@ -395,6 +397,8 @@ def train(
         ("return_predictions", return_predictions),
         ("return_enhanced_outputs", return_enhanced_outputs),
         ("return_ood_scores", return_ood_scores),
+        ("oob_scores", oob_scores),
+        ("return_oob_predictions", return_oob_predictions),
         ("collect_split_distance_summaries", collect_split_distance_summaries),
         ("return_imputed_training_csr", return_imputed_training_csr),
         ("return_imputed_testing_csr", return_imputed_testing_csr),
@@ -455,6 +459,15 @@ def train(
     normalized_sampling, normalized_sample_size = _sampling_args(
         sampling, sample_size
     )
+    if return_oob_predictions and not oob_scores:
+        raise ValueError(
+            "return_oob_predictions=True requires oob_scores=True so OOB "
+            "instances are routed during fitting."
+        )
+    if return_oob_predictions and str(forest_mode).strip().lower() == "isolation":
+        raise ValueError(
+            "OOB predictions are not currently supported in isolation mode."
+        )
     
     if return_imputed_training and not impute_training_data:
         impute_training_data = True
@@ -567,6 +580,8 @@ def train(
         "-regression_num_branches=" + str(regression_num_branches),
         "-sampling=" + normalized_sampling,
         "-sample_size=" + normalized_sample_size,
+        "-oob_scores=" + _bool(oob_scores),
+        "-return_oob_predictions=" + _bool(return_oob_predictions),
 
         "-DTWImpute=" + _bool(DTWImpute),
         "-imputation_initialization=" + imputation_initialization,

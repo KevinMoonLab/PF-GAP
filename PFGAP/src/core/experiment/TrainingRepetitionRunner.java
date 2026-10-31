@@ -136,6 +136,13 @@ public final class TrainingRepetitionRunner {
                 context.getParallelRuntime()
         );
 
+        outputCoordinator.writeTrainingOobPredictionsWhenRequested(
+                forest.getResultSet(),
+                trainingData,
+                repetition,
+                context
+        );
+
         saveModelWhenRequested(
                 forest,
                 trainingData,

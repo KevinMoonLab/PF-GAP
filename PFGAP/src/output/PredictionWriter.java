@@ -91,6 +91,121 @@ public final class PredictionWriter {
         return outputPath;
     }
 
+    /**
+     * Writes OOB classification predictions using the ordinary classification
+     * schema. Rows with no contributing OOB tree retain their original
+     * instance_index and contain blank prediction/correct fields.
+     */
+    public static Path writeOobClassification(
+            Path path,
+            List<?> predictions,
+            List<?> actualLabels,
+            int[] contributingTreeCounts
+    ) throws IOException {
+        validateOobArguments(path, predictions, actualLabels, contributingTreeCounts);
+        int outputCount = validateClassificationValues(
+                actualLabels,
+                "actual label",
+                false
+        );
+        validateCoveredClassificationPredictions(
+                predictions,
+                contributingTreeCounts,
+                outputCount
+        );
+
+        Path outputPath = normalizePath(path);
+        try (BufferedWriter csv = CsvUtils.newWriter(outputPath)) {
+            CsvUtils.writeHeader(csv, classificationHeader(outputCount, true));
+            for (int instanceIndex = 0;
+                 instanceIndex < predictions.size();
+                 instanceIndex++) {
+                Object prediction = predictions.get(instanceIndex);
+                Object actual = actualLabels.get(instanceIndex);
+                boolean covered = contributingTreeCounts[instanceIndex] > 0;
+                List<Object> row = new ArrayList<>();
+                row.add(instanceIndex);
+                if (outputCount == 1) {
+                    row.add(covered ? prediction : null);
+                    row.add(actual);
+                    row.add(covered ? Objects.equals(prediction, actual) : null);
+                } else {
+                    for (int outputIndex = 0;
+                         outputIndex < outputCount;
+                         outputIndex++) {
+                        row.add(covered
+                                ? LabelUtils.valueAt(prediction, outputIndex)
+                                : null);
+                        row.add(LabelUtils.valueAt(actual, outputIndex));
+                    }
+                    row.add(covered ? Objects.equals(prediction, actual) : null);
+                }
+                CsvUtils.writeRow(csv, row);
+            }
+        }
+        return outputPath;
+    }
+
+    /**
+     * Writes OOB regression predictions using the ordinary regression schema.
+     * Rows with no contributing OOB tree retain their original instance_index
+     * and contain blank prediction/error fields.
+     */
+    public static Path writeOobRegression(
+            Path path,
+            List<?> predictions,
+            List<?> actualTargets,
+            int[] contributingTreeCounts
+    ) throws IOException {
+        validateOobArguments(path, predictions, actualTargets, contributingTreeCounts);
+        int outputCount = validateRegressionValues(
+                actualTargets,
+                "actual target",
+                false
+        );
+        validateCoveredRegressionPredictions(
+                predictions,
+                contributingTreeCounts,
+                outputCount
+        );
+
+        Path outputPath = normalizePath(path);
+        try (BufferedWriter csv = CsvUtils.newWriter(outputPath)) {
+            CsvUtils.writeHeader(csv, regressionHeader(outputCount, true));
+            for (int instanceIndex = 0;
+                 instanceIndex < predictions.size();
+                 instanceIndex++) {
+                Object prediction = predictions.get(instanceIndex);
+                Object actual = actualTargets.get(instanceIndex);
+                boolean covered = contributingTreeCounts[instanceIndex] > 0;
+                List<Object> row = new ArrayList<>();
+                row.add(instanceIndex);
+                for (int outputIndex = 0;
+                     outputIndex < outputCount;
+                     outputIndex++) {
+                    if (!covered) {
+                        row.add(null);
+                        row.add(CsvUtils.numericField(
+                                numericValueAt(actual, outputIndex)
+                        ));
+                        row.add(null);
+                        row.add(null);
+                        continue;
+                    }
+                    double predicted = numericValueAt(prediction, outputIndex);
+                    double observed = numericValueAt(actual, outputIndex);
+                    double residual = observed - predicted;
+                    row.add(CsvUtils.numericField(predicted));
+                    row.add(CsvUtils.numericField(observed));
+                    row.add(CsvUtils.numericField(residual));
+                    row.add(CsvUtils.numericField(Math.abs(residual)));
+                }
+                CsvUtils.writeRow(csv, row);
+            }
+        }
+        return outputPath;
+    }
+
     public static Path writeClassification(
             Path path,
             List<?> predictions
@@ -238,6 +353,93 @@ public final class PredictionWriter {
             }
         }
         return List.copyOf(columns);
+    }
+
+    private static void validateOobArguments(
+            Path path,
+            List<?> predictions,
+            List<?> actualValues,
+            int[] contributingTreeCounts
+    ) {
+        validateCommonArguments(path, predictions, actualValues);
+        Objects.requireNonNull(
+                contributingTreeCounts,
+                "OOB contributing-tree counts cannot be null."
+        );
+        if (actualValues == null || actualValues.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "OOB prediction output requires training labels or targets."
+            );
+        }
+        if (contributingTreeCounts.length != predictions.size()) {
+            throw new IllegalArgumentException(
+                    "OOB contributing-tree count length must match prediction count."
+            );
+        }
+        for (int count : contributingTreeCounts) {
+            if (count < 0) {
+                throw new IllegalArgumentException(
+                        "OOB contributing-tree counts cannot be negative."
+                );
+            }
+        }
+    }
+
+    private static void validateCoveredClassificationPredictions(
+            List<?> predictions,
+            int[] counts,
+            int outputCount
+    ) {
+        for (int index = 0; index < predictions.size(); index++) {
+            Object prediction = predictions.get(index);
+            if (counts[index] == 0) {
+                if (prediction != null) {
+                    throw new IllegalArgumentException(
+                            "Uncovered OOB prediction must be null at instance " + index + "."
+                    );
+                }
+                continue;
+            }
+            if (prediction == null) {
+                throw new IllegalArgumentException(
+                        "Covered OOB prediction is null at instance " + index + "."
+                );
+            }
+            if (LabelUtils.outputCount(prediction) != outputCount) {
+                throw new IllegalArgumentException(
+                        "OOB classification output count differs at instance " + index + "."
+                );
+            }
+        }
+    }
+
+    private static void validateCoveredRegressionPredictions(
+            List<?> predictions,
+            int[] counts,
+            int outputCount
+    ) {
+        for (int index = 0; index < predictions.size(); index++) {
+            Object prediction = predictions.get(index);
+            if (counts[index] == 0) {
+                if (prediction != null) {
+                    throw new IllegalArgumentException(
+                            "Uncovered OOB prediction must be null at instance " + index + "."
+                    );
+                }
+                continue;
+            }
+            if (prediction == null) {
+                throw new IllegalArgumentException(
+                        "Covered OOB prediction is null at instance " + index + "."
+                );
+            }
+            LabelUtils.validateRegressionLabel(prediction);
+            if (LabelUtils.outputCount(prediction) != outputCount) {
+                throw new IllegalArgumentException(
+                        "OOB regression output count differs at instance " + index + "."
+                );
+            }
+        }
     }
 
     private static void validateCommonArguments(

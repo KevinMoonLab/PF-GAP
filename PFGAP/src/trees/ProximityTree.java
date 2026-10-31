@@ -148,6 +148,57 @@ public class ProximityTree
 		return root;
 	}
 
+	/**
+	 * Copies already-routed OOB leaf predictions for one half-open training
+	 * range into a zero-based batch destination. No series is traversed again.
+	 */
+	public void populateRoutedOutOfBagPredictions(
+			int trainingStart,
+			int trainingEnd,
+			Object[] predictionsByBatchOffset
+	) {
+		Objects.requireNonNull(
+				predictionsByBatchOffset,
+				"OOB prediction destination cannot be null."
+		);
+		if (root == null) {
+			throw new IllegalStateException(
+					"OOB predictions are unavailable before tree training."
+			);
+		}
+		if (trainingStart < 0 || trainingEnd < trainingStart) {
+			throw new IllegalArgumentException(
+					"Invalid OOB prediction range ["
+							+ trainingStart
+							+ ", "
+							+ trainingEnd
+							+ ")."
+			);
+		}
+		if (predictionsByBatchOffset.length != trainingEnd - trainingStart) {
+			throw new IllegalArgumentException(
+					"OOB prediction destination length must equal the range size."
+			);
+		}
+		for (Node leaf : leaves) {
+			Object prediction = leaf.label();
+			for (int trainingPosition : leaf.OutOfBagIndices) {
+				if (trainingPosition < 0) {
+					throw new IllegalStateException(
+							"Routed OOB position cannot be negative: "
+									+ trainingPosition
+					);
+				}
+				if (trainingPosition >= trainingStart
+						&& trainingPosition < trainingEnd) {
+					predictionsByBatchOffset[
+							trainingPosition - trainingStart
+							] = prediction;
+				}
+			}
+		}
+	}
+
 	public MEASURE[] getChosen_distances() {
 		return chosen_distances.clone();
 	}
@@ -220,10 +271,12 @@ public class ProximityTree
 				);
 
 		ListObjectDataset outOfBagData =
-				createDatasetFromPositions(
+				AppContext.shouldRouteOutOfBagTrainingData()
+						? createDatasetFromPositions(
 						data,
 						treeSample.outOfBagPositions
-				);
+				)
+						: null;
 
 		root.train(
 				inBagData,
@@ -330,93 +383,100 @@ public class ProximityTree
 	}
 
 	/**
-	 * Creates one tree's sample, multiplicities, and OOB complement.
+	 * Creates one tree's sample and multiplicities, materializing the OOB
+	 * complement only when the resolved training plan requires routing.
 	 */
 	private TreeSample createTreeSample(
 			int populationSize
 	) {
-		SamplingStrategy strategy =
-				AppContext.getSamplingStrategy();
-
-		int sampleSize =
-				AppContext.resolveTreeSampleSize(
-						populationSize
-				);
-
-		int[] sampledPositions =
-				new int[sampleSize];
-
-		int[] multiplicities =
-				new int[populationSize];
+		SamplingStrategy strategy = AppContext.getSamplingStrategy();
+		int sampleSize = AppContext.resolveTreeSampleSize(populationSize);
+		int[] sampledPositions = new int[sampleSize];
+		HashMap<Integer, Integer> multiplicities = new HashMap<>(
+				mapCapacity(Math.min(sampleSize, populationSize))
+		);
 
 		switch (strategy) {
 			case FULL -> {
-				for (int position = 0;
-					 position < populationSize;
-					 position++) {
+				for (int position = 0; position < populationSize; position++) {
 					sampledPositions[position] = position;
-					multiplicities[position] = 1;
+					multiplicities.put(position, 1);
 				}
 			}
 			case BOOTSTRAP -> {
-				for (int draw = 0;
-					 draw < sampleSize;
-					 draw++) {
-					int position =
-							rand.nextInt(
-									populationSize
-							);
+				for (int draw = 0; draw < sampleSize; draw++) {
+					int position = rand.nextInt(populationSize);
 					sampledPositions[draw] = position;
-					multiplicities[position]++;
+					multiplicities.merge(position, 1, Integer::sum);
 				}
 			}
-			case SUBSAMPLE -> {
-				int[] candidates =
-						new int[populationSize];
-				for (int position = 0;
-					 position < populationSize;
-					 position++) {
-					candidates[position] = position;
-				}
-				for (int draw = 0;
-					 draw < sampleSize;
-					 draw++) {
-					int swapPosition =
-							draw + rand.nextInt(
-									populationSize - draw
-							);
-					int selected = candidates[swapPosition];
-					candidates[swapPosition] = candidates[draw];
-					candidates[draw] = selected;
-					sampledPositions[draw] = selected;
-					multiplicities[selected] = 1;
-				}
-			}
+			case SUBSAMPLE -> sampleWithoutReplacement(
+					populationSize,
+					sampledPositions,
+					multiplicities
+			);
 		}
 
-		int outOfBagCount = 0;
-		for (int multiplicity : multiplicities) {
-			if (multiplicity == 0) {
-				outOfBagCount++;
-			}
-		}
-
-		int[] outOfBagPositions =
-				new int[outOfBagCount];
-		int outputIndex = 0;
-		for (int position = 0;
-			 position < populationSize;
-			 position++) {
-			if (multiplicities[position] == 0) {
-				outOfBagPositions[outputIndex++] = position;
-			}
-		}
-
+		int[] outOfBagPositions = AppContext.shouldRouteOutOfBagTrainingData()
+				? collectOutOfBagPositions(populationSize, multiplicities)
+				: null;
 		return new TreeSample(
 				sampledPositions,
 				multiplicities,
 				outOfBagPositions
 		);
+	}
+
+	/**
+	 * Samples without replacement through a sparse partial Fisher-Yates map.
+	 *
+	 * <p>The draw sequence and selected order match the former dense partial
+	 * shuffle, while setup time and temporary storage scale with sample size.</p>
+	 */
+	private void sampleWithoutReplacement(
+			int populationSize,
+			int[] sampledPositions,
+			HashMap<Integer, Integer> multiplicities
+	) {
+		HashMap<Integer, Integer> sparseSwaps =
+				new HashMap<>(mapCapacity(sampledPositions.length));
+		for (int draw = 0; draw < sampledPositions.length; draw++) {
+			int swapPosition = draw + rand.nextInt(populationSize - draw);
+			int selected = sparseSwaps.getOrDefault(swapPosition, swapPosition);
+			int drawValue = sparseSwaps.getOrDefault(draw, draw);
+			sparseSwaps.put(swapPosition, drawValue);
+			sampledPositions[draw] = selected;
+			multiplicities.put(selected, 1);
+		}
+	}
+
+	private static int mapCapacity(int expectedEntries) {
+		if (expectedEntries <= 0) {
+			return 16;
+		}
+		long capacity = (long) Math.ceil(expectedEntries / 0.75d);
+		return (int) Math.min(capacity, 1L << 30);
+	}
+
+	/** Collects the complement only when a requested task needs OOB routing. */
+	private static int[] collectOutOfBagPositions(
+			int populationSize,
+			HashMap<Integer, Integer> multiplicities
+	) {
+		int outOfBagCount = populationSize - multiplicities.size();
+		int[] outOfBagPositions = new int[outOfBagCount];
+		int outputIndex = 0;
+		for (int position = 0; position < populationSize; position++) {
+			if (!multiplicities.containsKey(position)) {
+				outOfBagPositions[outputIndex++] = position;
+			}
+		}
+		if (outputIndex != outOfBagCount) {
+			throw new IllegalStateException(
+					"OOB complement size changed during sampling."
+			);
+		}
+		return outOfBagPositions;
 	}
 
 	/**
@@ -438,35 +498,22 @@ public class ProximityTree
 			);
 		}
 
-		root.OutOfBagIndices.ensureCapacity(
-				treeSample.outOfBagPositions.length
-		);
-
-		for (int position
-				: treeSample.outOfBagPositions) {
-
-			root.OutOfBagIndices.add(
-					position
+		if (treeSample.outOfBagPositions != null) {
+			root.OutOfBagIndices.ensureCapacity(
+					treeSample.outOfBagPositions.length
 			);
-		}
 
-		root.multiplicities =
-				new HashMap<>();
+			for (int position
+					: treeSample.outOfBagPositions) {
 
-		for (int position = 0;
-			 position < treeSample.multiplicities.length;
-			 position++) {
-
-			int count =
-					treeSample.multiplicities[position];
-
-			if (count > 0) {
-				root.multiplicities.put(
-						position,
-						count
+				root.OutOfBagIndices.add(
+						position
 				);
 			}
 		}
+
+		root.multiplicities =
+				new HashMap<>(treeSample.multiplicities);
 	}
 
 	/**
@@ -958,12 +1005,12 @@ public class ProximityTree
 	private static final class TreeSample {
 
 		private final int[] sampledPositions;
-		private final int[] multiplicities;
+		private final HashMap<Integer, Integer> multiplicities;
 		private final int[] outOfBagPositions;
 
 		private TreeSample(
 				int[] sampledPositions,
-				int[] multiplicities,
+				HashMap<Integer, Integer> multiplicities,
 				int[] outOfBagPositions
 		) {
 			this.sampledPositions =
@@ -1312,16 +1359,18 @@ public class ProximityTree
 					bestSplits
 			);
 
-			ObjectDataset[] oobSplits =
-					createEmptyOobSplits(
-							bestSplits.length,
-							oobData
-					);
+			ObjectDataset[] oobSplits = null;
+			if (oobData != null && oobData.size() > 0) {
+				oobSplits = createEmptyOobSplits(
+						bestSplits.length,
+						oobData
+				);
 
-			routeOutOfBagData(
-					oobData,
-					oobSplits
-			);
+				routeOutOfBagData(
+						oobData,
+						oobSplits
+				);
+			}
 
 			trainChildren(
 					bestSplits,
@@ -1349,7 +1398,7 @@ public class ProximityTree
 						int branch = branchOrder[orderedIndex];
 						children[branch].train(
 								bestSplits[branch],
-								oobSplits[branch],
+								oobSplitForBranch(oobSplits, branch),
 								runtime
 						);
 					}
@@ -1365,10 +1414,19 @@ public class ProximityTree
 			for (int branch : branchOrder) {
 				children[branch].train(
 						bestSplits[branch],
-						oobSplits[branch],
+						oobSplitForBranch(oobSplits, branch),
 						runtime
 				);
 			}
+		}
+
+		private static ObjectDataset oobSplitForBranch(
+				ObjectDataset[] oobSplits,
+				int branch
+		) {
+			return oobSplits == null
+					? null
+					: oobSplits[branch];
 		}
 
 		private boolean shouldParallelizeChildren(
@@ -1564,6 +1622,12 @@ public class ProximityTree
 				ObjectDataset oobData,
 				ObjectDataset[] oobSplits
 		) throws Exception {
+
+			if (oobData != null && oobSplits == null) {
+				throw new IllegalArgumentException(
+						"OOB split destinations cannot be null when OOB data is present."
+				);
+			}
 
 			if (oobData == null
 					|| oobData.size() == 0) {

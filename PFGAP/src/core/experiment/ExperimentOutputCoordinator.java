@@ -48,6 +48,68 @@ public final class ExperimentOutputCoordinator {
         );
     }
 
+    /** Writes requested fit-time OOB predictions as an ordinary CSV artifact. */
+    public void writeTrainingOobPredictionsWhenRequested(
+            ProximityForestResult result,
+            ListObjectDataset trainingData,
+            int repetition,
+            ExperimentRepetitionContext context
+    ) throws IOException {
+        if (!AppContext.return_oob_predictions) {
+            return;
+        }
+        Objects.requireNonNull(result, "ProximityForestResult cannot be null.");
+        Objects.requireNonNull(trainingData, "Training dataset cannot be null.");
+        Objects.requireNonNull(context, "Repetition context cannot be null.");
+        if (result.OobPredictions == null
+                || result.OobPredictions.size() != trainingData.size()) {
+            throw new IllegalStateException(
+                    "OOB prediction output was requested, but predictions are missing or misaligned."
+            );
+        }
+        if (result.OobPredictionTreeCounts == null
+                || result.OobPredictionTreeCounts.length != trainingData.size()) {
+            throw new IllegalStateException(
+                    "OOB contributing-tree counts are missing or misaligned."
+            );
+        }
+
+        Path outputPath = artifactPaths.trainingOobPredictions(repetition);
+        List<Object> actualValues = trainingData._internal_class_list();
+        Path written;
+        if (AppContext.isRegressionMode()) {
+            written = PredictionWriter.writeOobRegression(
+                    outputPath,
+                    result.OobPredictions,
+                    actualValues,
+                    result.OobPredictionTreeCounts
+            );
+        } else {
+            Map<Integer, Object> newToOriginal = trainingData.invertLabelMap(
+                    trainingData._get_initial_class_labels()
+            );
+            List<Object> originalPredictions = result.OobPredictions.stream()
+                    .map(value -> value == null ? null : newToOriginal.get(value))
+                    .toList();
+            List<Object> originalActuals = actualValues.stream()
+                    .map(value -> value == null ? null : newToOriginal.get(value))
+                    .toList();
+            written = PredictionWriter.writeOobClassification(
+                    outputPath,
+                    originalPredictions,
+                    originalActuals,
+                    result.OobPredictionTreeCounts
+            );
+        }
+        context.addArtifact(
+                "trainingOobPredictions",
+                artifactPaths.relativeArtifactPath(written)
+        );
+        if (AppContext.verbosity > 0) {
+            System.out.println("Wrote training OOB predictions to: " + written);
+        }
+    }
+
     /** Writes requested validation prediction and structured artifacts. */
     public void writeValidationPredictionsWhenRequested(
             ProximityForestResult result,

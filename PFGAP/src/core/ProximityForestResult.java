@@ -40,6 +40,23 @@ public class ProximityForestResult implements Serializable {
     public ArrayList<Object> Predictions;
 
     /**
+     * Optional aggregate OOB predictions in training-instance order.
+     *
+     * <p>This is deliberately separate from {@link #PredictionResults}: an
+     * OOB prediction is aggregated only from trees for which the training
+     * instance was out of bag, so it is an ordinary prediction artifact,
+     * not an enhanced all-tree prediction record.</p>
+     */
+    public ArrayList<Object> OobPredictions;
+
+    /**
+     * Number of contributing OOB trees for each entry in
+     * {@link #OobPredictions}. This remains result metadata and is not used
+     * to invent a second prediction CSV schema.
+     */
+    public int[] OobPredictionTreeCounts;
+
+    /**
      * Optional structured per-instance results in evaluation-instance order.
      * Empty means that enhanced evaluation has not populated this result.
      */
@@ -75,6 +92,8 @@ public class ProximityForestResult implements Serializable {
     public ProximityForestResult(ProximityForest forest) {
         attachForest(forest);
         this.Predictions = new ArrayList<>();
+        this.OobPredictions = new ArrayList<>();
+        this.OobPredictionTreeCounts = new int[0];
         this.PredictionResults = new ArrayList<>();
     }
 
