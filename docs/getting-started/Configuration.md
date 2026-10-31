@@ -349,6 +349,21 @@ Direct Java lists use brackets and comma-separated entries:
 
 Do not add shell-interpreted whitespace or quoting unless required by the shell. See [Distances](../reference/Distances.md) and [Custom Distances](../extensions/Custom_Distances.md).
 
+### Whole-tree sampling and OOB work
+
+```python
+sampling="bootstrap"
+sample_size=None
+oob_scores=False
+return_oob_predictions=False
+```
+
+`sampling` accepts `full`, `bootstrap`, or `subsample`. For bootstrap and subsample training, `sample_size=None` uses the training-set size, a positive integer is an exact count, and a float in `(0, 1]` is a fraction rounded up. `sampling="full"` requires `sample_size=None`.
+
+`oob_scores` requests fit-time OOB aggregation. `return_oob_predictions` only controls whether that aggregate is written to `training_oob_predictions.csv` and therefore requires `oob_scores=True`. Compatible proximity or imputation work may require OOB routing without producing the file.
+
+See [Sampling and OOB Predictions](../guides/OOB_Predictions.md).
+
 ### Outputs and persistence
 
 ```python

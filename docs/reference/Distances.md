@@ -40,7 +40,7 @@ twe
 msm
 ```
 
-These defaults are primarily univariate numeric time-series measures, with Euclidean distance also suitable for fixed-width numeric vectors.
+These defaults are primarily univariate numeric time-series measures, with Euclidean distance also suitable for fixed-width numeric vectors. The Java `AppContext` is the source of truth: when `distances=None`, the Python helper omits `-distances` rather than maintaining a second default list.
 
 ## Distance selection at splits
 

@@ -10,6 +10,7 @@ PFGAP is a Java-based framework and command-line application for Proximity Fores
 
 - Time-series and structured-data classification
 - Regression forests and numeric prediction
+- Configurable full, bootstrap, or without-replacement per-tree sampling
 - Univariate and multivariate observations
 - Equal-length and unequal-length series
 - Generalized, Breiman, and depth-weighted proximities
@@ -225,6 +226,10 @@ A forest trained with retained split-distance summaries can score later evaluati
 
 See [OOD Scoring](docs/guides/OOD_Scoring.md).
 
+### Sampling and fit-time OOB predictions
+
+Trees can use the full training set, bootstrap samples, or without-replacement subsamples. Fit-time OOB scoring and the optional `training_oob_predictions.csv` artifact are configured separately; proximity and imputation work may also require OOB routing. See [Sampling and OOB Predictions](docs/guides/OOB_Predictions.md).
+
 ### Proximities
 
 PFGAP supports generalized, Breiman, and depth-weighted proximity definitions. It can write training-to-training and evaluation-to-training matrices in dense CSV or sparse Matrix Market form.
@@ -423,3 +428,5 @@ If you use PFGAP in research, cite the publication relevant to the functionality
 ## License
 
 See [LICENSE](LICENSE).
+
+<!-- sampling-oob-docs-v1 -->

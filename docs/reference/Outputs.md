@@ -114,6 +114,12 @@ Additional targets continue the same numbered pattern. Target indices are zero-b
 
 If a particular actual target is null while actual-target columns are present, the corresponding actual, residual, and absolute-error fields are blank for that row.
 
+## Fit-time OOB predictions
+
+With both `oob_scores` and `return_oob_predictions` enabled during classification or regression training, PFGAP writes `training_oob_predictions.csv`. It uses the ordinary prediction schema, including positional columns for multi-output tasks. Instances with no contributing OOB tree retain their zero-based index and actual value, with blank prediction-derived fields.
+
+The file is not written merely because bootstrap or subsample sampling is used, or when routing is needed only for proximity, imputation, or supervised outlier work. Repetition suffixes follow the standard artifact policy.
+
 ## Structured evaluation output
 
 Structured output is written when enhanced prediction details, OOD output, or both are requested. Ordinary prediction CSVs support scalar and multi-output tasks. Enhanced prediction details remain scalar-only in v1; OOD-only structured output remains valid independently.

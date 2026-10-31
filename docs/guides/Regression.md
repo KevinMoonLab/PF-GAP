@@ -286,19 +286,23 @@ This setting controls the number of candidate distance configurations considered
 
 ### Bootstrap sampling
 
-Python:
+PFGAP separates the per-tree sampling rule from OOB output.
 
 ```python
-bootstrap_trees=True
+sampling="bootstrap"       # "full", "bootstrap", or "subsample"
+sample_size=None           # full training size
+# sample_size=256          # exact count
+# sample_size=0.8          # fraction, rounded up
 ```
 
-Direct Java:
+- `full` uses every observation once and requires `sample_size=None`.
+- `bootstrap` samples with replacement.
+- `subsample` samples distinct observations without replacement.
+- For bootstrap and subsample, an omitted size uses the training-set size. An integer is an exact count; a float in `(0, 1]` is a fraction. Thus `1` and `1.0` are intentionally different.
 
-```text
--bootstrap_trees=true
-```
+Set `oob_scores=True` for fit-time OOB aggregation. Add `return_oob_predictions=True` to write `training_oob_predictions.csv`. OOB predictions support scalar and multi-target regression.
 
-When enabled, trees are trained using bootstrap samples of the training observations.
+Sampling alone does not force recursive OOB routing. Requested proximity, imputation, or supervised outlier work may require routing independently. See [Sampling and OOB Predictions](OOB_Predictions.md).
 
 ### Maximum depth
 

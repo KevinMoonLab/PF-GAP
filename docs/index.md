@@ -88,6 +88,7 @@ Guides are organized around tasks rather than individual classes.
 - [Imputation](guides/Imputation.md) explains initialization, iterative proximity updates, training and test imputation, and output choices.
 - [Outlier Scoring](guides/Outlier_Scoring.md) distinguishes unsupervised isolation scoring from Breiman-style supervised classification outlier scores.
 - [OOD Scoring](guides/OOD_Scoring.md) explains evaluation-time scoring from retained split-distance support.
+- [Sampling and OOB Predictions](guides/OOB_Predictions.md) explains whole-tree sampling, fit-time OOB aggregation, and routing required by proximity-based work.
 
 ### Data processing and execution
 

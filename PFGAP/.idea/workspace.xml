@@ -7,18 +7,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/../Application/PF_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PF_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/ProximityForestResult.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ProximityForestResult.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentArtifactPaths.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentOutputCoordinator.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/ExperimentResultAssembler.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/experiment/TrainingRepetitionRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/output/PredictionWriter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/output/PredictionWriter.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/trees/ProximityForest.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityForest.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
