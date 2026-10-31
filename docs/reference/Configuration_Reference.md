@@ -136,7 +136,10 @@ Custom parameter names cannot be blank or contain `;` or `=`. Values cannot cont
 | `r` | `-r` | `5` | Not exposed | Positive integer | Candidate distance configurations considered at each split. Java's context default is `1`; the Python helper explicitly sends `5`. |
 | `on_tree` | `-on_tree` | `True` | Not exposed | Boolean | Controls random distance-measure selection per node through the existing application setting. |
 | `max_depth` | `-max_depth` | `0` | Not exposed | Integer | Maximum tree depth setting. The Java field initializes to `0`. |
-| `bootstrap_trees` | `-bootstrap_trees` | `True` | Not exposed | Boolean | Enables bootstrap sampling for trees. |
+| `sampling` | `-sampling` | `bootstrap` | Not exposed | `full`, `bootstrap`, `subsample` | Whole-tree sampling strategy. |
+| `sample_size` | `-sample_size` | `None` | Not exposed | `None`, positive integer, or float in `(0, 1]` | Per-tree sample size; integer and fractional forms are distinct. |
+| `oob_scores` | `-oob_scores` | `False` | Not exposed | Boolean | Requests fit-time OOB aggregation; requires bootstrap or subsample. |
+| `return_oob_predictions` | `-return_oob_predictions` | `False` | Not exposed | Boolean | Writes OOB predictions; requires OOB scoring and is unavailable in isolation mode. |
 | `shuffle` | `-shuffle` | `False` | `False` | Boolean | Shuffles the dataset for the invocation. |
 
 ## Dimension selection

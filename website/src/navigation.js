@@ -125,6 +125,59 @@ export const navigationGroups = Object.freeze([
         "Control worker budgets, random seeds, and reproducible execution."
       ),
     ]),
+  },
+  {
+    title: "Guides",
+    pages: Object.freeze([
+      page(
+        "Classification",
+        "/guides/classification",
+        "guides/Classification.md",
+        "Train and evaluate classification forests."
+      ),
+      page(
+        "Regression",
+        "/guides/regression",
+        "guides/Regression.md",
+        "Train and evaluate regression forests."
+      ),
+      page(
+        "Imputation",
+        "/guides/imputation",
+        "guides/Imputation.md",
+        "Initialize and iteratively update missing feature values."
+      ),
+      page(
+        "Outlier Scoring",
+        "/guides/outlier-scoring",
+        "guides/Outlier_Scoring.md",
+        "Use supervised outlier scores and unsupervised isolation scoring."
+      ),
+      page(
+        "Sampling and OOB Predictions",
+        "/guides/ood-scoring",
+        "guides/OOB_Predictions.md",
+        "Score evaluation observations against retained training support."
+      ),
+      page(
+        "Standardization",
+        "/guides/standardization",
+        "guides/Standardization.md",
+        "Configure numeric transformation, saved statistics, and inversion."
+      ),
+      page(
+        "Eager and Lazy Data",
+        "/guides/eager-and-lazy-data",
+        "guides/Eager_and_Lazy_Data.md",
+        "Choose between materialized and deferred data access."
+      ),
+      page(
+        "Parallelism and Reproducibility",
+        "/guides/parallelism-and-reproducibility",
+        "guides/Parallelism_and_Reproducibility.md",
+        "Control worker budgets, random seeds, and reproducible execution."
+      ),
+    ]),
   }),
 
   Object.freeze({

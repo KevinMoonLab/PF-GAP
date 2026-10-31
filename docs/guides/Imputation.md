@@ -663,6 +663,12 @@ The current Python helper rejects imputation and imputed-data output for lazy `P
 
 See [Readers](../data/Readers.md) and [Eager and Lazy Data](Eager_and_Lazy_Data.md) for the complete compatibility rules.
 
+## Sampling and OOB routing
+
+Whole-tree sampling and fit-time OOB prediction output are separate from imputation. If the selected proximity requires out-of-bag training leaf assignments, training or test imputation can enable OOB routing even with `oob_scores=False`. This routing does not create `training_oob_predictions.csv`; that artifact requires both `oob_scores=True` and `return_oob_predictions=True`.
+
+See [Sampling and OOB Predictions](OOB_Predictions.md).
+
 ## Common problems
 
 ### Missing values are parsed as ordinary strings

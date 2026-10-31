@@ -9,6 +9,42 @@ def _bool(value):
     return "true" if value else "false"
 
 
+def _sampling_args(sampling, sample_size):
+    if not isinstance(sampling, str):
+        raise TypeError("sampling must be 'full', 'bootstrap', or 'subsample'.")
+
+    normalized_sampling = sampling.strip().lower()
+    if normalized_sampling not in {"full", "bootstrap", "subsample"}:
+        raise ValueError(
+            "sampling must be 'full', 'bootstrap', or 'subsample'; "
+            f"received {sampling!r}."
+        )
+
+    if normalized_sampling == "full":
+        if sample_size is not None:
+            raise ValueError("sample_size must be None when sampling='full'.")
+        return normalized_sampling, "None"
+
+    if sample_size is None:
+        return normalized_sampling, "None"
+
+    if isinstance(sample_size, (bool, np.bool_)):
+        raise TypeError("sample_size must be None, a positive integer, or a float in (0, 1].")
+
+    if isinstance(sample_size, (int, np.integer)):
+        if int(sample_size) <= 0:
+            raise ValueError("Integer sample_size must be positive.")
+        return normalized_sampling, str(int(sample_size))
+
+    if isinstance(sample_size, (float, np.floating)):
+        value = float(sample_size)
+        if not np.isfinite(value) or value <= 0.0 or value > 1.0:
+            raise ValueError("Floating-point sample_size must be finite and within (0, 1].")
+        return normalized_sampling, repr(value)
+
+    raise TypeError("sample_size must be None, a positive integer, or a float in (0, 1].")
+
+
 def _list_arg(values):
     if values is None:
         return "[]"
@@ -53,6 +89,14 @@ def _ensure_output_directory(output_directory):
 
 
 def _append_common_distance_arg(msg_list, arg_name, distances):
+    """Append a distance-list argument only when explicitly provided.
+
+    ``None`` means that the Python caller did not override the corresponding
+    Java-side configuration. An explicit empty iterable remains distinct and
+    is serialized as ``[]``.
+    """
+    if distances is None:
+        return
     msg_list.append(f"-{arg_name}={_list_arg(distances)}")
 
 
@@ -266,7 +310,10 @@ def train(
     isolation_num_branches=2,
     isolation_min_leaf_size=1,
     regression_num_branches=2,
-    bootstrap_trees=True,
+    sampling="bootstrap",
+    sample_size=None,
+    oob_scores=False,
+    return_oob_predictions=False,
     seed=None,
     on_tree=True,
     max_depth=0,
@@ -350,6 +397,8 @@ def train(
         ("return_predictions", return_predictions),
         ("return_enhanced_outputs", return_enhanced_outputs),
         ("return_ood_scores", return_ood_scores),
+        ("oob_scores", oob_scores),
+        ("return_oob_predictions", return_oob_predictions),
         ("collect_split_distance_summaries", collect_split_distance_summaries),
         ("return_imputed_training_csr", return_imputed_training_csr),
         ("return_imputed_testing_csr", return_imputed_testing_csr),
@@ -407,6 +456,18 @@ def train(
     normalized_model_persistence_mode = _model_persistence_mode_arg(
         model_persistence_mode
     )
+    normalized_sampling, normalized_sample_size = _sampling_args(
+        sampling, sample_size
+    )
+    if return_oob_predictions and not oob_scores:
+        raise ValueError(
+            "return_oob_predictions=True requires oob_scores=True so OOB "
+            "instances are routed during fitting."
+        )
+    if return_oob_predictions and str(forest_mode).strip().lower() == "isolation":
+        raise ValueError(
+            "OOB predictions are not currently supported in isolation mode."
+        )
     
     if return_imputed_training and not impute_training_data:
         impute_training_data = True
@@ -517,7 +578,10 @@ def train(
         "-isolation_num_branches=" + str(isolation_num_branches),
         "-isolation_min_leaf_size=" + str(isolation_min_leaf_size),
         "-regression_num_branches=" + str(regression_num_branches),
-        "-bootstrap_trees=" + _bool(bootstrap_trees),
+        "-sampling=" + normalized_sampling,
+        "-sample_size=" + normalized_sample_size,
+        "-oob_scores=" + _bool(oob_scores),
+        "-return_oob_predictions=" + _bool(return_oob_predictions),
 
         "-DTWImpute=" + _bool(DTWImpute),
         "-imputation_initialization=" + imputation_initialization,
@@ -819,4 +883,3 @@ def getArray(filename):
     contents = contents.replace("}", "]")
 
     return np.array(ast.literal_eval(contents))
-

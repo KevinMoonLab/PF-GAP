@@ -217,19 +217,16 @@ When the Python helper receives `forest_mode="isolation"` with its default `puri
 
 #### Bootstrap sampling
 
-Python:
+Isolation trees support the same whole-tree sampling choices as other forest modes:
 
 ```python
-bootstrap_trees=True
+sampling="subsample"
+sample_size=256
 ```
 
-Direct Java:
+For a pure isolation run without proximity-based training work, `oob_scores=False` avoids fit-time OOB scoring and routing. `return_oob_predictions` is not supported in isolation mode. A fixed sample such as 256 is a practical starting point, not a universal optimum.
 
-```text
--bootstrap_trees=true
-```
-
-Bootstrap sampling controls whether individual trees are trained from bootstrap samples of the training observations.
+See [Sampling and OOB Predictions](OOB_Predictions.md).
 
 ### Select distances
 

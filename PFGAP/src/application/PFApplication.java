@@ -15,6 +15,8 @@ import preprocessing.standardization.StandardizationScope;
 import preprocessing.standardization.VarianceConvention;
 import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
+import trees.SamplingStrategy;
+import trees.TreeSampleSize;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -465,8 +467,21 @@ public class PFApplication {
 					case "-seed":
 						AppContext.setRandomSeed(Long.parseLong(options[1]));
 						break;
-					case "-bootstrap_trees":
-						AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
+					case "-sampling":
+						AppContext.sampling_strategy =
+								SamplingStrategy.parse(options[1]);
+						break;
+					case "-sample_size":
+						AppContext.sample_size =
+								TreeSampleSize.parse(options[1]);
+						break;
+					case "-oob_scores":
+						AppContext.oob_scores =
+								Boolean.parseBoolean(options[1]);
+						break;
+					case "-return_oob_predictions":
+						AppContext.return_oob_predictions =
+								Boolean.parseBoolean(options[1]);
 						break;
 					case "-eval":
 						AppContext.eval = Boolean.parseBoolean(options[1]);
@@ -955,7 +970,7 @@ public class PFApplication {
 
 						for (int j=0; j < numberofdists; j++){
 							MEASURE convertedEntry;
-							String distanceString = contentsList.get(j);
+							String distanceString = contentsList.get(j).trim();
 							if (distanceString.startsWith("javadistance:")) {
 								// check the format
 								String[] parts = distanceString.split(":");
@@ -1031,19 +1046,35 @@ public class PFApplication {
 								// we'll just add an empty string list (to keep track of indices).
 								String[] descriptor = new String[]{""};
 								AppContext.Descriptors.add(descriptor);
-								convertedEntry = measuresByName.get(contentsList.get(j));
+								//convertedEntry = measuresByName.get(contentsList.get(j));
+								convertedEntry = measuresByName.get(distanceString);
 							}
 							//MEASURE convertedEntry = measuresByName.get(contentsList.get(j));
 							toadd[j] = convertedEntry;
 						}
 
-						if (Objects.equals(contentsList.get(0), "")){
-							AppContext.userdistances = new MEASURE[]{}; //new MEASURE[numberofdists];
+						if (contentsList.size() == 1
+								&& contentsList.get(0).trim().isEmpty()) {
+							/*
+							 * An explicit [] has the same meaning as omitting -distances:
+							 * use the canonical Java default.
+							 */
+							AppContext.userdistances = null;
 						} else {
+							for (int distanceIndex = 0;
+								 distanceIndex < toadd.length;
+								 distanceIndex++) {
+
+								if (toadd[distanceIndex] == null) {
+									throw new IllegalArgumentException(
+											"Unknown distance measure: "
+													+ contentsList.get(distanceIndex)
+									);
+								}
+							}
+
 							AppContext.userdistances = toadd;
 						}
-
-						//AppContext.userdistances = toadd;
 						break;
 					default:
 						throw new Exception("Invalid Commandline Arguments");
@@ -1058,8 +1089,10 @@ public class PFApplication {
 				AppContext.perform_test_imputation = true;
 				AppContext.hasMissingValues = true;
 			}
+			AppContext.userdistances = AppContext.resolveDistanceMeasures();
 			validateDimensionSelectionConfiguration();
 			AppContext.validateEvaluationOutputConfiguration();
+			AppContext.prepareOobRoutingPlan();
 
 			if (imputerType !=null) {
 				switch (imputerType) {

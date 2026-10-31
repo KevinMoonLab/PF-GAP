@@ -101,8 +101,26 @@ public final class ExperimentResultAssembler {
                                 AppContext.num_candidates_per_split
                         )
                         .addConfiguration(
-                                "bootstrapTrees",
-                                AppContext.bootstrap_trees
+                                "samplingStrategy",
+                                AppContext.getSamplingStrategy()
+                        )
+                        .addConfiguration(
+                                "sampleSize",
+                                AppContext.getTreeSampleSize()
+                        )
+                        .addConfiguration(
+                                "oobScoresRequested",
+                                AppContext.oob_scores
+                        )
+                        .addConfiguration(
+                                "oobRoutingRequired",
+                                AppContext.getOobRoutingPlan()
+                                        .routingRequired()
+                        )
+                        .addConfiguration(
+                                "oobRoutingReasons",
+                                AppContext.getOobRoutingPlan()
+                                        .reasons()
                         )
                         .addConfiguration(
                                 "numWorkersRequested",
@@ -155,14 +173,14 @@ public final class ExperimentResultAssembler {
                                 AppContext.standardizationConfig == null
                                         ? null
                                         : AppContext.standardizationConfig
-                                                .getMethod()
+                                        .getMethod()
                         )
                         .addConfiguration(
                                 "standardizationScope",
                                 AppContext.standardizationConfig == null
                                         ? null
                                         : AppContext.standardizationConfig
-                                                .getScope()
+                                        .getScope()
                         )
                         .addConfiguration(
                                 "enhancedOutputsRequested",

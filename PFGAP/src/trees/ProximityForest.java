@@ -50,6 +50,8 @@ public class ProximityForest implements Serializable {
 
     private static final int MINIMUM_TREE_RANGE_SIZE = 1;
     private static final int MINIMUM_PREDICTION_RANGE_SIZE = 1;
+    /** Maximum training observations held in the temporary OOB grid. */
+    private static final int OOB_AGGREGATION_BATCH_SIZE = 4096;
 
     protected ProximityForestResult result;
     protected int forest_id;
@@ -158,6 +160,13 @@ public class ProximityForest implements Serializable {
                     }
             );
 
+            if (AppContext.return_oob_predictions) {
+                computeOutOfBagPredictions(trainData, runtime);
+            } else {
+                result.OobPredictions.clear();
+                result.OobPredictionTreeCounts = new int[0];
+            }
+
             result.endTimeTrain =
                     System.nanoTime();
             result.elapsedTimeTrain =
@@ -170,6 +179,118 @@ public class ProximityForest implements Serializable {
         } finally {
             trainLock.unlock();
         }
+    }
+
+    /**
+     * Aggregates predictions from OOB leaf memberships already recorded while
+     * fitting. This performs no second tree traversal.
+     *
+     * <p>Only one bounded training-position batch is materialized at a time.
+     * Temporary reference storage is therefore O(treeCount * batchSize), not
+     * O(treeCount * trainingSize). Batches are processed in source order and
+     * tree predictions are combined in tree-index order, preserving seeded
+     * determinism.</p>
+     */
+    private void computeOutOfBagPredictions(
+            ListObjectDataset trainData,
+            ParallelRuntime runtime
+    ) throws Exception {
+        if (!AppContext.oob_scores) {
+            throw new IllegalStateException(
+                    "OOB prediction output requires fit-time OOB routing."
+            );
+        }
+        if (AppContext.isIsolationMode()) {
+            throw new IllegalArgumentException(
+                    "OOB predictions are not currently supported in isolation mode."
+            );
+        }
+
+        int trainingSize = trainData.size();
+        Object[] aggregatePredictions = new Object[trainingSize];
+        int[] contributingTreeCounts = new int[trainingSize];
+
+        for (int batchStart = 0;
+             batchStart < trainingSize;
+             batchStart += OOB_AGGREGATION_BATCH_SIZE) {
+            int batchEnd = Math.min(
+                    trainingSize,
+                    batchStart + OOB_AGGREGATION_BATCH_SIZE
+            );
+            aggregateOutOfBagBatch(
+                    batchStart,
+                    batchEnd,
+                    aggregatePredictions,
+                    contributingTreeCounts,
+                    runtime
+            );
+        }
+
+        result.OobPredictions = new ArrayList<>(
+                Arrays.asList(aggregatePredictions)
+        );
+        result.OobPredictionTreeCounts = contributingTreeCounts;
+    }
+
+    private void aggregateOutOfBagBatch(
+            int batchStart,
+            int batchEnd,
+            Object[] aggregatePredictions,
+            int[] contributingTreeCounts,
+            ParallelRuntime runtime
+    ) throws Exception {
+        int batchSize = batchEnd - batchStart;
+        Object[][] predictionsByTree =
+                new Object[trees.length][batchSize];
+
+        runtime.forRange(
+                0,
+                trees.length,
+                MINIMUM_TREE_RANGE_SIZE,
+                treeIndex -> trees[treeIndex]
+                        .populateRoutedOutOfBagPredictions(
+                                batchStart,
+                                batchEnd,
+                                predictionsByTree[treeIndex]
+                        )
+        );
+
+        runtime.forRange(
+                0,
+                batchSize,
+                MINIMUM_PREDICTION_RANGE_SIZE,
+                batchOffset -> aggregateOneOutOfBagPrediction(
+                        predictionsByTree,
+                        batchOffset,
+                        batchStart + batchOffset,
+                        aggregatePredictions,
+                        contributingTreeCounts
+                )
+        );
+    }
+
+    private void aggregateOneOutOfBagPrediction(
+            Object[][] predictionsByTree,
+            int batchOffset,
+            int trainingPosition,
+            Object[] aggregatePredictions,
+            int[] contributingTreeCounts
+    ) {
+        Object[] treePredictions = new Object[trees.length];
+        int contributingTrees = 0;
+        for (int treeIndex = 0;
+             treeIndex < trees.length;
+             treeIndex++) {
+            Object prediction = predictionsByTree[treeIndex][batchOffset];
+            if (prediction != null) {
+                treePredictions[treeIndex] = prediction;
+                contributingTrees++;
+            }
+        }
+        contributingTreeCounts[trainingPosition] = contributingTrees;
+        aggregatePredictions[trainingPosition] = contributingTrees == 0
+                ? null
+                : combineTreePredictions(treePredictions);
     }
 
     private void reportTreeProgress(int treeIndex) {
@@ -988,9 +1109,9 @@ public class ProximityForest implements Serializable {
         if (LabelUtils.isMultiOutput(prediction)) {
             throw new UnsupportedOperationException(
                     "Enhanced prediction output is not supported for "
-                    + "multi-output classification or multi-target "
-                    + "regression. Use ordinary prediction "
-                    + "output instead."
+                            + "multi-output classification or multi-target "
+                            + "regression. Use ordinary prediction "
+                            + "output instead."
             );
         }
 

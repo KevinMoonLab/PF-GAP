@@ -307,12 +307,33 @@ Controls random distance-measure selection per node through the existing applica
 
 Maximum tree-depth setting.
 
-## `-bootstrap_trees`
+## `-sampling`
+
+**Type:** String
+**Default:** `bootstrap`
+
+Selects `full`, `bootstrap`, or `subsample` whole-tree sampling.
+
+## `-sample_size`
+
+**Type:** `None`, positive integer, or float in `(0, 1]`
+**Default:** `None`
+
+For bootstrap and subsample, `None` uses the training-set size, an integer is an exact count, and a float is a fraction rounded up. Full sampling requires `None`; a subsample cannot exceed the population.
+
+## `-oob_scores`
 
 **Type:** Boolean
-**Default:** `true`
+**Default:** `false`
 
-Enables bootstrap sampling for individual trees.
+Requests fit-time OOB aggregation. Requires bootstrap or subsample sampling.
+
+## `-return_oob_predictions`
+
+**Type:** Boolean
+**Default:** `false`
+
+Writes `training_oob_predictions.csv`. Requires `-oob_scores=true` and is unavailable in isolation mode.
 
 ## `-shuffle`
 

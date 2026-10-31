@@ -20,6 +20,9 @@ import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationStats;
 import proximity.ProximityType;
 import trees.DimensionSelectionStrategy;
+import trees.OobRoutingPlan;
+import trees.SamplingStrategy;
+import trees.TreeSampleSize;
 
 /**
  *
@@ -80,7 +83,19 @@ public class AppContext {
 
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
-	public static boolean bootstrap_trees = true;
+	/** Whole-tree sampling strategy. */
+	public static SamplingStrategy sampling_strategy =
+			SamplingStrategy.BOOTSTRAP;
+	/** Per-tree sample size; None/fullSize resolves to the training size. */
+	public static TreeSampleSize sample_size =
+			TreeSampleSize.fullSize();
+	/** Whether fit-time OOB predictions and aggregate scores are requested. */
+	public static boolean oob_scores = false;
+	/** Whether aggregate fit-time OOB predictions should be written. */
+	public static boolean return_oob_predictions = false;
+	/** Resolved once after command-line parsing and before training begins. */
+	private static OobRoutingPlan oobRoutingPlan =
+			OobRoutingPlan.none();
 
 	// additional imputation variables
 	public static boolean perform_train_imputation = false; // should the model impute (not return) train data?
@@ -123,8 +138,14 @@ public class AppContext {
 
 	public static int print_test_progress_for_each_instances = 100;
 
-	// These distances are the default when none are specified.
-	public static MEASURE[] enabled_distance_measures = new MEASURE[] {
+	/**
+	 * Canonical default Proximity Forest distance pool.
+	 *
+	 * <p>The array is private so callers cannot accidentally mutate the default.
+	 * Use {@link #defaultDistanceMeasures()} or
+	 * {@link #resolveDistanceMeasures()} to obtain a defensive copy.</p>
+	 */
+	private static final MEASURE[] DEFAULT_DISTANCE_MEASURES = {
 			MEASURE.euclidean,
 			MEASURE.dtw,
 			MEASURE.dtwcv,
@@ -137,6 +158,23 @@ public class AppContext {
 			MEASURE.twe,
 			MEASURE.msm
 	};
+
+	/**
+	 * Retained compatibility view of the default pool.
+	 *
+	 * <p>New code should use {@link #defaultDistanceMeasures()} rather than
+	 * reading or modifying this array directly.</p>
+	 */
+	public static MEASURE[] enabled_distance_measures =
+			DEFAULT_DISTANCE_MEASURES.clone();
+
+	/**
+	 * Explicit user-selected distance pool.
+	 *
+	 * <p>Null means that no command-line or wrapper override was supplied.
+	 * It is resolved to the canonical default once argument parsing finishes.</p>
+	 */
+	public static MEASURE[] userdistances;
 
 	/**
 	 * Controls the primitive storage type produced by numeric dataset readers.
@@ -157,7 +195,7 @@ public class AppContext {
 	public static boolean get_training_outlier_scores;
 	public static boolean get_predictions = false; // write aggregate prediction artifacts
 	public static String modelname = "Thor";
-	public static MEASURE[] userdistances; //= {MEASURE.dtw};
+	//public static MEASURE[] userdistances; //= {MEASURE.dtw};
 	public static boolean early_abandon_distances = true;
 	public static MEASURE[] KNNdistances; //only used in KNN initial imputation.
 	public static List<String[]> Descriptors = new ArrayList<>(); //this is specifically to store file names for custom java distances.
@@ -251,6 +289,36 @@ public class AppContext {
 	public static boolean collect_split_distance_summaries = false;
 	public static Long rand_seed = null;
 	private static Random rand = new Random();
+
+	/**
+	 * Returns a defensive copy of the canonical default distance pool.
+	 */
+	public static MEASURE[] defaultDistanceMeasures() {
+		return DEFAULT_DISTANCE_MEASURES.clone();
+	}
+
+	/**
+	 * Returns the effective distance pool for a new forest.
+	 *
+	 * <p>An omitted, null, or empty user selection means to use the canonical
+	 * Proximity Forest defaults. A non-empty user selection is returned as a
+	 * defensive copy.</p>
+	 */
+	public static MEASURE[] resolveDistanceMeasures() {
+		if (userdistances == null || userdistances.length == 0) {
+			return defaultDistanceMeasures();
+		}
+
+		MEASURE[] resolved = userdistances.clone();
+		for (int index = 0; index < resolved.length; index++) {
+			if (resolved[index] == null) {
+				throw new IllegalArgumentException(
+						"Unknown or null distance at position " + index + "."
+				);
+			}
+		}
+		return resolved;
+	}
 
 	/**
 	 * Validates invocation-level output settings.
@@ -361,8 +429,42 @@ public class AppContext {
 				|| forest_mode.trim().equalsIgnoreCase("classification");
 	}
 
-	public static boolean useBootstrapTrees() {
-		return bootstrap_trees;
+	public static SamplingStrategy getSamplingStrategy() {
+		return Objects.requireNonNull(
+				sampling_strategy,
+				"Sampling strategy cannot be null."
+		);
+	}
+	public static TreeSampleSize getTreeSampleSize() {
+		return Objects.requireNonNull(
+				sample_size,
+				"Tree sample size cannot be null."
+		);
+	}
+	/** Resolves and validates the configured sample size for training. */
+	public static int resolveTreeSampleSize(int populationSize) {
+		return getTreeSampleSize().resolve(
+				populationSize,
+				getSamplingStrategy()
+		);
+	}
+	/** Resolves and validates all fit-time reasons for OOB routing. */
+	public static void prepareOobRoutingPlan() {
+		oobRoutingPlan = OobRoutingPlan.resolve();
+		oobRoutingPlan.validateConfiguration(
+				getSamplingStrategy()
+		);
+	}
+	/** Returns the immutable fit-time OOB routing plan. */
+	public static OobRoutingPlan getOobRoutingPlan() {
+		return Objects.requireNonNull(
+				oobRoutingPlan,
+				"OOB routing plan has not been initialized."
+		);
+	}
+	/** Returns whether recursive OOB routing is required during tree training. */
+	public static boolean shouldRouteOutOfBagTrainingData() {
+		return getOobRoutingPlan().routingRequired();
 	}
 
 	//public static Map<String, LazySeriesReader> lazySeriesReaders =

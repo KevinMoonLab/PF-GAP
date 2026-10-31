@@ -23,6 +23,9 @@ public final class ExperimentArtifactPaths {
     public static final String TEST_OUTLIER_SCORES =
             "test_outlier_scores.csv";
 
+    public static final String TRAINING_OOB_PREDICTIONS =
+            "training_oob_predictions.csv";
+
     public static final String VALIDATION_PREDICTIONS =
             "validation_predictions.csv";
 
@@ -218,6 +221,14 @@ public final class ExperimentArtifactPaths {
     public Path testOutlierScores(int repetition) {
         return resolveRepeated(
                 TEST_OUTLIER_SCORES,
+                repetition
+        );
+    }
+
+    /** Returns the ordinary fit-time OOB prediction artifact path. */
+    public Path trainingOobPredictions(int repetition) {
+        return resolveRepeated(
+                TRAINING_OOB_PREDICTIONS,
                 repetition
         );
     }
