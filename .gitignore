@@ -105,7 +105,7 @@ docs/demo/**
 # Common data files generated during experiments
 *.csv
 *.tsv
-*.npy
+# *.npy
 *.npz
 *.parquet
 *.feather
