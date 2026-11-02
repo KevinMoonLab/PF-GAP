@@ -3,6 +3,20 @@ import numpy as np
 import os
 import ast
 import csv
+from pathlib import Path
+
+_WRAPPER_DIR = Path(__file__).absolute().parent
+
+
+def _resolve_jar_path(jar_path):
+    """Find the bundled JAR, or use a caller-supplied path."""
+    if jar_path is None:
+        path = _WRAPPER_DIR / "PFGAP.jar"
+    else:
+        path = Path(jar_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"PFGAP.jar not found at {path}. Pass jar_path to train() or predict().")
+    return str(path)
 
 
 def _bool(value):
@@ -391,7 +405,8 @@ def train(
     regressor=False,
     purity="gini",
     purity_threshold=1e-6,
-    regressor_aggregation="mean"
+    regressor_aggregation="mean",
+    jar_path=None,
 ):
     for name, value in (
         ("return_predictions", return_predictions),
@@ -504,9 +519,9 @@ def train(
     model_name = os.path.basename(os.path.normpath(str(model_name)))
     
     if use_vector_api:
-        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
+        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", _resolve_jar_path(jar_path), "-eval=false"]
     else:
-        msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
+        msgList = ["java", "-Xmx" + memory, "-jar", _resolve_jar_path(jar_path), "-eval=false"]
 
     msgList.extend([
         "-train=" + str(train_file),
@@ -701,7 +716,8 @@ def predict(
     missing_indicators=("", "NA", "NaN", "null", "nan", "NAN"),
 
     # Optional runtime distances
-    distances=None
+    distances=None,
+    jar_path=None,
 ):
     for name, value in (
         ("return_predictions", return_predictions),
@@ -750,9 +766,9 @@ def predict(
     output_directory = _ensure_output_directory(output_directory)
     
     if use_vector_api:
-        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
+        msgList = ["java", "--add-modules=jdk.incubator.vector", "-Xmx" + memory, "-jar", _resolve_jar_path(jar_path), "-eval=true"]
     else:
-        msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
+        msgList = ["java", "-Xmx" + memory, "-jar", _resolve_jar_path(jar_path), "-eval=true"]
 
     msgList.extend([
         "-train=" + str(testfile),
