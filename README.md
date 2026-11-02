@@ -121,7 +121,7 @@ The paths are illustrative. Select a reader and separators that match the actual
 
 ### Python
 
-Run from `Application/`, or otherwise place `PF_wrapper.py` and `PFGAP.jar` together in the working directory expected by the helper.
+Make `Application/` importable (for example, add it to `PYTHONPATH`). Keep `PFGAP.jar` in the same directory as the `PF_wrapper.py` path imported by your script or notebook. The helper finds it there regardless of the working directory. To use a JAR elsewhere, pass `jar_path="/path/to/PFGAP.jar"` to `train(...)` or `predict(...)`. Relative dataset and output paths still use the process working directory.
 
 ```python
 import PF_wrapper as PF

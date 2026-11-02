@@ -85,7 +85,6 @@ venv.bak/
 # =========================
 # Jupyter
 # =========================
-*.ipynb
 .ipynb_checkpoints/
 
 # If you later want curated notebooks in the repo, whitelist them, for example:
